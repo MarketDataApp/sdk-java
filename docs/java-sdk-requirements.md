@@ -17,6 +17,7 @@ should be added here only after the corresponding ADR is accepted.
 | §1 Distribution               | [ADR-001](adr/ADR-001-java-only-vs-multi-language-sdk.md)          |
 | §2 Kotlin Interoperability    | [ADR-001](adr/ADR-001-java-only-vs-multi-language-sdk.md)          |
 | §3 JDK Targets                | [ADR-002](adr/ADR-002-minimum-jdk-version.md)                      |
+| §4 HTTP Client                | [ADR-004](adr/ADR-004-http-client.md)                              |
 
 ---
 
@@ -141,6 +142,24 @@ Source: [ADR-002](adr/ADR-002-minimum-jdk-version.md)
 
 ---
 
+## 4. HTTP Client
+
+Source: [ADR-004](adr/ADR-004-http-client.md)
+
+- The SDK uses `java.net.http.HttpClient` from the JDK standard library
+  exclusively.
+- **No third-party HTTP client** (OkHttp, Apache HttpClient, etc.) may
+  be added as a runtime dependency.
+- HTTP/2 must be enabled (it is the default for `java.net.http`).
+- A single shared `HttpClient` instance per `MarketDataClient` provides
+  automatic connection pooling (per generic SDK requirements doc §1.1).
+- Timeouts must satisfy the generic SDK requirements doc §10
+  (99-second request timeout, 2-second connect timeout).
+- Async methods return `CompletableFuture<T>` directly from
+  `HttpClient.sendAsync` — no adapter layer.
+
+---
+
 ## Acceptance Checklist
 
 ### Distribution (§1)
@@ -163,3 +182,11 @@ Source: [ADR-002](adr/ADR-002-minimum-jdk-version.md)
 - [ ] CI runs unit tests on JDK 17, 21, and 25
 - [ ] Minimum supported JDK documented in README
 - [ ] Published artifact is not a multi-release JAR
+
+### HTTP Client (§4)
+- [ ] All HTTP requests go through `java.net.http.HttpClient`
+- [ ] No third-party HTTP client on the dependency tree
+- [ ] Single shared `HttpClient` instance per `MarketDataClient`
+- [ ] HTTP/2 enabled
+- [ ] 99-second request timeout / 2-second connect timeout configured
+- [ ] Async methods return `CompletableFuture<T>` natively

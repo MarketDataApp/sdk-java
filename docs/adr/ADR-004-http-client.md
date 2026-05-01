@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — under discussion.
+Accepted.
 
 ## Context
 
@@ -16,16 +16,14 @@ API. The choice affects:
 - Compatibility with the requirements doc's mandated 99-second request
   timeout, 2-second connect timeout, and 50-request concurrency pool
 
-This ADR depends on [ADR-002 (Minimum JDK)](./ADR-002-minimum-jdk-version.md):
-
-- If ADR-002 lands on **JDK 11+**, all three options below are viable.
-- If ADR-002 lands on **JDK 8**, `java.net.http.HttpClient` is
-  unavailable and the options collapse to OkHttp and Apache HttpClient
-  only.
-
-The discussion below assumes JDK 11+ as the more interesting case. If
-the team chooses JDK 8 in ADR-002, simply read this ADR as a comparison
-between Options B and C.
+[ADR-002](./ADR-002-minimum-jdk-version.md) settled the minimum JDK at
+17, which makes `java.net.http.HttpClient` available. ADR-002's
+exclusion of JDK 8 was driven specifically by the desire to avoid
+shipping a third-party HTTP client as a runtime dependency — the
+std-lib option was already the implicit destination once that
+constraint was accepted. This ADR documents that decision explicitly
+and weighs it against the two third-party clients we could still choose
+to adopt.
 
 The requirements doc (§1.1, §10) mandates connection pooling and the
 fixed 99s/2s timeouts. All three options support these natively.
@@ -158,18 +156,35 @@ configuration matters. Neither is a strong argument for this SDK.
 
 ## Decision
 
-*To be filled in by the team.*
+**Option A — `java.net.http.HttpClient`.** The SDK uses the JDK standard
+library's HTTP client exclusively. No third-party HTTP client is added
+as a runtime dependency.
+
+This decision flows directly from ADR-002: the team's reason for
+excluding JDK 8 was specifically to avoid shipping a third-party HTTP
+client, which made the std-lib client the implicit answer. Options B
+(OkHttp 5) and C (Apache HttpClient 5) were considered for completeness
+but neither offers capabilities we need that we wouldn't hand-roll
+anyway — retry, rate limiting, status caching, and the concurrency pool
+are all required by the SDK requirements doc and would be implemented
+on top of any of the three clients.
+
+The async surface of the SDK uses the client's native
+`CompletableFuture<T>` return type, matching the requirements-doc
+mandate for Java's async pattern with no adapter glue.
 
 ## Consequences
 
-*To be filled in once a decision is made.*
+Follow-on work implied by each option. The chosen option is marked.
 
-- **A (`java.net.http`):** Zero HTTP runtime deps. Hand-roll
-  retry/logging/observability. Async via `CompletableFuture` directly.
-  Requires JDK 11+ from ADR-002.
+- **A (chosen):** Zero HTTP runtime dependencies. Hand-roll retry,
+  logging, observability, rate limiting, and the concurrency pool. Async
+  via `CompletableFuture` directly from `HttpClient.sendAsync`. A single
+  shared `HttpClient` instance per `MarketDataClient` provides automatic
+  connection pooling.
 - **B (OkHttp 5):** `okhttp:5.x` + `okio:3.x` + `kotlin-stdlib:1.9.x`
   on the dependency tree. Interceptor-based logging and metrics. Async
-  callback API needs a CompletableFuture adapter.
+  callback API would need a `CompletableFuture` adapter.
 - **C (Apache HttpClient 5):** `httpclient5` + `httpcore5` (+ `h2`)
   on the dependency tree. Verbose configuration upfront; rich tuning
   knobs available later if needed.
