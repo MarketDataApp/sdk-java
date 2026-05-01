@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — under discussion.
+Accepted.
 
 ## Context
 
@@ -175,17 +175,37 @@ fact — but it's open to the team.
 
 ## Decision
 
-*To be filled in by the team.*
+**Option B — Sync + async per method (full parity).** Every public
+endpoint method exposes both a sync variant and an `…Async` variant
+returning `CompletableFuture<T>`.
+
+The team's reasoning: as a consumer it's valuable to have both options
+ergonomically available without library-side gatekeeping (Taylor); full
+sync+async parity is essentially the standard for modern Java SDKs in
+2026 (Lucas, citing AWS SDK v2 / Google Cloud Java parallels). The
+doubled test surface is acceptable cost — the SDK is not expected to
+undergo constant modification, so the CI-time impact is manageable.
+
+Implementation: internal logic is **async-first**. The underlying HTTP
+client (`java.net.http`, per ADR-004) returns
+`CompletableFuture<HttpResponse<…>>` natively. Sync methods are thin
+wrappers that call `.join()` and unwrap `CompletionException` to
+surface the underlying cause directly. Both surfaces share the same
+validation, retry, rate-limit, and concurrency-pool logic — no
+parallel implementations.
+
+Options A (sync only), C (selective async), and D (async-primary with
+sync wrappers) were considered but rejected.
 
 ## Consequences
 
-*To be filled in once a decision is made.*
+Follow-on work implied by each option. The chosen option is marked.
 
 - **A (sync only):** All public methods block. Internal HTTP layer
   may still be async; we just don't expose it. No `…Async` methods,
   no `CompletableFuture` in the public API except possibly on
   `MarketDataClient.close()`.
-- **B (full parity):** Every endpoint method has a sibling
+- **B (chosen):** Every endpoint method has a sibling
   `…Async(...)` returning `CompletableFuture<T>`. Internal logic is
   async-first; sync wrappers call `.join()` and unwrap
   `CompletionException`. Both surfaces share validation, retry, rate-

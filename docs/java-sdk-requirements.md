@@ -18,6 +18,9 @@ should be added here only after the corresponding ADR is accepted.
 | §2 Kotlin Interoperability    | [ADR-001](adr/ADR-001-java-only-vs-multi-language-sdk.md)          |
 | §3 JDK Targets                | [ADR-002](adr/ADR-002-minimum-jdk-version.md)                      |
 | §4 HTTP Client                | [ADR-004](adr/ADR-004-http-client.md)                              |
+| §5 Build Tool                 | [ADR-003](adr/ADR-003-build-tool.md)                               |
+| §6 JSON Library               | [ADR-005](adr/ADR-005-json-library.md)                             |
+| §7 Async API Surface          | [ADR-006](adr/ADR-006-async-api-surface.md)                        |
 
 ---
 
@@ -160,6 +163,70 @@ Source: [ADR-004](adr/ADR-004-http-client.md)
 
 ---
 
+## 5. Build Tool
+
+Source: [ADR-003](adr/ADR-003-build-tool.md)
+
+- The SDK is built with **Gradle** using the **Kotlin DSL**
+  (`build.gradle.kts`, `settings.gradle.kts`).
+- Dependency versions are managed via a Gradle version catalog
+  (`gradle/libs.versions.toml`).
+- Standard plugins: `java-library`, `maven-publish`, [Vanniktech Maven
+  Publish](https://github.com/vanniktech/gradle-maven-publish-plugin)
+  (or Gradle Nexus Publish) for Maven Central,
+  [Spotless](https://github.com/diffplug/spotless) for formatting,
+  [JaCoCo](https://www.jacoco.org/) for coverage.
+- Integration tests live in a separate Gradle source set
+  (`integrationTest`), gated by environment variable per generic SDK
+  requirements doc §13.
+
+---
+
+## 6. JSON Library
+
+Source: [ADR-005](adr/ADR-005-json-library.md)
+
+- The SDK uses **Jackson** (`jackson-databind`) as its JSON library.
+- Records-based response models use Jackson's record support
+  (Jackson 2.12+). Records are the default model shape (per §3 — JDK
+  17 minimum).
+- The API's compressed parallel-arrays wire format (generic SDK
+  requirements doc §11.1) is decoded via custom Jackson
+  `JsonDeserializer` classes.
+- The minimum Jackson version is documented in the published POM and
+  README.
+- The Jackson dependency is **not shaded** in v1. Shading is held in
+  reserve as a mitigation if classpath collisions become a real
+  customer pain post-launch.
+
+---
+
+## 7. Async API Surface
+
+Source: [ADR-006](adr/ADR-006-async-api-surface.md)
+
+- Every public endpoint method exposes both a **sync** and an
+  **async** variant:
+
+  ```java
+  Quote quote = client.stocks().quote("AAPL");
+  CompletableFuture<Quote> quoteFuture = client.stocks().quoteAsync("AAPL");
+  ```
+
+- Async method names use the `<methodName>Async` convention
+  consistently.
+- Async methods return `CompletableFuture<T>` (matching the generic
+  SDK requirements doc's Java async pattern).
+- **Internal logic is async-first.** Sync methods are thin wrappers
+  that call `.join()` on the async path and unwrap
+  `CompletionException` to surface the underlying cause directly.
+- Both surfaces share the same validation, retry, rate-limit, and
+  concurrency-pool logic — no parallel implementations.
+- Test coverage must include **both sync and async variants** for
+  every endpoint.
+
+---
+
 ## Acceptance Checklist
 
 ### Distribution (§1)
@@ -190,3 +257,28 @@ Source: [ADR-004](adr/ADR-004-http-client.md)
 - [ ] HTTP/2 enabled
 - [ ] 99-second request timeout / 2-second connect timeout configured
 - [ ] Async methods return `CompletableFuture<T>` natively
+
+### Build Tool (§5)
+- [ ] Build uses Gradle with the Kotlin DSL (`.gradle.kts`)
+- [ ] Dependency versions managed via `gradle/libs.versions.toml`
+- [ ] Integration tests live in a separate `integrationTest` source set
+- [ ] Standard plugins applied: `java-library`, `maven-publish`,
+      Maven Central publish plugin, Spotless, JaCoCo
+
+### JSON Library (§6)
+- [ ] Jackson is the only JSON dependency on the dependency tree
+- [ ] Wire-format decoders implemented as custom `JsonDeserializer`
+      classes
+- [ ] Records-based response models use Jackson's record support
+- [ ] Minimum Jackson version documented in POM and README
+- [ ] Jackson is not shaded into the SDK JAR (v1)
+
+### Async API Surface (§7)
+- [ ] Every endpoint method has both sync and `<methodName>Async`
+      variants
+- [ ] Async methods return `CompletableFuture<T>`
+- [ ] Internal logic is async-first; sync methods wrap `.join()` and
+      unwrap `CompletionException`
+- [ ] Both surfaces share validation, retry, rate-limit, and
+      concurrency-pool logic
+- [ ] Tests cover both sync and async paths for every endpoint

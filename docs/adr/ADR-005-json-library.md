@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — under discussion.
+Accepted.
 
 ## Context
 
@@ -190,13 +190,30 @@ Moshi's advantages don't translate.
 
 ## Decision
 
-*To be filled in by the team.*
+**Option A — Jackson.** The SDK uses Jackson (`jackson-databind`) as
+its JSON library.
+
+The team's reasoning: Jackson is the de facto Java JSON standard. New
+Java engineers onboarding will already know it; records support is the
+cleanest of the candidates; and the wire-format decoding work
+(parallel-arrays JSON → typed records, per generic SDK requirements
+doc §11.1) is best supported by Jackson's custom-deserializer model.
+
+The classpath-collision risk that comes with Jackson on shared
+classpaths is acknowledged. We document a minimum Jackson version in
+the published POM. Shading the dependency into the SDK JAR is held in
+reserve as a mitigation if collisions become a real customer pain
+post-launch.
+
+Options B (Gson), C (Moshi), D (JSON-B), and E (hand-rolled) were
+considered but offered no meaningful advantage over Jackson for this
+SDK's needs.
 
 ## Consequences
 
-*To be filled in once a decision is made.*
+Follow-on work implied by each option. The chosen option is marked.
 
-- **A (Jackson):** Add `jackson-databind` (and transitively `core` +
+- **A (chosen):** Add `jackson-databind` (and transitively `core` +
   `annotations`) as a runtime dependency. Document the minimum
   Jackson version. Custom deserializers for wire-format decoding live
   in `internal/wire/` or similar. Decide later whether to shade.

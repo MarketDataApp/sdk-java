@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — under discussion.
+Accepted.
 
 ## Context
 
@@ -146,13 +146,22 @@ copy from.
 
 ## Decision
 
-*To be filled in by the team.*
+**Option A — Gradle (Kotlin DSL).** The SDK is built with Gradle using
+the Kotlin DSL.
+
+The team's reasoning: configuration is more readable than Maven XML;
+the build pipeline is more modern and faster on incremental builds
+(configuration cache, faster compilation). Option C (Maven) was the
+strongest counter-position but the team had no existing Maven
+preference to weigh against the Gradle Kotlin DSL benefits. Option B
+(Gradle Groovy) was ruled out as obsolete in 2026; Option D (Bazel)
+was not a serious option for this scope.
 
 ## Consequences
 
-*To be filled in once a decision is made.*
+Follow-on work implied by each option. The chosen option is marked.
 
-- **A (Gradle Kotlin DSL):** `build.gradle.kts`, `settings.gradle.kts`,
+- **A (chosen):** `build.gradle.kts`, `settings.gradle.kts`,
   `gradle/libs.versions.toml` (version catalog). Plugin choices: 
   `java-library`, `maven-publish`, Vanniktech or Nexus Publish for
   Central, Spotless for formatting, JaCoCo for coverage.
