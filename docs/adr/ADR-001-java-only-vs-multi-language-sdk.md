@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — under discussion.
+Accepted.
 
 ## Context
 
@@ -48,6 +48,13 @@ A single artifact, all Java sources, no Kotlin in the build.
 - Mirrors the prevailing pattern among major published Java SDKs: AWS SDK
   for Java v2, Stripe Java, Square OkHttp, Google Cloud Java client
   libraries — all are Java-only.
+- Kotlin consumers remain a first-class audience provided we ship
+  [JSpecify](https://jspecify.dev/) nullability annotations and follow
+  basic Kotlin-interop hygiene (no Kotlin-reserved parameter names,
+  SAM-friendly callbacks, getter discipline). This mirrors the
+  JavaScript SDK's TypeScript story: one artifact, type metadata makes
+  the second-language audience first-class. Detailed requirements live
+  in [Java SDK Requirements §2](../java-sdk-requirements.md#2-kotlin-interoperability).
 
 **Cons**
 
@@ -176,15 +183,34 @@ preferences, customer Kotlin usage signal — before choosing.
 
 ## Decision
 
-*To be filled in by the team.*
+**Option A — Java only.** The SDK is published as a single Java artifact
+with no Kotlin sources and no `kotlin-stdlib` transitive dependency.
+
+Kotlin consumers are treated as a first-class audience served via Java
+interop, not via a separate Kotlin-flavored API. The SDK adopts the
+Kotlin interoperability requirements in
+[Java SDK Requirements §2](../java-sdk-requirements.md#2-kotlin-interoperability):
+JSpecify nullability annotations on the entire public surface, avoidance
+of Kotlin reserved words in public names, SAM-friendly callbacks, getter
+discipline, and a Kotlin example in the README.
+
+Option E (a separate `marketdata-sdk-java-kotlin` extensions artifact
+providing suspend wrappers and Kotlin DSL builders) remains a deferred
+follow-up. We will revisit it only if Kotlin demand for ergonomics
+beyond the interop checklist materializes after launch.
 
 ## Consequences
 
-*To be filled in once a decision is made. Each option implies different
-follow-on work:*
+Follow-on work implied by each option. The chosen option is marked.
 
-- **A:** Build configured for Java only. Future Kotlin extensions artifact
-  remains an open option.
+- **A (chosen):** Build configured for Java only — no Kotlin sources, no
+  `kotlin-stdlib` dependency. JSpecify is added as a compile-time
+  dependency and applied across the public API. The Kotlin interop
+  checklist in
+  [Java SDK Requirements §2](../java-sdk-requirements.md#2-kotlin-interoperability)
+  becomes part of the Java SDK style guide and acceptance criteria. A
+  future Kotlin extensions artifact (Option E) remains an open option but
+  is not in current scope.
 - **B:** Add Kotlin Gradle plugin; agree on which packages may use Kotlin;
   document the convention so contributors know when each language applies.
 - **C:** Entire codebase is Kotlin; Java-interop annotations become part
