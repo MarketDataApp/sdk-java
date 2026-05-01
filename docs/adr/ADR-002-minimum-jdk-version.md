@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — under discussion.
+Accepted.
 
 ## Context
 
@@ -313,7 +313,27 @@ principle-based positions.
 
 ## Decision
 
-*To be filled in by the team.*
+**Option B — JDK 17.** The SDK targets JDK 17 as the minimum runtime;
+the build pipeline produces bytecode with `javac --release 17`.
+
+The team weighed the reach-vs-ergonomics tradeoff and concluded:
+
+- Market Data API customers are ~95% individuals, not enterprises. The
+  customer slice most likely to be pinned to an older JDK is small.
+- Enterprise sales would require credentials (SOC 2, etc.) we have not
+  yet pursued, so the "enterprise locked to JDK 11" risk is hypothetical
+  for the foreseeable future.
+- LTS support for JDK 17 through ~2029 gives the SDK a comfortable
+  runway before the next minimum-JDK conversation.
+- If a future enterprise customer requires JDK 11 (or 8), refactoring a
+  stable, fully tested SDK down to an older target is easier than
+  starting on the older target and forward-porting — especially with AI
+  tooling now available to assist.
+
+**Multi-version CI matrix.** Although the minimum target is 17, unit
+tests run on the matrix `{17, 21, 25}` to catch forward-compat
+regressions early. This mirrors the multi-version testing approach used
+in the Python SDK.
 
 ## Consequences
 
@@ -325,11 +345,12 @@ Follow-on work implied by each option. The chosen option will be marked.
   without compile-time exhaustiveness; build pipeline targets
   `javac --release 11`; plan a follow-up bump to 17 within the SDK's
   first major-version cycle as Temurin LTS for 11 winds down.
-- **B (JDK 17):** records for all response models; sealed exception
+- **B (chosen):** records for all response models; sealed exception
   hierarchy with exhaustive `switch`; pattern matching available in
-  implementation code; build pipeline targets `javac --release 17`.
-  This shapes most later ADRs (response model design, exception design,
-  HTTP client choice).
+  implementation code; build pipeline targets `javac --release 17`; CI
+  runs unit tests on JDK 17, 21, and 25 to catch forward-compat
+  regressions. This shapes most later ADRs (response model design,
+  exception design, HTTP client choice).
 
 ## References
 

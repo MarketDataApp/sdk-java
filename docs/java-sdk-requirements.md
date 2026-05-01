@@ -16,6 +16,7 @@ should be added here only after the corresponding ADR is accepted.
 |-------------------------------|--------------------------------------------------------------------|
 | §1 Distribution               | [ADR-001](adr/ADR-001-java-only-vs-multi-language-sdk.md)          |
 | §2 Kotlin Interoperability    | [ADR-001](adr/ADR-001-java-only-vs-multi-language-sdk.md)          |
+| §3 JDK Targets                | [ADR-002](adr/ADR-002-minimum-jdk-version.md)                      |
 
 ---
 
@@ -123,6 +124,23 @@ println(quote)
 
 ---
 
+## 3. JDK Targets
+
+Source: [ADR-002](adr/ADR-002-minimum-jdk-version.md)
+
+- **Minimum runtime:** JDK 17 (LTS). Consumers must run JDK 17 or
+  newer.
+- **Build target:** the published artifact is compiled with
+  `javac --release 17` so its bytecode runs on any JDK 17+ runtime.
+- **CI test matrix:** unit tests run on JDK 17, 21, and 25 to catch
+  forward-compat regressions. Mirrors the multi-version testing
+  approach used in the Python SDK.
+- **No multi-release JAR.** Single bytecode level for the entire
+  artifact.
+- **Minimum supported JDK** must be documented in the README.
+
+---
+
 ## Acceptance Checklist
 
 ### Distribution (§1)
@@ -139,3 +157,9 @@ println(quote)
 - [ ] Generic wildcards correct on public APIs (`? extends` / `? super`
       where appropriate)
 - [ ] Kotlin usage example in README quick-start
+
+### JDK Targets (§3)
+- [ ] Build pipeline uses `javac --release 17`
+- [ ] CI runs unit tests on JDK 17, 21, and 25
+- [ ] Minimum supported JDK documented in README
+- [ ] Published artifact is not a multi-release JAR
