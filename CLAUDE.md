@@ -68,9 +68,10 @@ The Java SDK must also satisfy the canonical, cross-language [SDK Requirements](
 - §12 concurrency: `Semaphore(50)` field on `MarketDataClient` (wiring of acquire/release lands with the request layer).
 - §15 packaging: SemVer, MIT `LICENSE`, `CHANGELOG.md` in Keep a Changelog format, version auto-detected via JAR manifest (`Implementation-Version`).
 - §16 security: tokens never logged verbatim (use `Tokens.redact`); TLS validated by default (`HttpClient` does not expose a skip-verify option).
-- ADR-002 CI: split into two workflows.
+- ADR-002 CI: split into three workflows.
   - `.github/workflows/pull-request.yml` — runs on PR `opened`/`synchronize`/`reopened` (no pre-PR push trigger by design). JDK 17 only. Runs `./gradlew build` and uploads `build/reports/jacoco/test/jacocoTestReport.xml` to Codecov.
   - `.github/workflows/main.yml` — runs only on `push` to `main`. Full forward-compat matrix `{17, 21, 25}` via `-PtestJdk=N` (wired into `tasks.test.javaLauncher` in `build.gradle.kts`). The JDK 17 matrix entry also uploads coverage to Codecov, establishing the base coverage that PRs compare against.
+  - `.github/workflows/pr-matrix-on-demand.yml` — manually triggered by commenting one of `/run-all-jdks`, `/jdk-matrix`, or `/test-all` on an open PR. Runs JDK 21 and 25 (17 already ran via `pull-request.yml`). Gated to commenters with write/maintain/admin permission. Reacts 👀 to the trigger comment and posts a result summary comment when the matrix finishes. Note: `issue_comment` workflows always execute from the default branch's copy of the file — feature-branch edits to this workflow have no effect until merged to main.
   - Coverage ratchet lives in `codecov.yml`: project status with `target: auto, threshold: 5%` (cannot drop >5 pp vs base branch) plus a patch-coverage requirement of 70 % on new code. Requires a `CODECOV_TOKEN` repo secret — without it the upload step fails because workflows pass `fail_ci_if_error: true`.
 
 **Deliberately deferred (require the request/endpoint layer to land first):**

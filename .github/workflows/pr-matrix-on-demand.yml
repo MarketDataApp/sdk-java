@@ -1,0 +1,159 @@
+name: PR matrix (on demand)
+
+# Manually triggered by commenting one of these slash commands on an
+# open PR:
+#   /run-all-jdks
+#   /jdk-matrix
+#   /test-all
+# Runs the forward-compat matrix (JDK 21, 25) — JDK 17 already runs
+# automatically on every PR open/sync via pull-request.yml.
+#
+# Important security note: workflows triggered by `issue_comment` always
+# run from the *default branch's* version of the workflow file, not from
+# the PR. So adding/changing this file on a feature branch has no effect
+# until it lands on main.
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write   # to react to the trigger comment
+
+# Multiple "run all versions" comments on the same PR cancel earlier runs.
+concurrency:
+  group: pr-on-demand-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: Guard
+    runs-on: ubuntu-latest
+    # Only fire on PR comments (not generic issue comments) that contain
+    # one of the three accepted slash commands. `contains` is substring
+    # match — false positives are possible but unlikely in practice given
+    # the leading slash and hyphen-rich shape of these tokens.
+    if: |
+      github.event.issue.pull_request != null && (
+        contains(github.event.comment.body, '/run-all-jdks') ||
+        contains(github.event.comment.body, '/jdk-matrix') ||
+        contains(github.event.comment.body, '/test-all')
+      )
+    outputs:
+      head_sha: ${{ steps.pr.outputs.head_sha }}
+    steps:
+      # Reject comments from anyone without write access. Otherwise an
+      # external user commenting on a fork PR could burn our CI minutes
+      # and potentially exfiltrate secrets via a malicious build.
+      - name: Verify commenter has write permission
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: perm } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: context.payload.comment.user.login,
+            });
+            const allowed = ['write', 'maintain', 'admin'].includes(perm.permission);
+            if (!allowed) {
+              core.setFailed(
+                `@${context.payload.comment.user.login} (${perm.permission}) ` +
+                `cannot trigger CI; write access required.`
+              );
+            }
+
+      # Visible feedback to the commenter that we picked up the trigger.
+      - name: React 👀 to the trigger comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'eyes',
+            });
+
+      # The issue_comment event payload doesn't include the PR's head SHA,
+      # so look it up via the pulls API. We also confirm the PR is open;
+      # firing on closed PRs is almost always a mistake.
+      - name: Resolve PR head SHA
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.issue.number,
+            });
+            if (pr.state !== 'open') {
+              core.setFailed(`PR #${pr.number} is ${pr.state}; refusing to run.`);
+              return;
+            }
+            core.setOutput('head_sha', pr.head.sha);
+
+  verify:
+    name: Verify (JDK ${{ matrix.java }})
+    needs: guard
+    runs-on: ubuntu-latest
+    strategy:
+      # If JDK 21 fails, we still want to know whether 25 passes.
+      fail-fast: false
+      matrix:
+        java: ['21', '25']
+
+    steps:
+      # Check out exactly the PR's HEAD commit, not the merge ref.
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.guard.outputs.head_sha }}
+
+      # Compile=17, test=matrix JDK; same shape as main.yml.
+      - name: Set up JDKs (compile=17, test=${{ matrix.java }})
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: |
+            17
+            ${{ matrix.java }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Test on JDK ${{ matrix.java }}
+        run: ./gradlew test -PtestJdk=${{ matrix.java }} --stacktrace
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-jdk${{ matrix.java }}
+          path: |
+            build/reports/tests/
+            build/test-results/
+          retention-days: 14
+
+  # Post a single comment summarizing the on-demand matrix result so it's
+  # visible on the PR without diving into the Actions tab.
+  report:
+    name: Report
+    needs: verify
+    if: always() && needs.guard.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment outcome
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const ok = '${{ needs.verify.result }}' === 'success';
+            const emoji = ok ? '✅' : '❌';
+            const status = ok ? 'passed' : 'failed';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: `${emoji} On-demand JDK matrix \`{21, 25}\` ${status}. [View run](${runUrl}).`,
+            });
