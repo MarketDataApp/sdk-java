@@ -13,8 +13,10 @@ java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(17)
     }
-    withJavadocJar()
-    withSourcesJar()
+    // Sources/Javadoc jars are produced by the Vanniktech publish plugin
+    // (see mavenPublishing block below). Duplicating them via
+    // withJavadocJar()/withSourcesJar() here causes "multiple artifacts
+    // with classifier 'javadoc'" failures at publish time.
 }
 
 tasks.withType<JavaCompile>().configureEach {
@@ -79,6 +81,19 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
     finalizedBy(tasks.jacocoTestReport)
+
+    // ADR-002 CI matrix: optionally run tests on a specific JDK while
+    // compilation stays pinned to --release 17. The CI workflow passes
+    // -PtestJdk=17|21|25; locally you can do ./gradlew test -PtestJdk=21
+    // (Gradle will provision the JDK via the foojay resolver if missing).
+    val testJdk = providers.gradleProperty("testJdk").orNull
+    if (testJdk != null) {
+        javaLauncher.set(
+            javaToolchains.launcherFor {
+                languageVersion = JavaLanguageVersion.of(testJdk.toInt())
+            }
+        )
+    }
 }
 
 tasks.jacocoTestReport {
@@ -88,6 +103,11 @@ tasks.jacocoTestReport {
         html.required = true
     }
 }
+
+// Coverage ratchet (line coverage cannot drop more than 5 pp below
+// main's last value) is enforced in CI — see .github/workflows/pull-request.yml
+// and .github/scripts/check-coverage-delta.py. Not enforced locally so that
+// dev iteration isn't blocked while coverage is in flux.
 
 spotless {
     java {

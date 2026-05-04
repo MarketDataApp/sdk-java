@@ -1,0 +1,92 @@
+name: Main
+
+# Runs only on push to main (i.e. when a PR is merged or someone pushes
+# directly). This is where the full forward-compat JDK matrix runs and
+# where we record the coverage baseline that PR runs compare against.
+on:
+  push:
+    branches: ['main']
+
+permissions:
+  contents: read
+
+# Don't cancel main runs against each other — we want every merge to
+# produce a coverage baseline. Sequential is fine; main pushes are rare.
+concurrency:
+  group: main
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify (JDK ${{ matrix.java }})
+    runs-on: ubuntu-latest
+    strategy:
+      # Don't cancel siblings: if JDK 21 fails, we still want to know
+      # whether 17 and 25 pass.
+      fail-fast: false
+      matrix:
+        # ADR-002: tests run on JDK 17, 21, 25 to catch forward-compat
+        # regressions. Compilation is always pinned to --release 17.
+        java: ['17', '21', '25']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Install both JDK 17 (for compilation) and the matrix JDK (for
+      # test execution). setup-java exports JAVA_HOME_<version>_<arch>;
+      # Gradle's toolchain auto-detection picks them up.
+      - name: Set up JDKs (compile=17, test=${{ matrix.java }})
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: |
+            17
+            ${{ matrix.java }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build, test, lint, coverage
+        run: ./gradlew build -PtestJdk=${{ matrix.java }} --stacktrace
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-jdk${{ matrix.java }}
+          path: |
+            build/reports/tests/
+            build/test-results/
+          retention-days: 14
+
+      # The JDK 17 entry of the matrix is the canonical run for coverage
+      # baseline purposes — its JaCoCo XML is what PR runs compare against.
+      - name: Extract coverage baseline (JDK 17 only)
+        if: success() && matrix.java == '17'
+        run: |
+          python3 .github/scripts/extract-coverage.py > coverage-baseline.txt
+          echo "Baseline coverage: $(cat coverage-baseline.txt)"
+
+      - name: Save coverage baseline to cache (JDK 17 only)
+        if: success() && matrix.java == '17'
+        uses: actions/cache/save@v4
+        with:
+          path: coverage-baseline.txt
+          # Unique per commit so each main run produces a fresh entry;
+          # PR workflow restores via prefix-match on `coverage-baseline-main-`.
+          key: coverage-baseline-main-${{ github.sha }}
+
+      - name: Upload coverage report (JDK 17 only)
+        if: success() && matrix.java == '17'
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: build/reports/jacoco/test/
+          retention-days: 14
+
+  # Integration-tests job is intentionally not wired up yet:
+  # SDK requirements §13 says they run on PRs and release pipelines, but
+  # they hit the live API and require a MARKETDATA_TOKEN secret. Add this
+  # job (gated on `if: ${{ secrets.MARKETDATA_TOKEN != '' }}`) once the
+  # token is configured in the repo's GitHub Actions secrets.

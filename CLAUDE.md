@@ -68,6 +68,10 @@ The Java SDK must also satisfy the canonical, cross-language [SDK Requirements](
 - §12 concurrency: `Semaphore(50)` field on `MarketDataClient` (wiring of acquire/release lands with the request layer).
 - §15 packaging: SemVer, MIT `LICENSE`, `CHANGELOG.md` in Keep a Changelog format, version auto-detected via JAR manifest (`Implementation-Version`).
 - §16 security: tokens never logged verbatim (use `Tokens.redact`); TLS validated by default (`HttpClient` does not expose a skip-verify option).
+- ADR-002 CI: split into two workflows.
+  - `.github/workflows/pull-request.yml` — runs on PR `opened`/`synchronize`/`reopened` (no pre-PR push trigger by design). JDK 17 only. Runs `./gradlew build` + a coverage-delta check that compares the PR's line coverage against main's last recorded value, failing if it drops more than 5 pp. Baseline is restored via `actions/cache/restore@v4` with `restore-keys: coverage-baseline-main-` (prefix match against the latest main run's cache); if no baseline exists, the check passes with a `::warning::` rather than blocking the PR.
+  - `.github/workflows/main.yml` — runs only on `push` to `main`. Full forward-compat matrix `{17, 21, 25}` via `-PtestJdk=N` (wired into `tasks.test.javaLauncher` in `build.gradle.kts`). The JDK 17 matrix entry also extracts the coverage baseline and saves it to cache key `coverage-baseline-main-${sha}` for the next PR run.
+  - Helper scripts live in `.github/scripts/` (`extract-coverage.py`, `check-coverage-delta.py`). Both parse `build/reports/jacoco/test/jacocoTestReport.xml` directly. Tolerance constant lives in the script (`TOLERANCE_PP = 0.05`).
 
 **Deliberately deferred (require the request/endpoint layer to land first):**
 - §1.2 resource groupings (`client.stocks`, `client.options`, `client.funds`, `client.markets`, `client.utilities`).
@@ -78,7 +82,7 @@ The Java SDK must also satisfy the canonical, cross-language [SDK Requirements](
 - §9 retry/backoff policy and `/status/` cache workflow.
 - §12 acquire/release of the concurrency semaphore around dispatched requests.
 - §13 100% coverage threshold via JaCoCo `violationRules`; deferred until there is functional code worth the threshold.
-- CI matrix workflow (`.github/workflows/ci.yml`) on JDK 17/21/25.
+- §13 integration-test CI job: stubbed at the bottom of `ci.yml` with a comment. Gating on a `MARKETDATA_TOKEN` GitHub Actions secret; will be wired up once the secret exists.
 
 When picking up new work, check this list before reaching for the SDK requirements doc — most foundational rules are already encoded in code; missing pieces are deferred deliberately, not by accident.
 
