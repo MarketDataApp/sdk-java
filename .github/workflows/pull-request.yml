@@ -54,19 +54,12 @@ jobs:
             build/test-results/
           retention-days: 14
 
-      # Coverage ratchet: PR's line coverage cannot drop more than 5 pp
-      # below main's last recorded value. The baseline is restored from
-      # the cache populated by main.yml; if no baseline is available
-      # (first ever main run hasn't completed, or cache expired), the
-      # check passes with a warning instead of blocking the PR.
-      - name: Restore coverage baseline from main
-        uses: actions/cache/restore@v4
+      # Coverage ratchet lives in Codecov: codecov.yml at the repo root
+      # configures `threshold: 5%` so a PR fails the Codecov status check
+      # if line coverage drops more than 5 pp vs the base branch.
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
         with:
-          path: coverage-baseline.txt
-          # Unique key that won't match — forces fall-through to restore-keys.
-          key: coverage-baseline-pr-${{ github.run_id }}
-          restore-keys: |
-            coverage-baseline-main-
-
-      - name: Check coverage delta vs main
-        run: python3 .github/scripts/check-coverage-delta.py
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: build/reports/jacoco/test/jacocoTestReport.xml
+          fail_ci_if_error: true

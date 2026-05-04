@@ -2,7 +2,8 @@ name: Main
 
 # Runs only on push to main (i.e. when a PR is merged or someone pushes
 # directly). This is where the full forward-compat JDK matrix runs and
-# where we record the coverage baseline that PR runs compare against.
+# where we publish the canonical coverage snapshot that Codecov uses as
+# the base for PR diffs.
 on:
   push:
     branches: ['main']
@@ -60,30 +61,16 @@ jobs:
             build/test-results/
           retention-days: 14
 
-      # The JDK 17 entry of the matrix is the canonical run for coverage
-      # baseline purposes — its JaCoCo XML is what PR runs compare against.
-      - name: Extract coverage baseline (JDK 17 only)
+      # The JDK 17 entry of the matrix is the canonical run for coverage:
+      # its JaCoCo XML is uploaded to Codecov and becomes the base that
+      # subsequent PR runs compare against (see codecov.yml).
+      - name: Upload coverage to Codecov (JDK 17 only)
         if: success() && matrix.java == '17'
-        run: |
-          python3 .github/scripts/extract-coverage.py > coverage-baseline.txt
-          echo "Baseline coverage: $(cat coverage-baseline.txt)"
-
-      - name: Save coverage baseline to cache (JDK 17 only)
-        if: success() && matrix.java == '17'
-        uses: actions/cache/save@v4
+        uses: codecov/codecov-action@v5
         with:
-          path: coverage-baseline.txt
-          # Unique per commit so each main run produces a fresh entry;
-          # PR workflow restores via prefix-match on `coverage-baseline-main-`.
-          key: coverage-baseline-main-${{ github.sha }}
-
-      - name: Upload coverage report (JDK 17 only)
-        if: success() && matrix.java == '17'
-        uses: actions/upload-artifact@v4
-        with:
-          name: jacoco-report
-          path: build/reports/jacoco/test/
-          retention-days: 14
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: build/reports/jacoco/test/jacocoTestReport.xml
+          fail_ci_if_error: true
 
   # Integration-tests job is intentionally not wired up yet:
   # SDK requirements §13 says they run on PRs and release pipelines, but
