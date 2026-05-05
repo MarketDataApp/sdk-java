@@ -110,14 +110,16 @@ jobs:
         with:
           ref: ${{ needs.guard.outputs.head_sha }}
 
-      # Compile=17, test=matrix JDK; same shape as main.yml.
-      - name: Set up JDKs (compile=17, test=${{ matrix.java }})
+      # Order matters: JDK 17 must be last so JAVA_HOME=17 (Gradle 8.12
+      # doesn't support JDK 24+ as its daemon runtime). The matrix JDK
+      # is still installed and registered as a toolchain target.
+      - name: Set up JDKs (test=${{ matrix.java }}, compile/daemon=17)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: |
-            17
             ${{ matrix.java }}
+            17
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4

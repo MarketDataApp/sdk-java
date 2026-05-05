@@ -63,3 +63,10 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: build/reports/jacoco/test/jacocoTestReport.xml
           fail_ci_if_error: true
+
+  # NOTE: integration tests are NOT run automatically on PR open/sync.
+  # They are required for merge but only fire when a reviewer comments
+  # `integrationtest` (JDK 17) or `integrationtestfull` (matrix 17/21/25)
+  # — see .github/workflows/pr-integration-on-demand.yml. Branch-protection
+  # rules should require the "Integration tests pass" check name produced
+  # by that workflow before allowing merge to main.

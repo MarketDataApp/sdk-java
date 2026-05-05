@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.marketdata.sdk.exception.AuthenticationError;
+import com.marketdata.sdk.exception.NetworkError;
+import com.marketdata.sdk.exception.ParseError;
 import com.marketdata.sdk.exception.RateLimitError;
 import com.marketdata.sdk.exception.ServerError;
 import com.marketdata.sdk.markets.MarketStatus;
@@ -21,6 +23,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 /**
  * Exercises the full resource → transport → HTTP path against an in-process {@link HttpServer} (JDK
@@ -53,8 +57,15 @@ class MarketsResourceTest {
 
   // ---------- success paths ----------
 
-  @Test
-  void statusNoArgsHitsCanonicalUrlAndDecodesPayload() {
+  /**
+   * The 5 paths exercised below are the load-bearing scenarios — each runs once for {@link
+   * CallMode#SYNC} and once for {@link CallMode#ASYNC} so we satisfy SDK requirements §13's "tests
+   * must cover both sync and async variants for every endpoint" without duplicating every single
+   * mechanical case.
+   */
+  @ParameterizedTest
+  @EnumSource(CallMode.class)
+  void statusNoArgsHitsCanonicalUrlAndDecodesPayload(CallMode mode) {
     handler.setResponse(
         200,
         """
@@ -67,7 +78,7 @@ class MarketsResourceTest {
             rateLimitHeader("consumed", "1")));
 
     try (var client = newClient()) {
-      MarketStatus result = client.markets().status();
+      MarketStatus result = mode.statusNoArgs(client.markets());
 
       assertThat(result.days()).hasSize(2);
       assertThat(result.days().get(0).open()).isTrue();
@@ -91,13 +102,14 @@ class MarketsResourceTest {
     }
   }
 
-  @Test
-  void statusForDateBuildsDateQueryParam() {
+  @ParameterizedTest
+  @EnumSource(CallMode.class)
+  void statusForDateBuildsDateQueryParam(CallMode mode) {
     handler.setResponse(
         200, "{\"s\":\"ok\",\"date\":[1706760000],\"status\":[\"open\"]}", List.of());
 
     try (var client = newClient()) {
-      MarketStatus result = client.markets().status(LocalDate.of(2024, 2, 1));
+      MarketStatus result = mode.statusForDate(client.markets(), LocalDate.of(2024, 2, 1));
 
       assertThat(result.days()).hasSize(1);
       assertThat(lastRequest.get().path).isEqualTo("/v1/markets/status/");
@@ -105,13 +117,14 @@ class MarketsResourceTest {
     }
   }
 
-  @Test
-  void statusForRangeBuildsFromAndToQueryParams() {
+  @ParameterizedTest
+  @EnumSource(CallMode.class)
+  void statusForRangeBuildsFromAndToQueryParams(CallMode mode) {
     handler.setResponse(
         200, "{\"s\":\"ok\",\"date\":[1706673600],\"status\":[\"open\"]}", List.of());
 
     try (var client = newClient()) {
-      client.markets().status(LocalDate.of(2024, 1, 31), LocalDate.of(2024, 2, 5));
+      mode.statusForRange(client.markets(), LocalDate.of(2024, 1, 31), LocalDate.of(2024, 2, 5));
 
       assertThat(lastRequest.get().query).isEqualTo("from=2024-01-31&to=2024-02-05");
     }
@@ -127,10 +140,16 @@ class MarketsResourceTest {
     }
   }
 
-  // ---------- async parity ----------
+  // ---------- async-specific smoke ----------
 
+  /**
+   * Verifies that {@code statusAsync()} returns a real {@link
+   * java.util.concurrent.CompletableFuture} usable with the standard {@code .get()} contract
+   * (checked exception path). The {@code @ParameterizedTest}s above cover .join() semantics; this
+   * one covers .get().
+   */
   @Test
-  void statusAsyncReturnsSameResultAsSync() throws Exception {
+  void statusAsyncReturnsRealCompletableFuture() throws Exception {
     handler.setResponse(
         200, "{\"s\":\"ok\",\"date\":[1706760000],\"status\":[\"closed\"]}", List.of());
 
@@ -143,22 +162,24 @@ class MarketsResourceTest {
 
   // ---------- no-data and error paths ----------
 
-  @Test
-  void notFoundWithNoDataBodyDecodesAsEmpty() {
+  @ParameterizedTest
+  @EnumSource(CallMode.class)
+  void notFoundWithNoDataBodyDecodesAsEmpty(CallMode mode) {
     handler.setResponse(404, "{\"s\":\"no_data\"}", List.of());
 
     try (var client = newClient()) {
-      MarketStatus result = client.markets().status();
+      MarketStatus result = mode.statusNoArgs(client.markets());
       assertThat(result.isEmpty()).isTrue();
     }
   }
 
-  @Test
-  void http401ThrowsAuthenticationError() {
+  @ParameterizedTest
+  @EnumSource(CallMode.class)
+  void http401ThrowsAuthenticationError(CallMode mode) {
     handler.setResponse(401, "{}", List.of());
 
     try (var client = newClient()) {
-      assertThatThrownBy(() -> client.markets().status())
+      assertThatThrownBy(() -> mode.statusNoArgs(client.markets()))
           .isInstanceOf(AuthenticationError.class)
           .satisfies(
               t -> {
@@ -187,7 +208,166 @@ class MarketsResourceTest {
     }
   }
 
+  // ---------- malformed responses ----------
+
+  @ParameterizedTest
+  @EnumSource(CallMode.class)
+  void garbageBodyOnSuccessProducesParseError(CallMode mode) {
+    handler.setResponse(200, "this is plainly not json", List.of());
+
+    try (var client = newClient()) {
+      assertThatThrownBy(() -> mode.statusNoArgs(client.markets()))
+          .isInstanceOf(ParseError.class)
+          .hasMessageContaining("Failed to decode");
+    }
+  }
+
+  @Test
+  void emptyBodyOnSuccessProducesParseError() {
+    handler.setResponse(200, "", List.of());
+
+    try (var client = newClient()) {
+      assertThatThrownBy(() -> client.markets().status()).isInstanceOf(ParseError.class);
+    }
+  }
+
+  @Test
+  void unknownStatusFieldProducesParseError() {
+    handler.setResponse(200, "{\"s\":\"weird\"}", List.of());
+
+    try (var client = newClient()) {
+      assertThatThrownBy(() -> client.markets().status())
+          .isInstanceOf(ParseError.class)
+          .hasMessageContaining("weird");
+    }
+  }
+
+  @Test
+  void responseMissingArraysProducesParseError() {
+    handler.setResponse(200, "{\"s\":\"ok\"}", List.of());
+
+    try (var client = newClient()) {
+      assertThatThrownBy(() -> client.markets().status())
+          .isInstanceOf(ParseError.class)
+          .hasMessageContaining("date");
+    }
+  }
+
+  @Test
+  void mismatchedArraySizesProduceParseError() {
+    handler.setResponse(
+        200, "{\"s\":\"ok\",\"date\":[1706673600,1706760000],\"status\":[\"open\"]}", List.of());
+
+    try (var client = newClient()) {
+      assertThatThrownBy(() -> client.markets().status())
+          .isInstanceOf(ParseError.class)
+          .hasMessageContaining("different sizes");
+    }
+  }
+
+  // ---------- weird headers ----------
+
+  @Test
+  void successWithoutAnyRateLimitHeadersLeavesSnapshotNull() {
+    handler.setResponse(
+        200, "{\"s\":\"ok\",\"date\":[1706673600],\"status\":[\"open\"]}", List.of());
+
+    try (var client = newClient()) {
+      client.markets().status();
+      assertThat(client.getRateLimits()).isNull();
+    }
+  }
+
+  @Test
+  void partialRateLimitHeadersStillProduceSnapshot() {
+    handler.setResponse(
+        200,
+        "{\"s\":\"ok\",\"date\":[1706673600],\"status\":[\"open\"]}",
+        List.of(
+            new String[] {"x-api-ratelimit-limit", "100000"},
+            new String[] {"x-api-ratelimit-remaining", "99999"}));
+
+    try (var client = newClient()) {
+      client.markets().status();
+
+      RateLimits rl = client.getRateLimits();
+      assertThat(rl).isNotNull();
+      assertThat(rl.limit()).isEqualTo(100_000L);
+      assertThat(rl.remaining()).isEqualTo(99_999L);
+      assertThat(rl.consumed()).isEqualTo(0L); // missing → defaulted
+    }
+  }
+
+  @Test
+  void allUnparseableRateLimitHeadersAreIgnoredAsAbsent() {
+    handler.setResponse(
+        200,
+        "{\"s\":\"ok\",\"date\":[1706673600],\"status\":[\"open\"]}",
+        List.of(
+            new String[] {"x-api-ratelimit-limit", "not-a-number"},
+            new String[] {"x-api-ratelimit-remaining", "still-not"},
+            new String[] {"x-api-ratelimit-reset", "??"},
+            new String[] {"x-api-ratelimit-consumed", "wat"}));
+
+    try (var client = newClient()) {
+      client.markets().status();
+      assertThat(client.getRateLimits()).isNull();
+    }
+  }
+
+  @Test
+  void errorResponseWithoutCfRayProducesNullRequestId() {
+    handler.setResponse(401, "{}", List.of());
+
+    try (var client = newClient()) {
+      assertThatThrownBy(() -> client.markets().status())
+          .isInstanceOf(AuthenticationError.class)
+          .satisfies(t -> assertThat(((AuthenticationError) t).getRequestId()).isNull());
+    }
+  }
+
+  @Test
+  void errorResponseWithCfRayPropagatesRequestId() {
+    handler.setResponse(401, "{}", List.<String[]>of(new String[] {"cf-ray", "abc123-XYZ"}));
+
+    try (var client = newClient()) {
+      assertThatThrownBy(() -> client.markets().status())
+          .isInstanceOf(AuthenticationError.class)
+          .satisfies(
+              t -> assertThat(((AuthenticationError) t).getRequestId()).isEqualTo("abc123-XYZ"));
+    }
+  }
+
+  // ---------- network failure (connect refused — fast-failing proxy for timeout class) ----------
+
+  /**
+   * The 99-second per-request timeout is fixed by SDK requirements §10. Forcing a real timeout in a
+   * test would block for ~99 s, which we don't want. Instead we exercise the {@link NetworkError}
+   * path by pointing the client at a port nothing is listening on (TCP RST → fast failure). This
+   * proves the transport surfaces transport-level failures as a typed exception rather than letting
+   * raw {@code IOException}s leak.
+   */
+  @ParameterizedTest
+  @EnumSource(CallMode.class)
+  void connectionRefusedProducesNetworkError(CallMode mode) {
+    // port 1 is privileged and rejects fast.
+    try (var client = new MarketDataClient("test-key", "http://127.0.0.1:1", null, false)) {
+
+      assertThatThrownBy(() -> mode.statusNoArgs(client.markets()))
+          .isInstanceOf(NetworkError.class)
+          .satisfies(
+              t -> {
+                NetworkError ne = (NetworkError) t;
+                assertThat(ne.getCause()).isNotNull();
+                assertThat(ne.getRequestUrl()).contains("127.0.0.1:1");
+              });
+    }
+  }
+
   // ---------- helpers ----------
+
+  // CallMode (sync vs async dispatcher) lives in its own file so the integration-test source set
+  // can reuse it. See CallMode.java in this same package.
 
   private static String[] rateLimitHeader(String suffix, String value) {
     return new String[] {"x-api-ratelimit-" + suffix, value};

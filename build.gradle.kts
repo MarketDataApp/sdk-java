@@ -86,18 +86,19 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
     finalizedBy(tasks.jacocoTestReport)
+}
 
-    // ADR-002 CI matrix: optionally run tests on a specific JDK while
-    // compilation stays pinned to --release 17. The CI workflow passes
-    // -PtestJdk=17|21|25; locally you can do ./gradlew test -PtestJdk=21
-    // (Gradle will provision the JDK via the foojay resolver if missing).
-    val testJdk = providers.gradleProperty("testJdk").orNull
-    if (testJdk != null) {
-        javaLauncher.set(
-            javaToolchains.launcherFor {
-                languageVersion = JavaLanguageVersion.of(testJdk.toInt())
-            }
-        )
+// ADR-002 CI matrix: optionally run any Test task on a specific JDK
+// while compilation stays pinned to --release 17. The flag is wired to
+// every Test task (unit `test` + `integrationTest`) so on-demand and
+// merge-to-main matrix runs cover the live API on JDK 17/21/25 too.
+val testJdkProperty = providers.gradleProperty("testJdk").orNull
+if (testJdkProperty != null) {
+    val launcher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(testJdkProperty.toInt())
+    }
+    tasks.withType<Test>().configureEach {
+        javaLauncher.set(launcher)
     }
 }
 
