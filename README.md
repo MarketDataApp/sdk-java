@@ -107,14 +107,10 @@ The seven permitted subtypes — `AuthenticationError`, `BadRequestError`,
 The repo uses **Gradle (Kotlin DSL)** with a version catalog at
 [`gradle/libs.versions.toml`](gradle/libs.versions.toml).
 
-The Gradle wrapper jar is **not** committed. Bootstrap once with a
-locally installed Gradle (≥ 8.10):
-
-```bash
-gradle wrapper --gradle-version 8.12
-```
-
-After that, use the wrapper for everything:
+The Gradle wrapper is committed (`gradlew`, `gradlew.bat`,
+`gradle/wrapper/gradle-wrapper.jar`, `gradle/wrapper/gradle-wrapper.properties`),
+so any JDK 17+ environment can build the project without a separate Gradle
+install — the wrapper downloads the right Gradle version on first run.
 
 ```bash
 ./gradlew build               # compile + unit tests + spotless + jacoco

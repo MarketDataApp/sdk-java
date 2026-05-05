@@ -49,13 +49,14 @@ public final class MarketDataClient implements AutoCloseable {
   private final boolean validateOnStartup;
 
   private MarketDataClient(Builder builder) {
-    this.token = Configuration.resolve(builder.apiKey, EnvVars.TOKEN);
+    Configuration config = Configuration.loadFromProcess();
+    this.token = config.resolve(builder.apiKey, EnvVars.TOKEN);
     this.baseUrl =
         trimTrailingSlash(
-            Configuration.resolveOrDefault(
+            config.resolveOrDefault(
                 builder.baseUrl, EnvVars.BASE_URL, Configuration.DEFAULT_BASE_URL));
     this.apiVersion =
-        Configuration.resolveOrDefault(
+        config.resolveOrDefault(
             builder.apiVersion, EnvVars.API_VERSION, Configuration.DEFAULT_API_VERSION);
     this.demoMode = this.token == null;
     this.validateOnStartup = builder.validateOnStartup;

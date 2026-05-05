@@ -12,39 +12,49 @@ import org.jspecify.annotations.Nullable;
  * Resolves SDK configuration values per the cascade in SDK requirements §4: {@code explicit value →
  * MARKETDATA_* env var → .env file in CWD → built-in default}.
  *
- * <p>The {@code .env} file is read lazily from the current working directory when an env-backed
- * value is requested. Lines starting with {@code #} are treated as comments; surrounding single or
- * double quotes on values are stripped.
+ * <p>The only public construction path is {@link #loadFromProcess()}, which snapshots the live
+ * environment and the {@code .env} file once. The constructor is strictly private — there is no
+ * production-callable backdoor for injecting arbitrary maps. Tests reach the private constructor
+ * via reflection (see {@code ConfigurationTest}); this is by design so a developer can't
+ * accidentally take a shortcut around the canonical load path.
  */
 public final class Configuration {
 
   public static final String DEFAULT_BASE_URL = "https://api.marketdata.app";
   public static final String DEFAULT_API_VERSION = "v1";
+  private static final Path DEFAULT_DOTENV_PATH = Paths.get(".env");
 
-  private Configuration() {}
+  private final Map<String, String> systemEnv;
+  private final Map<String, String> dotEnv;
 
-  /**
-   * Returns the first non-blank value among {@code explicit}, the named environment variable, and
-   * the {@code .env} file entry — or {@code null} if none is set.
-   */
-  public static @Nullable String resolve(@Nullable String explicit, String envKey) {
-    if (isPresent(explicit)) {
-      return explicit;
-    }
-    String fromSystem = System.getenv(envKey);
-    if (isPresent(fromSystem)) {
-      return fromSystem;
-    }
-    String fromDotEnv = readDotEnv().get(envKey);
-    return isPresent(fromDotEnv) ? fromDotEnv : null;
+  private Configuration(Map<String, String> systemEnv, Map<String, String> dotEnv) {
+    this.systemEnv = Map.copyOf(systemEnv);
+    this.dotEnv = Map.copyOf(dotEnv);
   }
 
   /**
-   * Same as {@link #resolve(String, String)} but falls back to the supplied default when the
-   * cascade yields nothing.
+   * Production factory: snapshots {@code System.getenv()} and reads {@code ./.env} once. Call
+   * during client construction.
    */
-  public static String resolveOrDefault(
-      @Nullable String explicit, String envKey, String defaultValue) {
+  public static Configuration loadFromProcess() {
+    return new Configuration(System.getenv(), readDotEnvFile(DEFAULT_DOTENV_PATH));
+  }
+
+  /** Cascade: explicit → system env → .env → {@code null}. */
+  public @Nullable String resolve(@Nullable String explicit, String envKey) {
+    if (isPresent(explicit)) {
+      return explicit;
+    }
+    String fromSystem = systemEnv.get(envKey);
+    if (isPresent(fromSystem)) {
+      return fromSystem;
+    }
+    String fromDotEnv = dotEnv.get(envKey);
+    return isPresent(fromDotEnv) ? fromDotEnv : null;
+  }
+
+  /** Same as {@link #resolve} but returns {@code defaultValue} when the cascade yields nothing. */
+  public String resolveOrDefault(@Nullable String explicit, String envKey, String defaultValue) {
     String resolved = resolve(explicit, envKey);
     return resolved != null ? resolved : defaultValue;
   }
@@ -53,8 +63,12 @@ public final class Configuration {
     return value != null && !value.isBlank();
   }
 
-  private static Map<String, String> readDotEnv() {
-    Path path = Paths.get(".env");
+  /**
+   * Reads a {@code .env}-style file: lines like {@code KEY=value}, {@code #} for comments,
+   * surrounding single or double quotes stripped. Package-private so tests can target an arbitrary
+   * {@link Path} (e.g. inside a JUnit {@code @TempDir}) instead of CWD.
+   */
+  static Map<String, String> readDotEnvFile(Path path) {
     if (!Files.isRegularFile(path)) {
       return Map.of();
     }
