@@ -1,0 +1,29 @@
+# Codecov configuration.
+# Docs: https://docs.codecov.com/docs/codecov-yaml
+
+coverage:
+  status:
+    project:
+      default:
+        # Compare against the base branch's coverage automatically.
+        target: auto
+        # Allow up to 5 percentage points of drop before failing the
+        # status check. Mirrors the project's "no >5pp regression vs main"
+        # rule that previously lived in .github/scripts/check-coverage-delta.py.
+        threshold: 5%
+        # Don't run on draft commits / forks of forks.
+        if_ci_failed: error
+    patch:
+      default:
+        # Patch coverage = coverage of the lines this PR added/changed.
+        # Require at least 70% coverage on new code to nudge contributors
+        # toward writing tests for new logic, while leaving room for
+        # mechanical / boilerplate diffs.
+        target: 70%
+        threshold: 5%
+
+# Pull request comment from the Codecov bot.
+comment:
+  layout: "header, diff, files, footer"
+  behavior: default
+  require_changes: false
