@@ -41,7 +41,12 @@ tasks.jar {
 }
 
 // ADR-003: integration tests live in a separate, env-var-gated source set.
-val integrationTest by sourceSets.creating
+val integrationTest by sourceSets.creating {
+    // Wire the main and unit-test outputs into the integration test classpath
+    // so ITs can use both production code and test helpers (junit, assertj).
+    compileClasspath += sourceSets.main.get().output + sourceSets.test.get().output
+    runtimeClasspath += output + compileClasspath
+}
 
 val integrationTestImplementation by configurations.getting {
     extendsFrom(configurations.testImplementation.get())

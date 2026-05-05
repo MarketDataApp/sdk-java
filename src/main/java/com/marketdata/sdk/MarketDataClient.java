@@ -1,9 +1,6 @@
 package com.marketdata.sdk;
 
-import java.net.http.HttpClient;
 import java.time.Duration;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
@@ -11,9 +8,10 @@ import org.jspecify.annotations.Nullable;
 /**
  * Entry point to the Market Data Java SDK.
  *
- * <p>One {@code MarketDataClient} per application. Holds a single shared {@link HttpClient}
- * (HTTP/2, 2 s connect timeout) for connection pooling and a 50-permit semaphore that gates the
- * global concurrency pool required by SDK requirements §12.
+ * <p>One {@code MarketDataClient} per application. Resource façades (e.g. {@link #markets()}) are
+ * accessed through the client; all HTTP-shaped concerns (connection pooling, HTTP/2, the global
+ * concurrency semaphore, rate-limit header parsing) live in the internal {@link HttpTransport} the
+ * client owns.
  *
  * <p>Two constructors:
  *
@@ -32,19 +30,17 @@ import org.jspecify.annotations.Nullable;
 public final class MarketDataClient implements AutoCloseable {
 
   /** SDK requirements §10: fixed 99-second per-request timeout. */
-  public static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(99);
+  public static final Duration REQUEST_TIMEOUT = HttpTransport.REQUEST_TIMEOUT;
 
   /** SDK requirements §10: fixed 2-second connect timeout. */
-  public static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(2);
+  public static final Duration CONNECT_TIMEOUT = HttpTransport.CONNECT_TIMEOUT;
 
   /** SDK requirements §12: maximum concurrent in-flight requests per client. */
-  public static final int CONCURRENCY_LIMIT = 50;
+  public static final int CONCURRENCY_LIMIT = HttpTransport.CONCURRENCY_LIMIT;
 
   private static final Logger LOG = Logger.getLogger(MarketDataClient.class.getName());
 
-  private final HttpClient httpClient;
-  private final Semaphore concurrencyPermits;
-  private final AtomicReference<@Nullable RateLimits> latestRateLimits = new AtomicReference<>();
+  private final HttpTransport transport;
 
   private final @Nullable String token;
   private final String baseUrl;
@@ -52,6 +48,9 @@ public final class MarketDataClient implements AutoCloseable {
   private final String userAgent;
   private final boolean demoMode;
   private final boolean validateOnStartup;
+
+  // Resources — eagerly constructed; one record-shaped object per resource group.
+  private final MarketsResource markets;
 
   /**
    * Production constructor. Resolves all settings from the configuration cascade in SDK
@@ -95,13 +94,8 @@ public final class MarketDataClient implements AutoCloseable {
     this.validateOnStartup = validateOnStartup;
     this.userAgent = "marketdata-sdk-java/" + Version.current();
 
-    this.httpClient =
-        HttpClient.newBuilder()
-            .connectTimeout(CONNECT_TIMEOUT)
-            .version(HttpClient.Version.HTTP_2)
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .build();
-    this.concurrencyPermits = new Semaphore(CONCURRENCY_LIMIT);
+    this.transport = new HttpTransport(this.baseUrl, this.apiVersion, this.userAgent, this.token);
+    this.markets = new MarketsResource(this.transport);
 
     LOG.log(
         Level.INFO,
@@ -116,8 +110,21 @@ public final class MarketDataClient implements AutoCloseable {
     }
 
     // SDK requirements §5: validate on startup by default. The actual
-    // /user/ call lands with the request layer; this flag is the seam.
+    // /user/ call lands with the user resource; this flag is the seam.
   }
+
+  // ---------------------------------------------------------------------
+  // Resource accessors
+  // ---------------------------------------------------------------------
+
+  /** Façade for the {@code /v1/markets/*} endpoint group. */
+  public MarketsResource markets() {
+    return markets;
+  }
+
+  // ---------------------------------------------------------------------
+  // Configuration accessors
+  // ---------------------------------------------------------------------
 
   public String getBaseUrl() {
     return baseUrl;
@@ -141,15 +148,12 @@ public final class MarketDataClient implements AutoCloseable {
 
   /** Latest client-level rate-limit snapshot, or {@code null} if none has been received yet. */
   public @Nullable RateLimits getRateLimits() {
-    return latestRateLimits.get();
+    return transport.getLatestRateLimits();
   }
 
   @Override
   public void close() {
-    // java.net.http.HttpClient gained explicit close() in JDK 21.
-    // While the minimum target is JDK 17, this method is a no-op:
-    // the JVM releases the executor and connection pool on process
-    // exit. Revisit if/when the minimum bumps to 21+.
+    transport.close();
   }
 
   private static String trimTrailingSlash(String url) {
