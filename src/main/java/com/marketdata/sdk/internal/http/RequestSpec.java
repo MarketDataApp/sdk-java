@@ -19,7 +19,10 @@ import java.util.Map;
 public record RequestSpec(String path, Map<String, String> queryParams) {
 
   public RequestSpec {
-    queryParams = Map.copyOf(queryParams);
+    // Preserve insertion order — Map.copyOf would defensively copy but
+    // strip the iteration order, which breaks predictable URLs in tests
+    // and in any caller that cares about query-param order on the wire.
+    queryParams = Collections.unmodifiableMap(new LinkedHashMap<>(queryParams));
   }
 
   public static Builder get(String path) {
