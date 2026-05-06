@@ -1,11 +1,11 @@
 package com.marketdata.sdk.internal.http;
 
-import com.marketdata.sdk.exception.AuthenticationError;
-import com.marketdata.sdk.exception.BadRequestError;
+import com.marketdata.sdk.exception.AuthenticationException;
+import com.marketdata.sdk.exception.BadRequestException;
 import com.marketdata.sdk.exception.ErrorContext;
 import com.marketdata.sdk.exception.MarketDataException;
-import com.marketdata.sdk.exception.RateLimitError;
-import com.marketdata.sdk.exception.ServerError;
+import com.marketdata.sdk.exception.RateLimitException;
+import com.marketdata.sdk.exception.ServerException;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -24,10 +24,10 @@ final class HttpStatusMapper {
       int status, String requestUrl, @Nullable String requestId) {
     ErrorContext ctx = new ErrorContext(emptyToNull(requestId), requestUrl, status);
     return switch (status) {
-      case 400, 422 -> new BadRequestError("HTTP " + status + ": invalid request", ctx);
-      case 401 -> new AuthenticationError("HTTP 401: invalid or missing API token", ctx);
-      case 429 -> new RateLimitError("HTTP 429: rate limit exceeded", ctx);
-      default -> new ServerError("HTTP " + status + ": server error", ctx);
+      case 400, 422 -> new BadRequestException("HTTP " + status + ": invalid request", ctx);
+      case 401 -> new AuthenticationException("HTTP 401: invalid or missing API token", ctx);
+      case 429 -> new RateLimitException("HTTP 429: rate limit exceeded", ctx);
+      default -> new ServerException("HTTP " + status + ": server error", ctx);
     };
   }
 

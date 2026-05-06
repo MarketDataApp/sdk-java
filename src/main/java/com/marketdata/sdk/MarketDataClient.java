@@ -6,6 +6,7 @@ import com.marketdata.sdk.internal.Tokens;
 import com.marketdata.sdk.internal.Version;
 import com.marketdata.sdk.internal.http.HttpTransport;
 import com.marketdata.sdk.markets.MarketsResource;
+import com.marketdata.sdk.utilities.UtilitiesResource;
 import java.time.Duration;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -50,6 +51,7 @@ public final class MarketDataClient implements AutoCloseable {
   // one record-shaped object per resource group. Worth revisiting if the
   // resource count grows large.
   private final MarketsResource markets;
+  private final UtilitiesResource utilities;
 
   private MarketDataClient(Builder builder) {
     Configuration config = Configuration.loadFromProcess();
@@ -67,6 +69,7 @@ public final class MarketDataClient implements AutoCloseable {
 
     this.transport = new HttpTransport(this.baseUrl, this.apiVersion, this.userAgent, this.token);
     this.markets = new MarketsResource(this.transport);
+    this.utilities = new UtilitiesResource(this.transport);
 
     LOG.log(
         Level.INFO,
@@ -80,8 +83,14 @@ public final class MarketDataClient implements AutoCloseable {
       LOG.log(Level.FINE, "Token: {0}", Tokens.redact(token));
     }
 
-    // SDK requirements §5: validate on startup by default. The actual
-    // /user/ call lands with the user resource; this flag is the seam.
+    // SDK requirements §5: validate the token by hitting /user/ unless either
+    // (a) the caller explicitly disabled it, or (b) we're in demo mode (no
+    // token to validate). This also populates the rate-limit snapshot at
+    // construction time per §8.1 — the response headers feed the transport's
+    // latestRateLimits as a side-effect of the call.
+    if (validateOnStartup && !demoMode) {
+      this.utilities.user();
+    }
   }
 
   public static Builder builder() {
@@ -95,6 +104,11 @@ public final class MarketDataClient implements AutoCloseable {
   /** Façade for the {@code /v1/markets/*} endpoint group. */
   public MarketsResource markets() {
     return markets;
+  }
+
+  /** Façade for the {@code utilities} resource group ({@code /v1/user/}, plus more later). */
+  public UtilitiesResource utilities() {
+    return utilities;
   }
 
   // ---------------------------------------------------------------------

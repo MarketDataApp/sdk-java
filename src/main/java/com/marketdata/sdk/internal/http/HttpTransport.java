@@ -1,11 +1,12 @@
 package com.marketdata.sdk.internal.http;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.marketdata.sdk.RateLimits;
 import com.marketdata.sdk.exception.ErrorContext;
 import com.marketdata.sdk.exception.MarketDataException;
-import com.marketdata.sdk.exception.NetworkError;
-import com.marketdata.sdk.exception.ParseError;
+import com.marketdata.sdk.exception.NetworkException;
+import com.marketdata.sdk.exception.ParseException;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -64,7 +65,13 @@ public final class HttpTransport implements AutoCloseable {
     this.userAgent = userAgent;
     this.token = token;
     this.concurrencyPermits = new Semaphore(CONCURRENCY_LIMIT);
-    this.jsonMapper = new ObjectMapper();
+    // Be lenient on unknown JSON properties: the API may add new response
+    // fields over time, and we don't want SDK consumers to start seeing
+    // ParseException the moment a backend ships a new field. Records that
+    // need every field strictly mapped opt back in via a custom
+    // @JsonDeserialize anyway (see the wire-format deserializers).
+    this.jsonMapper =
+        new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     this.httpClient =
         HttpClient.newBuilder()
             .connectTimeout(CONNECT_TIMEOUT)
@@ -95,7 +102,7 @@ public final class HttpTransport implements AutoCloseable {
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       return CompletableFuture.failedFuture(
-          new NetworkError(
+          new NetworkException(
               "Interrupted while waiting for a concurrency permit",
               new ErrorContext(null, uri.toString(), null),
               e));
@@ -109,7 +116,7 @@ public final class HttpTransport implements AutoCloseable {
               if (error != null) {
                 Throwable root = unwrap(error);
                 throw new CompletionException(
-                    new NetworkError(
+                    new NetworkException(
                         "Request to " + uri + " failed: " + root.getMessage(),
                         new ErrorContext(null, uri.toString(), null),
                         root));
@@ -134,7 +141,7 @@ public final class HttpTransport implements AutoCloseable {
       if (cause instanceof RuntimeException re) {
         throw re;
       }
-      throw new NetworkError("Unexpected failure invoking SDK", ErrorContext.empty(), cause);
+      throw new NetworkException("Unexpected failure invoking SDK", ErrorContext.empty(), cause);
     }
   }
 
@@ -155,7 +162,7 @@ public final class HttpTransport implements AutoCloseable {
       try {
         return jsonMapper.readValue(response.body(), responseType);
       } catch (IOException e) {
-        throw new ParseError(
+        throw new ParseException(
             "Failed to decode response from " + url + ": " + e.getMessage(),
             new ErrorContext(requestId, url, status),
             e);
@@ -166,7 +173,11 @@ public final class HttpTransport implements AutoCloseable {
 
   private URI buildUri(RequestSpec spec) {
     StringBuilder sb = new StringBuilder();
-    sb.append(baseUrl).append('/').append(apiVersion).append('/').append(spec.path());
+    sb.append(baseUrl).append('/');
+    if (spec.versioned()) {
+      sb.append(apiVersion).append('/');
+    }
+    sb.append(spec.path());
     if (!spec.path().endsWith("/")) {
       sb.append('/');
     }

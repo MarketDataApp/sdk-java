@@ -9,13 +9,13 @@ class MarketDataExceptionTest {
 
   @Test
   void emptyContextLeavesFieldsNull() {
-    var error = new BadRequestError("symbol must not be blank", ErrorContext.empty());
+    var error = new BadRequestException("symbol must not be blank", ErrorContext.empty());
 
     assertThat(error.getRequestId()).isNull();
     assertThat(error.getRequestUrl()).isNull();
     assertThat(error.getStatusCode()).isNull();
     assertThat(error.getTimestamp()).isNotNull();
-    assertThat(error.getExceptionType()).isEqualTo("BadRequestError");
+    assertThat(error.getExceptionType()).isEqualTo("BadRequestException");
   }
 
   @Test
@@ -24,22 +24,22 @@ class MarketDataExceptionTest {
         new ErrorContext(
             "8a1b2c3d4e5f6g7h-SJC", "https://api.marketdata.app/v1/stocks/quotes/AAPL/", 429);
 
-    var error = new RateLimitError("Rate limit exceeded", ctx);
+    var error = new RateLimitException("Rate limit exceeded", ctx);
 
     assertThat(error.getRequestId()).isEqualTo("8a1b2c3d4e5f6g7h-SJC");
     assertThat(error.getStatusCode()).isEqualTo(429);
-    assertThat(error.getExceptionType()).isEqualTo("RateLimitError");
+    assertThat(error.getExceptionType()).isEqualTo("RateLimitException");
   }
 
   @Test
   void supportInfoIncludesAllRequiredFields() {
     var ctx = new ErrorContext("RAY-1", "https://api.marketdata.app/v1/stocks/quotes/AAPL/", 429);
-    var error = new RateLimitError("Rate limit exceeded", ctx);
+    var error = new RateLimitException("Rate limit exceeded", ctx);
 
     String supportInfo = error.getSupportInfo();
 
     assertThat(supportInfo)
-        .contains("RateLimitError")
+        .contains("RateLimitException")
         .contains("Rate limit exceeded")
         .contains("429")
         .contains("RAY-1")
@@ -53,18 +53,18 @@ class MarketDataExceptionTest {
     var cause = new RuntimeException("root cause");
 
     // The four subtypes not exercised by the other tests in this file.
-    var net = new NetworkError("network down", ctx, cause);
-    var nf = new NotFoundError("not found", ctx);
-    var pe = new ParseError("bad json", ctx, cause);
-    var se = new ServerError("internal", ctx);
+    var net = new NetworkException("network down", ctx, cause);
+    var nf = new NotFoundException("not found", ctx);
+    var pe = new ParseException("bad json", ctx, cause);
+    var se = new ServerException("internal", ctx);
 
-    assertThat(net.getExceptionType()).isEqualTo("NetworkError");
+    assertThat(net.getExceptionType()).isEqualTo("NetworkException");
     assertThat(net.getCause()).isSameAs(cause);
-    assertThat(nf.getExceptionType()).isEqualTo("NotFoundError");
+    assertThat(nf.getExceptionType()).isEqualTo("NotFoundException");
     assertThat(nf.getCause()).isNull();
-    assertThat(pe.getExceptionType()).isEqualTo("ParseError");
+    assertThat(pe.getExceptionType()).isEqualTo("ParseException");
     assertThat(pe.getCause()).isSameAs(cause);
-    assertThat(se.getExceptionType()).isEqualTo("ServerError");
+    assertThat(se.getExceptionType()).isEqualTo("ServerException");
     assertThat(se.getCause()).isNull();
 
     for (MarketDataException ex : List.of(net, nf, pe, se)) {
@@ -84,13 +84,13 @@ class MarketDataExceptionTest {
     // Exercise the one that the other tests in this file don't already hit.
     List<MarketDataException> exhaustive =
         List.of(
-            new AuthenticationError("a", ctx, cause),
-            new BadRequestError("b", ctx, cause),
-            new NotFoundError("n", ctx, cause),
-            new RateLimitError("r", ctx, cause),
-            new ServerError("s", ctx, cause),
-            new NetworkError("net", ctx), // cause-less variant
-            new ParseError("p", ctx)); // cause-less variant
+            new AuthenticationException("a", ctx, cause),
+            new BadRequestException("b", ctx, cause),
+            new NotFoundException("n", ctx, cause),
+            new RateLimitException("r", ctx, cause),
+            new ServerException("s", ctx, cause),
+            new NetworkException("net", ctx), // cause-less variant
+            new ParseException("p", ctx)); // cause-less variant
 
     for (MarketDataException ex : exhaustive) {
       assertThat(ex.getMessage()).isNotBlank();
@@ -99,11 +99,30 @@ class MarketDataExceptionTest {
   }
 
   @Test
+  void supportInfoRendersNAForMissingFields() {
+    // Counterpart to supportInfoIncludesAllRequiredFields: this exercises the "(n/a)"
+    // branch of each ternary in getSupportInfo, which the other tests skip because they
+    // always pass a fully-populated ErrorContext. Together they bring branch coverage of
+    // getSupportInfo from 50% to 100%.
+    var error = new BadRequestException("symbol must not be blank", ErrorContext.empty());
+
+    String supportInfo = error.getSupportInfo();
+
+    assertThat(supportInfo)
+        .contains("Type:        BadRequestException")
+        .contains("Message:     symbol must not be blank")
+        .contains("Status code: (n/a)")
+        .contains("Request ID:  (n/a)")
+        .contains("Request URL: (n/a)")
+        .contains("US/Eastern");
+  }
+
+  @Test
   void supportInfoNeverContainsSensitiveData() {
     // The exception itself never receives the token; we just
     // double-check that the canonical message+URL form doesn't leak.
-    var ctx = new ErrorContext("RAY-1", "https://api.marketdata.app/v1/user/", 401);
-    var error = new AuthenticationError("Invalid token", ctx);
+    var ctx = new ErrorContext("RAY-1", "https://api.marketdata.app/user/", 401);
+    var error = new AuthenticationException("Invalid token", ctx);
 
     assertThat(error.getSupportInfo()).doesNotContain("token=").doesNotContain("Bearer ");
   }

@@ -14,7 +14,7 @@ import org.junit.jupiter.params.provider.EnumSource;
  *
  * <p>Requires a valid {@code MARKETDATA_TOKEN} env var (or {@code .env} entry). Without one the
  * client enters demo mode and the {@code /markets/status/} endpoint is not on the demo allow-list,
- * so the test would receive an {@code AuthenticationError}.
+ * so the test would receive an {@code AuthenticationException}.
  *
  * <p>Each scenario runs once for {@link CallMode#SYNC} and once for {@link CallMode#ASYNC} so we
  * satisfy SDK requirements §13's "tests must cover both sync and async variants for every endpoint"

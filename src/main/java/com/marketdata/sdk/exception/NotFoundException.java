@@ -9,13 +9,13 @@ import org.jspecify.annotations.Nullable;
  * than throwing this exception. It exists for the cases where 404 truly indicates a programming
  * error.
  */
-public final class NotFoundError extends MarketDataException {
+public final class NotFoundException extends MarketDataException {
 
-  public NotFoundError(String message, ErrorContext context) {
+  public NotFoundException(String message, ErrorContext context) {
     super(message, context, null);
   }
 
-  public NotFoundError(String message, ErrorContext context, @Nullable Throwable cause) {
+  public NotFoundException(String message, ErrorContext context, @Nullable Throwable cause) {
     super(message, context, cause);
   }
 }

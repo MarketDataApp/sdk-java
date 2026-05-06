@@ -16,13 +16,13 @@ import org.jspecify.annotations.Nullable;
  * any HTTP request is dispatched.
  */
 public abstract sealed class MarketDataException extends RuntimeException
-    permits AuthenticationError,
-        BadRequestError,
-        NotFoundError,
-        RateLimitError,
-        ServerError,
-        NetworkError,
-        ParseError {
+    permits AuthenticationException,
+        BadRequestException,
+        NotFoundException,
+        RateLimitException,
+        ServerException,
+        NetworkException,
+        ParseException {
 
   private static final ZoneId EASTERN = ZoneId.of("America/New_York");
   private static final DateTimeFormatter TIMESTAMP_FORMAT =

@@ -5,11 +5,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.marketdata.sdk.MarketDataClient;
 import com.marketdata.sdk.RateLimits;
-import com.marketdata.sdk.exception.AuthenticationError;
-import com.marketdata.sdk.exception.NetworkError;
-import com.marketdata.sdk.exception.ParseError;
-import com.marketdata.sdk.exception.RateLimitError;
-import com.marketdata.sdk.exception.ServerError;
+import com.marketdata.sdk.exception.AuthenticationException;
+import com.marketdata.sdk.exception.NetworkException;
+import com.marketdata.sdk.exception.ParseException;
+import com.marketdata.sdk.exception.RateLimitException;
+import com.marketdata.sdk.exception.ServerException;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
@@ -180,15 +180,15 @@ class MarketsResourceTest {
 
   @ParameterizedTest
   @EnumSource(CallMode.class)
-  void http401ThrowsAuthenticationError(CallMode mode) {
+  void http401ThrowsAuthenticationException(CallMode mode) {
     handler.setResponse(401, "{}", List.of());
 
     try (var client = newClient()) {
       assertThatThrownBy(() -> mode.statusNoArgs(client.markets()))
-          .isInstanceOf(AuthenticationError.class)
+          .isInstanceOf(AuthenticationException.class)
           .satisfies(
               t -> {
-                AuthenticationError ae = (AuthenticationError) t;
+                AuthenticationException ae = (AuthenticationException) t;
                 assertThat(ae.getStatusCode()).isEqualTo(401);
                 assertThat(ae.getRequestUrl()).contains("/v1/markets/status/");
               });
@@ -196,20 +196,20 @@ class MarketsResourceTest {
   }
 
   @Test
-  void http429ThrowsRateLimitError() {
+  void http429ThrowsRateLimitException() {
     handler.setResponse(429, "{}", List.of());
 
     try (var client = newClient()) {
-      assertThatThrownBy(() -> client.markets().status()).isInstanceOf(RateLimitError.class);
+      assertThatThrownBy(() -> client.markets().status()).isInstanceOf(RateLimitException.class);
     }
   }
 
   @Test
-  void http500ThrowsServerError() {
+  void http500ThrowsServerException() {
     handler.setResponse(500, "{}", List.of());
 
     try (var client = newClient()) {
-      assertThatThrownBy(() -> client.markets().status()).isInstanceOf(ServerError.class);
+      assertThatThrownBy(() -> client.markets().status()).isInstanceOf(ServerException.class);
     }
   }
 
@@ -217,55 +217,55 @@ class MarketsResourceTest {
 
   @ParameterizedTest
   @EnumSource(CallMode.class)
-  void garbageBodyOnSuccessProducesParseError(CallMode mode) {
+  void garbageBodyOnSuccessProducesParseException(CallMode mode) {
     handler.setResponse(200, "this is plainly not json", List.of());
 
     try (var client = newClient()) {
       assertThatThrownBy(() -> mode.statusNoArgs(client.markets()))
-          .isInstanceOf(ParseError.class)
+          .isInstanceOf(ParseException.class)
           .hasMessageContaining("Failed to decode");
     }
   }
 
   @Test
-  void emptyBodyOnSuccessProducesParseError() {
+  void emptyBodyOnSuccessProducesParseException() {
     handler.setResponse(200, "", List.of());
 
     try (var client = newClient()) {
-      assertThatThrownBy(() -> client.markets().status()).isInstanceOf(ParseError.class);
+      assertThatThrownBy(() -> client.markets().status()).isInstanceOf(ParseException.class);
     }
   }
 
   @Test
-  void unknownStatusFieldProducesParseError() {
+  void unknownStatusFieldProducesParseException() {
     handler.setResponse(200, "{\"s\":\"weird\"}", List.of());
 
     try (var client = newClient()) {
       assertThatThrownBy(() -> client.markets().status())
-          .isInstanceOf(ParseError.class)
+          .isInstanceOf(ParseException.class)
           .hasMessageContaining("weird");
     }
   }
 
   @Test
-  void responseMissingArraysProducesParseError() {
+  void responseMissingArraysProducesParseException() {
     handler.setResponse(200, "{\"s\":\"ok\"}", List.of());
 
     try (var client = newClient()) {
       assertThatThrownBy(() -> client.markets().status())
-          .isInstanceOf(ParseError.class)
+          .isInstanceOf(ParseException.class)
           .hasMessageContaining("date");
     }
   }
 
   @Test
-  void mismatchedArraySizesProduceParseError() {
+  void mismatchedArraySizesProduceParseException() {
     handler.setResponse(
         200, "{\"s\":\"ok\",\"date\":[1706673600,1706760000],\"status\":[\"open\"]}", List.of());
 
     try (var client = newClient()) {
       assertThatThrownBy(() -> client.markets().status())
-          .isInstanceOf(ParseError.class)
+          .isInstanceOf(ParseException.class)
           .hasMessageContaining("different sizes");
     }
   }
@@ -326,8 +326,8 @@ class MarketsResourceTest {
 
     try (var client = newClient()) {
       assertThatThrownBy(() -> client.markets().status())
-          .isInstanceOf(AuthenticationError.class)
-          .satisfies(t -> assertThat(((AuthenticationError) t).getRequestId()).isNull());
+          .isInstanceOf(AuthenticationException.class)
+          .satisfies(t -> assertThat(((AuthenticationException) t).getRequestId()).isNull());
     }
   }
 
@@ -337,9 +337,10 @@ class MarketsResourceTest {
 
     try (var client = newClient()) {
       assertThatThrownBy(() -> client.markets().status())
-          .isInstanceOf(AuthenticationError.class)
+          .isInstanceOf(AuthenticationException.class)
           .satisfies(
-              t -> assertThat(((AuthenticationError) t).getRequestId()).isEqualTo("abc123-XYZ"));
+              t ->
+                  assertThat(((AuthenticationException) t).getRequestId()).isEqualTo("abc123-XYZ"));
     }
   }
 
@@ -347,14 +348,14 @@ class MarketsResourceTest {
 
   /**
    * The 99-second per-request timeout is fixed by SDK requirements §10. Forcing a real timeout in a
-   * test would block for ~99 s, which we don't want. Instead we exercise the {@link NetworkError}
-   * path by pointing the client at a port nothing is listening on (TCP RST → fast failure). This
-   * proves the transport surfaces transport-level failures as a typed exception rather than letting
-   * raw {@code IOException}s leak.
+   * test would block for ~99 s, which we don't want. Instead we exercise the {@link
+   * NetworkException} path by pointing the client at a port nothing is listening on (TCP RST → fast
+   * failure). This proves the transport surfaces transport-level failures as a typed exception
+   * rather than letting raw {@code IOException}s leak.
    */
   @ParameterizedTest
   @EnumSource(CallMode.class)
-  void connectionRefusedProducesNetworkError(CallMode mode) {
+  void connectionRefusedProducesNetworkException(CallMode mode) {
     try (var client =
         MarketDataClient.builder()
             .apiKey("test-key")
@@ -363,10 +364,10 @@ class MarketsResourceTest {
             .build()) {
 
       assertThatThrownBy(() -> mode.statusNoArgs(client.markets()))
-          .isInstanceOf(NetworkError.class)
+          .isInstanceOf(NetworkException.class)
           .satisfies(
               t -> {
-                NetworkError ne = (NetworkError) t;
+                NetworkException ne = (NetworkException) t;
                 assertThat(ne.getCause()).isNotNull();
                 assertThat(ne.getRequestUrl()).contains("127.0.0.1:1");
               });

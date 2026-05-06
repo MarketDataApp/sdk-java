@@ -7,9 +7,15 @@ import org.junit.jupiter.api.Test;
 
 class MarketDataClientTest {
 
+  // All tests use validateOnStartup(false): with the default (true), the
+  // client's constructor would call /user/ live, requiring a real token and
+  // network access. Validation behavior itself is exercised in
+  // UtilitiesResourceTest + MarketDataClientStartupValidationTest.
+
   @Test
   void buildsWithExplicitToken() {
-    try (var client = MarketDataClient.builder().apiKey("test-key").build()) {
+    try (var client =
+        MarketDataClient.builder().apiKey("test-key").validateOnStartup(false).build()) {
       assertThat(client.isDemoMode()).isFalse();
       assertThat(client.getBaseUrl()).isEqualTo(Configuration.DEFAULT_BASE_URL);
       assertThat(client.getApiVersion()).isEqualTo(Configuration.DEFAULT_API_VERSION);
@@ -18,14 +24,13 @@ class MarketDataClientTest {
 
   @Test
   void demoModeWhenNoTokenAvailable() {
-    // No apiKey set on the builder. Demo mode iff the env/dotenv
-    // cascade also yields nothing — true on any CI environment that
-    // doesn't export MARKETDATA_TOKEN. This assertion is conditional
-    // so the test stays valid in both cases.
-    try (var client = MarketDataClient.builder().build()) {
-      String envToken = System.getenv("MARKETDATA_TOKEN");
-      boolean expectDemo = envToken == null || envToken.isBlank();
-      assertThat(client.isDemoMode()).isEqualTo(expectDemo);
+    // No apiKey set on the builder. Demo mode iff the *full* cascade — env var AND .env file —
+    // yields no token. We ask Configuration directly for the truth instead of probing only
+    // System.getenv, otherwise a local .env with a token would silently desync this assertion.
+    try (var client = MarketDataClient.builder().validateOnStartup(false).build()) {
+      boolean cascadeHasToken =
+          Configuration.loadFromProcess().resolve(null, "MARKETDATA_TOKEN") != null;
+      assertThat(client.isDemoMode()).isEqualTo(!cascadeHasToken);
     }
   }
 
@@ -46,14 +51,14 @@ class MarketDataClientTest {
 
   @Test
   void userAgentMatchesSpec() {
-    try (var client = MarketDataClient.builder().apiKey("KEY").build()) {
+    try (var client = MarketDataClient.builder().apiKey("KEY").validateOnStartup(false).build()) {
       assertThat(client.getUserAgent()).startsWith("marketdata-sdk-java/");
     }
   }
 
   @Test
   void rateLimitsStartUnpopulated() {
-    try (var client = MarketDataClient.builder().apiKey("KEY").build()) {
+    try (var client = MarketDataClient.builder().apiKey("KEY").validateOnStartup(false).build()) {
       assertThat(client.getRateLimits()).isNull();
     }
   }
