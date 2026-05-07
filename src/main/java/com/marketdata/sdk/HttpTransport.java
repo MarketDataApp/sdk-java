@@ -19,7 +19,6 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicReference;
 import org.jspecify.annotations.Nullable;
 
@@ -54,7 +53,7 @@ final class HttpTransport implements AutoCloseable {
 
   private final HttpClient httpClient;
   private final ObjectMapper jsonMapper;
-  private final Semaphore concurrencyPermits;
+  private final AsyncSemaphore concurrencyPermits;
   private final AtomicReference<@Nullable RateLimits> latestRateLimits = new AtomicReference<>();
 
   private final String baseUrl;
@@ -63,18 +62,32 @@ final class HttpTransport implements AutoCloseable {
   private final @Nullable String token;
 
   HttpTransport(String baseUrl, String apiVersion, String userAgent, @Nullable String token) {
+    this(baseUrl, apiVersion, userAgent, token, defaultHttpClient());
+  }
+
+  // Package-private constructor used by tests to inject a stubbed HttpClient
+  // (e.g. one whose sendAsync throws synchronously, to verify permit release).
+  HttpTransport(
+      String baseUrl,
+      String apiVersion,
+      String userAgent,
+      @Nullable String token,
+      HttpClient httpClient) {
     this.baseUrl = baseUrl;
     this.apiVersion = apiVersion;
     this.userAgent = userAgent;
     this.token = token;
-    this.concurrencyPermits = new Semaphore(CONCURRENCY_LIMIT);
+    this.concurrencyPermits = new AsyncSemaphore(CONCURRENCY_LIMIT);
     this.jsonMapper = buildJsonMapper();
-    this.httpClient =
-        HttpClient.newBuilder()
-            .connectTimeout(CONNECT_TIMEOUT)
-            .version(HttpClient.Version.HTTP_2)
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .build();
+    this.httpClient = httpClient;
+  }
+
+  private static HttpClient defaultHttpClient() {
+    return HttpClient.newBuilder()
+        .connectTimeout(CONNECT_TIMEOUT)
+        .version(HttpClient.Version.HTTP_2)
+        .followRedirects(HttpClient.Redirect.NORMAL)
+        .build();
   }
 
   /** Latest client-level rate-limit snapshot, or {@code null} if no request has succeeded yet. */
@@ -94,19 +107,33 @@ final class HttpTransport implements AutoCloseable {
     URI uri = buildUri(spec);
     HttpRequest request = buildRequest(uri);
 
+    // ADR-007: acquire returns a CompletableFuture instead of parking the caller's thread.
+    // When permits are available the future is already completed (fast path) and thenCompose
+    // runs synchronously; when the pool is exhausted the future completes later, on the
+    // thread that calls release() — the caller's thread is never blocked here.
+    return concurrencyPermits.acquire().thenCompose(unused -> dispatch(uri, request, responseType));
+  }
+
+  private <T> CompletableFuture<T> dispatch(URI uri, HttpRequest request, Class<T> responseType) {
+    CompletableFuture<HttpResponse<byte[]>> sendFuture;
     try {
-      concurrencyPermits.acquire();
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
+      sendFuture = httpClient.sendAsync(request, BodyHandlers.ofByteArray());
+    } catch (Throwable t) {
+      // sendAsync threw synchronously (e.g. malformed request, internal NPE, OOM).
+      // The future never formed, so whenComplete will not fire — release the permit
+      // here to prevent a permanent leak that would degrade the pool to deadlock.
+      concurrencyPermits.release();
+      if (t instanceof Error err) {
+        throw err;
+      }
       return CompletableFuture.failedFuture(
           new NetworkError(
-              "Interrupted while waiting for a concurrency permit",
+              "Request to " + uri + " failed before dispatch: " + t.getMessage(),
               new ErrorContext(null, uri.toString(), null),
-              e));
+              t));
     }
 
-    return httpClient
-        .sendAsync(request, BodyHandlers.ofByteArray())
+    return sendFuture
         .whenComplete((r, t) -> concurrencyPermits.release())
         .handle(
             (response, error) -> {
