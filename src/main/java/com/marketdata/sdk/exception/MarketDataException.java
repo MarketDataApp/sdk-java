@@ -8,9 +8,9 @@ import org.jspecify.annotations.Nullable;
 /**
  * Root of the SDK exception hierarchy.
  *
- * <p>Sealed (ADR-002) so consumer {@code switch} statements over its subtypes are compile-time
- * exhaustive. Every instance carries the support context fields required by SDK requirements §6.2
- * and exposes a {@link #getSupportInfo()} string per §6.3.
+ * <p>Sealed so consumer {@code switch} statements over its subtypes are compile-time exhaustive.
+ * Every instance carries the support context fields required by SDK requirements §6.2 and exposes a
+ * {@link #getSupportInfo()} string per §6.3.
  *
  * <p>Subtypes use {@link ErrorContext#empty()} for client-side validation errors that occur before
  * any HTTP request is dispatched.

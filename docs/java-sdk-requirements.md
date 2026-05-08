@@ -118,9 +118,12 @@ The README and per-method docs must include at least one Kotlin usage
 example alongside the Java example for the quick-start path:
 
 ```kotlin
-val client = MarketDataClient.builder()
-    .apiKey("KEY")
-    .build()
+val client = MarketDataClient(
+    apiKey = "KEY",
+    baseUrl = null,
+    apiVersion = null,
+    validateOnStartup = true,
+)
 
 val quote = client.stocks().quote("AAPL")
 println(quote)
