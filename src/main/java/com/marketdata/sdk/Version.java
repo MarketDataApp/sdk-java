@@ -1,4 +1,4 @@
-package com.marketdata.sdk.internal;
+package com.marketdata.sdk;
 
 /**
  * Reads the SDK's version from the JAR manifest's {@code Implementation-Version} attribute (SDK
@@ -7,7 +7,7 @@ package com.marketdata.sdk.internal;
  * <p>Falls back to {@code "0.0.0-dev"} when the class is not loaded from a JAR (e.g. running tests
  * from class files).
  */
-public final class Version {
+final class Version {
 
   private static final String FALLBACK = "0.0.0-dev";
 

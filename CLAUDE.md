@@ -20,7 +20,7 @@ The repo follows a strict **ADR-first** workflow:
 
 When asked to make architectural changes, prefer updating an existing ADR or proposing a new one (status `Proposed`) over silently editing requirements.
 
-## Locked-in tech stack (ADRs 001–006, all Accepted)
+## Locked-in tech stack (ADRs 001–007, all Accepted)
 
 These decisions are not up for debate without amending the corresponding ADR:
 
@@ -31,6 +31,7 @@ These decisions are not up for debate without amending the corresponding ADR:
 - **`java.net.http.HttpClient` exclusively.** No third-party HTTP client (OkHttp, Apache) as a runtime dep — ever. HTTP/2 on (default). One shared `HttpClient` per `MarketDataClient`. Timeouts: 99s request, 2s connect. (ADR-004)
 - **Jackson (`jackson-databind`) for JSON.** Records-based response models (Jackson record support, 2.12+). The API's parallel-arrays wire format (e.g. `{"s":"ok","symbol":["AAPL","MSFT"],"price":[150.0,400.0]}`) is decoded via custom `JsonDeserializer` classes, *not* default reflection. Jackson is **not shaded** in v1; shading is held in reserve. (ADR-005)
 - **Sync + async parity per endpoint.** Every public endpoint exposes both `quote(...)` and `quoteAsync(...)`; async returns `CompletableFuture<T>`. **Internal logic is async-first.** Sync methods are thin wrappers that call `.join()` and unwrap `CompletionException` to surface the underlying cause directly. Both surfaces share validation, retry, rate-limit, and concurrency-pool logic — no parallel implementations. Tests must cover both variants for every endpoint. (ADR-006)
+- **Single-package internals.** Every infra and resource-façade class lives in `com.marketdata.sdk` (the root). The "internal" boundary is enforced by Java's package-private visibility — types not meant for consumers (`Configuration`, `EnvVars`, `Tokens`, `Version`, and the future `HttpTransport`, `RequestSpec`, `AsyncSemaphore`, etc.) drop the `public` modifier so the consumer's compiler simply cannot reference them. Resource façades (`MarketsResource`, etc.) stay `public final class` but with package-private constructors. Response DTOs and exceptions stay in their public subpackages (`com.marketdata.sdk.markets`, `com.marketdata.sdk.exception`); response records do not carry `@JsonDeserialize` annotations — wire-format deserializers register programmatically via a package-private Jackson `SimpleModule` on `HttpTransport`'s `ObjectMapper`. (ADR-007)
 
 ## Kotlin-interop rules for the public API
 
@@ -61,8 +62,8 @@ The Java SDK must also satisfy the canonical, cross-language [SDK Requirements](
 
 **Already wired in:**
 - §1.1 client object — `MarketDataClient` with two public constructors: a no-arg one for production (everything from the cascade) and a 4-arg `(apiKey, baseUrl, apiVersion, validateOnStartup)` for tests and short-lived runtimes. All fields `final` (immutable). Default base URL `https://api.marketdata.app`, default API version `v1`, single shared `HttpClient`, `User-Agent: marketdata-sdk-java/{version}` (version auto-detected from JAR manifest), `close()` for resource release, `getRateLimits()` accessor.
-- §4 configuration cascade — `Configuration.resolve(...)` does explicit → `MARKETDATA_*` env var → `.env` in CWD → default. Env var names live in `internal.EnvVars`. The 4-arg constructor's parameters feed step 1; the no-arg constructor skips it and starts at step 2.
-- §5 demo mode + `validateOnStartup` parameter on the 4-arg constructor (defaults to `true` via the no-arg constructor); token redaction via `internal.Tokens.redact` (matches the spec example `***…***YKT0`).
+- §4 configuration cascade — `Configuration.resolve(...)` does explicit → `MARKETDATA_*` env var → `.env` in CWD → default. Env var names live in `EnvVars` (package-private, in the SDK root package). The 4-arg constructor's parameters feed step 1; the no-arg constructor skips it and starts at step 2.
+- §5 demo mode + `validateOnStartup` parameter on the 4-arg constructor (defaults to `true` via the no-arg constructor); token redaction via `Tokens.redact` (matches the spec example `***…***YKT0`).
 - §6 sealed `MarketDataException` hierarchy with the 7 canonical subtypes and full support context (`requestId`, `requestUrl`, `statusCode`, `timestamp`, `exceptionType`) + `getSupportInfo()`.
 - §10 timeouts: `REQUEST_TIMEOUT = 99s` and `CONNECT_TIMEOUT = 2s` exposed as constants on `MarketDataClient`. Connect timeout is wired into the `HttpClient`; the per-request 99 s timeout is a constant ready to be applied to `HttpRequest.Builder#timeout` when the request layer lands.
 - §12 concurrency: `Semaphore(50)` field on `MarketDataClient` (wiring of acquire/release lands with the request layer).

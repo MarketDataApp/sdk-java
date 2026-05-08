@@ -1,9 +1,5 @@
 package com.marketdata.sdk;
 
-import com.marketdata.sdk.internal.Configuration;
-import com.marketdata.sdk.internal.EnvVars;
-import com.marketdata.sdk.internal.Tokens;
-import com.marketdata.sdk.internal.Version;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.concurrent.Semaphore;

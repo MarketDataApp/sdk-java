@@ -125,9 +125,10 @@ MARKETDATA_RUN_INTEGRATION_TESTS=true ./gradlew integrationTest
 ## Package layout
 
 ```
-com.marketdata.sdk             # MarketDataClient, RateLimits (public surface)
+com.marketdata.sdk             # MarketDataClient + RateLimits (public);
+                               # Configuration, EnvVars, Tokens, Version
+                               # are package-private and not part of the API
 com.marketdata.sdk.exception   # Sealed MarketDataException hierarchy + ErrorContext
-com.marketdata.sdk.internal    # Tokens, EnvVars, Configuration, Version (do not depend on)
 ```
 
 Every public package is `@NullMarked` (JSpecify): non-null is the default;

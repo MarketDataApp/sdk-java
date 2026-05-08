@@ -1,4 +1,4 @@
-package com.marketdata.sdk.internal;
+package com.marketdata.sdk;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -12,13 +12,13 @@ import org.jspecify.annotations.Nullable;
  * Resolves SDK configuration values per the cascade in SDK requirements §4: {@code explicit value →
  * MARKETDATA_* env var → .env file in CWD → built-in default}.
  *
- * <p>The only public construction path is {@link #loadFromProcess()}, which snapshots the live
+ * <p>The single canonical construction path is {@link #loadFromProcess()}, which snapshots the live
  * environment and the {@code .env} file once. The constructor is strictly private — there is no
  * production-callable backdoor for injecting arbitrary maps. Tests reach the private constructor
  * via reflection (see {@code ConfigurationTest}); this is by design so a developer can't
  * accidentally take a shortcut around the canonical load path.
  */
-public final class Configuration {
+final class Configuration {
 
   public static final String DEFAULT_BASE_URL = "https://api.marketdata.app";
   public static final String DEFAULT_API_VERSION = "v1";
