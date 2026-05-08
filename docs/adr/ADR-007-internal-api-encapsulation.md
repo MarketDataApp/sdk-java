@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed.
+Accepted.
 
 ## Context
 
@@ -277,30 +277,11 @@ escape hatch — but it should be a deliberate choice, not a default.
 
 ## Decision
 
-*Pending team review.*
+**Option B — Single-package infra.** Every infra and resource façade class moves into `com.marketdata.sdk` and drops the `public` modifier so it becomes package-private; the compiler then refuses any consumer reference to `HttpTransport`, `RequestSpec`, `AsyncSemaphore`, the wire-format deserializers, or any other internal type. B was chosen over A (JPMS) because the threat model includes classpath consumers — still the majority in 2026 — and JPMS enforcement degrades to a soft IDE warning on classpath, while Option B's enforcement is identical at the language level for both consumer modes.
 
 ## Consequences
 
-Follow-on work implied by each option. The chosen option will be
-marked when the decision is made.
-
-- **A (JPMS, recommended):** Add `src/main/java/module-info.java` with
-  the exports listed in the option above. Add `requires` clauses for
-  Jackson and JSpecify (`requires static org.jspecify` for compile-time
-  only). Update CLAUDE.md to record the modulepath/classpath
-  enforcement contract. No source moves, no refactor of resource code.
-  Tests continue to access internals via Gradle's standard test source
-  set wiring. Verify that `./gradlew build` still succeeds end-to-end
-  and that `javadoc` no longer surfaces `internal.*` packages.
-
-- **B (single-package infra):** Move every infra and resource façade
-  class to `com.marketdata.sdk`; drop `public` from every type that
-  was internal. Refactor `@JsonDeserialize` annotations off response
-  records and into a programmatic `SimpleModule` registered on
-  `HttpTransport`'s `ObjectMapper`. Update every test that imports
-  formerly-internal types to the new package. Update CLAUDE.md to
-  describe the single-package convention and the package-private
-  default for non-DTO classes.
+Move every infra and resource façade class to `com.marketdata.sdk`, drop `public` from every type that was internal, refactor `@JsonDeserialize` annotations off response records into a programmatic `SimpleModule` registered on `HttpTransport`'s `ObjectMapper` (response records become data-only, decoupled from wire-format logic), and migrate every test that imports formerly-internal types to the new package — tests for package-private types must live in the matching test package. README's package-layout section needs to reflect the new tree.
 
 ## References
 
