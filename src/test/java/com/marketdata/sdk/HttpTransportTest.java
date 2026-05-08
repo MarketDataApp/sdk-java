@@ -61,6 +61,38 @@ class HttpTransportTest {
     assertThat(permits.availablePermits()).isEqualTo(initial);
   }
 
+  /**
+   * Errors thrown synchronously by {@link HttpClient#sendAsync} (e.g. {@code OutOfMemoryError})
+   * must surface with their original type preserved — wrapping a JVM-level {@link Error} in a
+   * {@link com.marketdata.sdk.exception.NetworkError} would mask the real cause and produce a
+   * misleading "network failure" for what is actually a runtime crash. Covers the {@code if (t
+   * instanceof Error err) throw err;} branch in {@code dispatch}; the {@link
+   * java.util.concurrent.CompletableFuture#thenCompose} machinery catches the rethrown Error and
+   * exposes it as the future's root cause rather than letting it propagate synchronously.
+   */
+  @Test
+  void errorThrownSynchronouslyIsPreservedAsRootCause() throws Exception {
+    HttpTransport transport =
+        new HttpTransport(
+            "http://localhost", "v1", "test/0.0", null, new ErrorThrowingHttpClient());
+
+    AsyncSemaphore permits = readSemaphore(transport);
+    int initial = permits.availablePermits();
+
+    CompletableFuture<Object> f =
+        transport.executeAsync(RequestSpec.get("ping").build(), Object.class);
+
+    assertThat(f).isCompletedExceptionally();
+    assertThatThrownBy(f::join)
+        .isInstanceOf(CompletionException.class)
+        .hasRootCauseInstanceOf(OutOfMemoryError.class)
+        .hasRootCauseMessage("simulated synchronous Error from sendAsync");
+
+    // Permit released even though the catch took the Error branch — a leak here would
+    // accumulate over a long-lived process and eventually deadlock the pool.
+    assertThat(permits.availablePermits()).isEqualTo(initial);
+  }
+
   private static AsyncSemaphore readSemaphore(HttpTransport t) throws Exception {
     Field f = HttpTransport.class.getDeclaredField("concurrencyPermits");
     f.setAccessible(true);
@@ -77,6 +109,80 @@ class HttpTransportTest {
     public <T> CompletableFuture<HttpResponse<T>> sendAsync(
         HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler) {
       throw new IllegalArgumentException("simulated synchronous throw from sendAsync");
+    }
+
+    @Override
+    public Optional<CookieHandler> cookieHandler() {
+      return Optional.empty();
+    }
+
+    @Override
+    public Optional<Duration> connectTimeout() {
+      return Optional.empty();
+    }
+
+    @Override
+    public Redirect followRedirects() {
+      return Redirect.NEVER;
+    }
+
+    @Override
+    public Optional<ProxySelector> proxy() {
+      return Optional.empty();
+    }
+
+    @Override
+    public SSLContext sslContext() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public SSLParameters sslParameters() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Optional<Authenticator> authenticator() {
+      return Optional.empty();
+    }
+
+    @Override
+    public Version version() {
+      return Version.HTTP_1_1;
+    }
+
+    @Override
+    public Optional<Executor> executor() {
+      return Optional.empty();
+    }
+
+    @Override
+    public <T> HttpResponse<T> send(
+        HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler)
+        throws IOException, InterruptedException {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public <T> CompletableFuture<HttpResponse<T>> sendAsync(
+        HttpRequest request,
+        HttpResponse.BodyHandler<T> responseBodyHandler,
+        HttpResponse.PushPromiseHandler<T> pushPromiseHandler) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public WebSocket.Builder newWebSocketBuilder() {
+      throw new UnsupportedOperationException();
+    }
+  }
+
+  /** Same skeleton as {@link SyncThrowingHttpClient} but throws an {@link Error} (OOM-shaped). */
+  private static final class ErrorThrowingHttpClient extends HttpClient {
+    @Override
+    public <T> CompletableFuture<HttpResponse<T>> sendAsync(
+        HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler) {
+      throw new OutOfMemoryError("simulated synchronous Error from sendAsync");
     }
 
     @Override

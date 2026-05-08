@@ -2,6 +2,12 @@ package com.marketdata.sdk;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import org.junit.jupiter.api.Test;
 
 class MarketDataClientTest {
@@ -17,15 +23,66 @@ class MarketDataClientTest {
 
   @Test
   void demoModeWhenNoTokenAvailable() {
-    // No apiKey passed to the constructor. Demo mode iff the env/dotenv
-    // cascade also yields nothing — true on any CI environment that
-    // doesn't export MARKETDATA_TOKEN. This assertion is conditional
-    // so the test stays valid in both cases.
+    // Demo mode iff the full cascade (env var → .env → null) yields nothing. Deriving the
+    // expectation from the same Configuration helper the constructor uses keeps the test
+    // valid both on CI (no token anywhere → demoMode) and locally (.env-supplied token →
+    // not demoMode); a plain `System.getenv` check would miss the .env source and break
+    // locally.
     try (var client = new MarketDataClient()) {
-      String envToken = System.getenv("MARKETDATA_TOKEN");
-      boolean expectDemo = envToken == null || envToken.isBlank();
+      boolean expectDemo = Configuration.loadFromProcess().resolve(null, EnvVars.TOKEN) == null;
       assertThat(client.isDemoMode()).isEqualTo(expectDemo);
     }
+  }
+
+  @Test
+  void fineLevelLoggingEmitsRedactedToken() {
+    // The constructor logs the redacted token at FINE only. With the default logger
+    // configuration (INFO), `LOG.isLoggable(FINE)` returns false and the line is dead from
+    // JaCoCo's perspective. This test installs a capturing handler at FINE and asserts the
+    // redacted token shows up — the unredacted token must not.
+    Logger logger = Logger.getLogger(MarketDataClient.class.getName());
+    Level previousLevel = logger.getLevel();
+    boolean previousUseParent = logger.getUseParentHandlers();
+    CapturingHandler capture = new CapturingHandler();
+    logger.addHandler(capture);
+    logger.setLevel(Level.FINE);
+    logger.setUseParentHandlers(false);
+
+    try (var client = new MarketDataClient("supersecret-token-VALUE-YKT0", null, null, false)) {
+      assertThat(client.isDemoMode()).isFalse();
+    } finally {
+      logger.removeHandler(capture);
+      logger.setLevel(previousLevel);
+      logger.setUseParentHandlers(previousUseParent);
+    }
+
+    assertThat(capture.records)
+        .anySatisfy(
+            r -> {
+              assertThat(r.getLevel()).isEqualTo(Level.FINE);
+              assertThat(r.getMessage()).contains("Token");
+            });
+    // Whatever was logged at FINE, the raw token must never appear in any record.
+    for (LogRecord r : capture.records) {
+      assertThat(r.getMessage() == null ? "" : r.getMessage())
+          .doesNotContain("supersecret-token-VALUE-YKT0");
+    }
+  }
+
+  /** Minimal {@link Handler} that buffers everything in memory for assertions. */
+  private static final class CapturingHandler extends Handler {
+    final List<LogRecord> records = new ArrayList<>();
+
+    @Override
+    public void publish(LogRecord record) {
+      records.add(record);
+    }
+
+    @Override
+    public void flush() {}
+
+    @Override
+    public void close() {}
   }
 
   @Test

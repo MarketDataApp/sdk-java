@@ -131,6 +131,29 @@ class ConfigurationTest {
   }
 
   @Test
+  void mismatchedQuotesArePreservedVerbatim(@TempDir Path tmp) throws IOException {
+    // stripQuotes only strips when the first AND last characters match (both " or both ').
+    // Lines with mixed or unbalanced quotes must keep the value as-is. Covers the right-hand
+    // false branches of the `||` in (first == '"' && last == '"') || (first == '\'' && last ==
+    // '\'').
+    Path dotenv = tmp.resolve(".env");
+    Files.writeString(
+        dotenv,
+        """
+        UNCLOSED_DOUBLE="abc
+        UNCLOSED_SINGLE='abc
+        MIXED_QUOTES="abc'
+        """);
+
+    Map<String, String> parsed = Configuration.readDotEnvFile(dotenv);
+
+    assertThat(parsed)
+        .containsEntry("UNCLOSED_DOUBLE", "\"abc")
+        .containsEntry("UNCLOSED_SINGLE", "'abc")
+        .containsEntry("MIXED_QUOTES", "\"abc'");
+  }
+
+  @Test
   void dotEnvParsingIntegratesWithCascade(@TempDir Path tmp) throws IOException {
     Path dotenv = tmp.resolve(".env");
     Files.writeString(dotenv, "MARKETDATA_TOKEN=from-real-dotenv\n");

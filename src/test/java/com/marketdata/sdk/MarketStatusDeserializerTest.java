@@ -85,4 +85,20 @@ class MarketStatusDeserializerTest {
         .isInstanceOf(JsonMappingException.class)
         .hasMessageContaining("expected 'date' and 'status' arrays");
   }
+
+  @Test
+  void rejectsResponseWhereDateIsArrayButStatusIsMissing() {
+    // Covers the right-hand branch of the `||` in `!dates.isArray() || !statuses.isArray()`:
+    // dates is a valid array, but statuses is absent. Without this test, the short-circuit
+    // means the second condition is only ever evaluated when the first is false and matches.
+    String json =
+        """
+        { "s": "ok",
+          "date": [1706673600] }
+        """;
+
+    assertThatThrownBy(() -> mapper.readValue(json, MarketStatus.class))
+        .isInstanceOf(JsonMappingException.class)
+        .hasMessageContaining("expected 'date' and 'status' arrays");
+  }
 }
