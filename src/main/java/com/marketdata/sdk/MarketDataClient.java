@@ -16,8 +16,8 @@ import org.jspecify.annotations.Nullable;
  * Entry point to the Market Data Java SDK.
  *
  * <p>One {@code MarketDataClient} per application. Holds a single shared {@link HttpClient}
- * (HTTP/2, 2 s connect timeout) for connection pooling (ADR-004) and a 50-permit semaphore that
- * gates the global concurrency pool required by SDK requirements §12.
+ * (HTTP/2, 2 s connect timeout) for connection pooling and a 50-permit semaphore that gates the
+ * global concurrency pool required by SDK requirements §12.
  *
  * <p>Two constructors:
  *
@@ -151,9 +151,9 @@ public final class MarketDataClient implements AutoCloseable {
   @Override
   public void close() {
     // java.net.http.HttpClient gained explicit close() in JDK 21.
-    // While the minimum target is JDK 17 (ADR-002), this method is a
-    // no-op: the JVM releases the executor and connection pool on
-    // process exit. Revisit if/when the minimum bumps to 21+.
+    // While the minimum target is JDK 17, this method is a no-op:
+    // the JVM releases the executor and connection pool on process
+    // exit. Revisit if/when the minimum bumps to 21+.
   }
 
   private static String trimTrailingSlash(String url) {
