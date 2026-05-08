@@ -32,7 +32,7 @@ common path is two lines (per SDK requirements §"Easy Default Requests"):
 ### Java
 
 ```java
-try (var client = MarketDataClient.builder().build()) {
+try (var client = new MarketDataClient()) {
     // endpoint methods land in subsequent iterations
 }
 ```
@@ -40,7 +40,7 @@ try (var client = MarketDataClient.builder().build()) {
 ### Kotlin
 
 ```kotlin
-MarketDataClient.builder().build().use { client ->
+MarketDataClient().use { client ->
     // endpoint methods land in subsequent iterations
 }
 ```
@@ -50,7 +50,9 @@ MarketDataClient.builder().build().use { client ->
 Values are resolved through this cascade (highest priority first), per
 SDK requirements §4:
 
-1. Explicit builder methods — `apiKey(...)`, `baseUrl(...)`, `apiVersion(...)`
+1. Explicit constructor parameters — `apiKey`, `baseUrl`, `apiVersion`
+   (passed to `new MarketDataClient(apiKey, baseUrl, apiVersion, validateOnStartup)`;
+   the no-arg `new MarketDataClient()` skips this step and starts at #2)
 2. Environment variables (table below)
 3. `.env` file in the current working directory
 4. Built-in defaults

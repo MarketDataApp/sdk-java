@@ -19,10 +19,19 @@ import org.jspecify.annotations.Nullable;
  * (HTTP/2, 2 s connect timeout) for connection pooling (ADR-004) and a 50-permit semaphore that
  * gates the global concurrency pool required by SDK requirements §12.
  *
- * <p>Construction follows the configuration cascade in §4: explicit builder values → {@code
- * MARKETDATA_*} environment variables → values in a {@code .env} file in the working directory →
- * built-in defaults. Pass no token to enter <em>demo mode</em> (authenticated endpoints will fail;
- * the {@code Authorization} header is omitted).
+ * <p>Two constructors:
+ *
+ * <ul>
+ *   <li>{@link #MarketDataClient()} — production path. Resolves everything from the cascade in §4
+ *       ({@code MARKETDATA_*} environment variable → value in a {@code .env} file → built-in
+ *       default). With no token in the cascade, enters <em>demo mode</em> — authenticated endpoints
+ *       will fail and the {@code Authorization} header is omitted.
+ *   <li>{@link #MarketDataClient(String, String, String, boolean)} — explicit-control path for
+ *       tests and short-lived runtimes. Each parameter may still be {@code null} to defer to the
+ *       cascade for that single value.
+ * </ul>
+ *
+ * <p>Instances are immutable: every field is {@code final} and assigned in the constructor.
  */
 public final class MarketDataClient implements AutoCloseable {
 
@@ -48,18 +57,46 @@ public final class MarketDataClient implements AutoCloseable {
   private final boolean demoMode;
   private final boolean validateOnStartup;
 
-  private MarketDataClient(Builder builder) {
+  /**
+   * Production constructor. Resolves all settings from the configuration cascade in SDK
+   * requirements §4 (env var → {@code .env} → built-in default) and enables startup validation.
+   *
+   * <p>Equivalent to {@link #MarketDataClient(String, String, String, boolean) new
+   * MarketDataClient(null, null, null, true)}.
+   */
+  public MarketDataClient() {
+    this(null, null, null, true);
+  }
+
+  /**
+   * Explicit-control constructor for tests and short-lived runtimes. Each of {@code apiKey}, {@code
+   * baseUrl}, and {@code apiVersion} may be {@code null} to defer to the cascade in §4 for that
+   * single value.
+   *
+   * @param apiKey explicit API token, or {@code null} to resolve from {@code MARKETDATA_TOKEN} →
+   *     {@code .env} → demo mode
+   * @param baseUrl override the API base URL, or {@code null} to resolve to {@link
+   *     Configuration#DEFAULT_BASE_URL}
+   * @param apiVersion override the API version segment, or {@code null} to resolve to {@link
+   *     Configuration#DEFAULT_API_VERSION}
+   * @param validateOnStartup whether to validate the token on construction by calling {@code
+   *     /user/} (SDK requirements §5). Pass {@code false} for short-lived runtimes where the
+   *     startup hit is undesirable.
+   */
+  public MarketDataClient(
+      @Nullable String apiKey,
+      @Nullable String baseUrl,
+      @Nullable String apiVersion,
+      boolean validateOnStartup) {
     Configuration config = Configuration.loadFromProcess();
-    this.token = config.resolve(builder.apiKey, EnvVars.TOKEN);
+    this.token = config.resolve(apiKey, EnvVars.TOKEN);
     this.baseUrl =
         trimTrailingSlash(
-            config.resolveOrDefault(
-                builder.baseUrl, EnvVars.BASE_URL, Configuration.DEFAULT_BASE_URL));
+            config.resolveOrDefault(baseUrl, EnvVars.BASE_URL, Configuration.DEFAULT_BASE_URL));
     this.apiVersion =
-        config.resolveOrDefault(
-            builder.apiVersion, EnvVars.API_VERSION, Configuration.DEFAULT_API_VERSION);
+        config.resolveOrDefault(apiVersion, EnvVars.API_VERSION, Configuration.DEFAULT_API_VERSION);
     this.demoMode = this.token == null;
-    this.validateOnStartup = builder.validateOnStartup;
+    this.validateOnStartup = validateOnStartup;
     this.userAgent = "marketdata-sdk-java/" + Version.current();
 
     this.httpClient =
@@ -73,21 +110,17 @@ public final class MarketDataClient implements AutoCloseable {
     LOG.log(
         Level.INFO,
         "Initialized Market Data SDK {0} (baseUrl={1}, apiVersion={2}, demoMode={3})",
-        new Object[] {Version.current(), baseUrl, apiVersion, demoMode});
-    if (demoMode) {
+        new Object[] {Version.current(), this.baseUrl, this.apiVersion, this.demoMode});
+    if (this.demoMode) {
       LOG.warning(
           "No API token provided — running in demo mode. Authenticated endpoints will"
               + " fail; rate-limit initialization is skipped.");
     } else if (LOG.isLoggable(Level.FINE)) {
-      LOG.log(Level.FINE, "Token: {0}", Tokens.redact(token));
+      LOG.log(Level.FINE, "Token: {0}", Tokens.redact(this.token));
     }
 
     // SDK requirements §5: validate on startup by default. The actual
     // /user/ call lands with the request layer; this flag is the seam.
-  }
-
-  public static Builder builder() {
-    return new Builder();
   }
 
   public String getBaseUrl() {
@@ -125,46 +158,5 @@ public final class MarketDataClient implements AutoCloseable {
 
   private static String trimTrailingSlash(String url) {
     return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
-  }
-
-  public static final class Builder {
-    private @Nullable String apiKey;
-    private @Nullable String baseUrl;
-    private @Nullable String apiVersion;
-    private boolean validateOnStartup = true;
-
-    private Builder() {}
-
-    /** Override the API token; otherwise resolved from {@code MARKETDATA_TOKEN} or {@code .env}. */
-    public Builder apiKey(String apiKey) {
-      this.apiKey = apiKey;
-      return this;
-    }
-
-    /** Override the base URL (default {@value Configuration#DEFAULT_BASE_URL}). */
-    public Builder baseUrl(String baseUrl) {
-      this.baseUrl = baseUrl;
-      return this;
-    }
-
-    /** Override the API version (default {@value Configuration#DEFAULT_API_VERSION}). */
-    public Builder apiVersion(String apiVersion) {
-      this.apiVersion = apiVersion;
-      return this;
-    }
-
-    /**
-     * Whether to validate the token at construction by calling {@code /user/} (SDK requirements
-     * §5). Defaults to {@code true}. Disable for short-lived runtimes where the startup hit is
-     * undesirable.
-     */
-    public Builder validateOnStartup(boolean validateOnStartup) {
-      this.validateOnStartup = validateOnStartup;
-      return this;
-    }
-
-    public MarketDataClient build() {
-      return new MarketDataClient(this);
-    }
   }
 }
