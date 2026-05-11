@@ -1,4 +1,4 @@
-package com.marketdata.sdk.internal;
+package com.marketdata.sdk;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

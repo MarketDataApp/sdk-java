@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Project scaffold per ADRs 001–006: Gradle Kotlin DSL build, JDK 17 toolchain,
+- Project scaffold per ADRs 001–007: Gradle Kotlin DSL build, JDK 17 toolchain,
   `integrationTest` source set, Spotless + JaCoCo, Vanniktech Maven Publish.
 - `MarketDataClient` skeleton with two public constructors — a no-arg one
   for production (everything resolved from the cascade) and a 4-arg one
@@ -27,6 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `RateLimits` record exposed via `MarketDataClient.getRateLimits()`.
 - JSpecify `@NullMarked` on every public package; JSpecify on `compileOnlyApi`
   so consumers get the annotations at compile time without a runtime dep.
-- Token redaction utility (`internal.Tokens`) for log output.
+- Token redaction utility (`Tokens`, package-private in the SDK root) for
+  log output.
 - MIT license; SDK version auto-detected from the JAR manifest
   (`Implementation-Version`).
+- Single-package architecture per ADR-007: every infra class
+  (`Configuration`, `EnvVars`, `Tokens`, `Version`) lives in
+  `com.marketdata.sdk` as package-private. The `internal/` subpackage
+  was removed; the consumer's compiler cannot reference these types,
+  closing the "internal type leaks via constructor signature" gap that
+  every non-modular Java SDK has.

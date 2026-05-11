@@ -2,7 +2,6 @@ package com.marketdata.sdk;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.marketdata.sdk.internal.Configuration;
 import org.junit.jupiter.api.Test;
 
 class MarketDataClientTest {

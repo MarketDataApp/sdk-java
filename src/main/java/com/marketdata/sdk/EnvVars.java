@@ -1,10 +1,10 @@
-package com.marketdata.sdk.internal;
+package com.marketdata.sdk;
 
 /**
  * Names of the {@code MARKETDATA_*} environment variables consulted by the SDK. Mirrors SDK
  * requirements §4.
  */
-public final class EnvVars {
+final class EnvVars {
 
   public static final String TOKEN = "MARKETDATA_TOKEN";
   public static final String BASE_URL = "MARKETDATA_BASE_URL";

@@ -1,4 +1,4 @@
-package com.marketdata.sdk.internal;
+package com.marketdata.sdk;
 
 import org.jspecify.annotations.Nullable;
 
@@ -6,7 +6,7 @@ import org.jspecify.annotations.Nullable;
  * Token redaction helpers. SDK requirements §5 / §16: API tokens must never appear in log output
  * verbatim.
  */
-public final class Tokens {
+final class Tokens {
 
   /**
    * Minimum number of asterisks emitted before the trailing 4 chars, matching the SDK requirements
