@@ -315,6 +315,45 @@ class MarketsResourceTest {
     }
   }
 
+  /**
+   * Regression for Issue #4: a successful request that arrives without rate-limit headers must not
+   * clobber the previously-cached snapshot. The API's rate-limit middleware can silently swallow
+   * its own errors and serve the response without headers; if we overwrote the snapshot with {@code
+   * null} on each such response, the user-visible {@code getRateLimits()} would flicker between
+   * populated and {@code null} across consecutive successful calls. Spec §8 mandates " update
+   * client-level snapshot" — implicitly only when there's something to update.
+   */
+  @Test
+  void successWithoutHeadersDoesNotClobberPreviousSnapshot() {
+    handler.setResponse(
+        200,
+        "{\"s\":\"ok\",\"date\":[1706673600],\"status\":[\"open\"]}",
+        List.of(
+            new String[] {"x-api-ratelimit-limit", "50000"},
+            new String[] {"x-api-ratelimit-remaining", "49000"},
+            new String[] {"x-api-ratelimit-reset", "1735689600"},
+            new String[] {"x-api-ratelimit-consumed", "1000"}));
+
+    try (var client = newClient()) {
+      client.markets().status();
+      RateLimits before = client.getRateLimits();
+      assertThat(before).isNotNull();
+      assertThat(before.remaining()).isEqualTo(49000L);
+
+      // Same client, second successful call — but the server didn't include rate-limit headers
+      // this time (e.g. middleware glitch on the API side).
+      handler.setResponse(
+          200, "{\"s\":\"ok\",\"date\":[1706760000],\"status\":[\"closed\"]}", List.of());
+      client.markets().status();
+
+      RateLimits after = client.getRateLimits();
+      assertThat(after)
+          .as("snapshot must retain the last known rate-limit data, not reset to null")
+          .isNotNull();
+      assertThat(after.remaining()).isEqualTo(49000L);
+    }
+  }
+
   @Test
   void errorResponseWithoutCfRayProducesNullRequestId() {
     handler.setResponse(401, "{}", List.of());
@@ -349,9 +388,20 @@ class MarketsResourceTest {
    */
   @ParameterizedTest
   @EnumSource(CallMode.class)
-  void connectionRefusedProducesNetworkError(CallMode mode) {
-    // port 1 is privileged and rejects fast.
-    try (var client = new MarketDataClient("test-key", "http://127.0.0.1:1", null, false)) {
+  void connectionRefusedProducesNetworkError(CallMode mode) throws IOException {
+    // Bind to an ephemeral port and immediately close — the OS guarantees that connecting to a
+    // recently-closed local port produces a fast RST (Linux/macOS) or ConnectException (Windows)
+    // rather than the long timeouts some hardened sandboxes serve on the historically-privileged
+    // port 1. The narrow window where another process could grab the port before our connect
+    // attempt is theoretical on CI.
+    int closedPort;
+    try (java.net.ServerSocket probe =
+        new java.net.ServerSocket(0, 0, java.net.InetAddress.getByName("127.0.0.1"))) {
+      closedPort = probe.getLocalPort();
+    }
+
+    try (var client =
+        new MarketDataClient("test-key", "http://127.0.0.1:" + closedPort, null, false)) {
 
       assertThatThrownBy(() -> mode.statusNoArgs(client.markets()))
           .isInstanceOf(NetworkError.class)
@@ -359,7 +409,7 @@ class MarketsResourceTest {
               t -> {
                 NetworkError ne = (NetworkError) t;
                 assertThat(ne.getCause()).isNotNull();
-                assertThat(ne.getRequestUrl()).contains("127.0.0.1:1");
+                assertThat(ne.getRequestUrl()).contains("127.0.0.1:" + closedPort);
               });
     }
   }

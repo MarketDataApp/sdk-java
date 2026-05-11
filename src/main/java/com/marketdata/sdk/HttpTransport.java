@@ -17,6 +17,7 @@ import java.net.http.HttpResponse.BodyHandlers;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicReference;
@@ -90,7 +91,12 @@ final class HttpTransport implements AutoCloseable {
         .build();
   }
 
-  /** Latest client-level rate-limit snapshot, or {@code null} if no request has succeeded yet. */
+  /**
+   * Latest client-level rate-limit snapshot, or {@code null} if the client has not yet received a
+   * response that carried parseable {@code x-api-ratelimit-*} headers. Once populated, the snapshot
+   * reflects the most recent rate-limit-bearing response — successful responses that arrive without
+   * headers do not reset it.
+   */
   @Nullable RateLimits getLatestRateLimits() {
     return latestRateLimits.get();
   }
@@ -111,7 +117,25 @@ final class HttpTransport implements AutoCloseable {
     // When permits are available the future is already completed (fast path) and thenCompose
     // runs synchronously; when the pool is exhausted the future completes later, on the
     // thread that calls release() — the caller's thread is never blocked here.
-    return concurrencyPermits.acquire().thenCompose(unused -> dispatch(uri, request, responseType));
+    CompletableFuture<Void> permit = concurrencyPermits.acquire();
+    CompletableFuture<T> dispatched =
+        permit.thenCompose(unused -> dispatch(uri, request, responseType));
+
+    // Cancellation of `dispatched` doesn't propagate to `permit` by default, so a slow-path
+    // waiter would stay live in the semaphore queue; release() would later "transfer" the
+    // permit by completing the waiter, but thenCompose's function wouldn't run (its
+    // dependent is already cancelled), and dispatch — which registers whenComplete(release)
+    // — would never fire. Cancelling `permit` here makes AsyncSemaphore.release skip the
+    // waiter. The narrow race where the waiter is cancelled between release()'s pollFirst
+    // and complete() is handled inside release() itself by retrying.
+    dispatched.whenComplete(
+        (r, t) -> {
+          if (t instanceof CancellationException) {
+            permit.cancel(false);
+          }
+        });
+
+    return dispatched;
   }
 
   private <T> CompletableFuture<T> dispatch(URI uri, HttpRequest request, Class<T> responseType) {
@@ -145,7 +169,16 @@ final class HttpTransport implements AutoCloseable {
                         new ErrorContext(null, uri.toString(), null),
                         root));
               }
-              latestRateLimits.set(RateLimitHeaders.parse(response.headers()));
+              // Only overwrite the snapshot when the response carried parseable rate-limit
+              // headers. The API's rate-limit middleware can silently swallow its own errors
+              // and respond without headers; clobbering with null on every such response would
+              // make `client.getRateLimits()` flicker between populated and null across
+              // consecutive calls. Spec §8 says "update client-level snapshot" — implicitly only
+              // when there is something to update.
+              RateLimits parsed = RateLimitHeaders.parse(response.headers());
+              if (parsed != null) {
+                latestRateLimits.set(parsed);
+              }
               return processResponse(response, responseType, uri.toString());
             });
   }
@@ -203,9 +236,16 @@ final class HttpTransport implements AutoCloseable {
   }
 
   private URI buildUri(RequestSpec spec) {
+    // RequestSpec's Javadoc says path has no leading slash, but a caller mistake would produce
+    // baseUrl/v1//markets/status (double slash). Strip defensively so the URL stays well-formed
+    // regardless of which side of the contract the bug is on.
+    String path = spec.path();
+    if (path.startsWith("/")) {
+      path = path.substring(1);
+    }
     StringBuilder sb = new StringBuilder();
-    sb.append(baseUrl).append('/').append(apiVersion).append('/').append(spec.path());
-    if (!spec.path().endsWith("/")) {
+    sb.append(baseUrl).append('/').append(apiVersion).append('/').append(path);
+    if (!path.endsWith("/")) {
       sb.append('/');
     }
     Map<String, String> params = spec.queryParams();

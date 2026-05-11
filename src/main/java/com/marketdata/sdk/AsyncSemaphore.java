@@ -61,21 +61,28 @@ final class AsyncSemaphore {
    * completed) without going through the counter. Otherwise the counter is incremented.
    */
   void release() {
-    CompletableFuture<Void> next = null;
-    synchronized (lock) {
-      while (!waiters.isEmpty()) {
-        CompletableFuture<Void> w = waiters.pollFirst();
-        if (!w.isDone()) {
-          next = w;
-          break;
+    // Outer loop handles the TOCTOU window between pollFirst (inside the lock) and
+    // complete (outside): if the waiter is cancelled in that gap, complete(null) returns
+    // false and the permit hasn't actually been transferred. Retry with the next waiter,
+    // or fall through to the counter when the queue runs out of live waiters.
+    while (true) {
+      CompletableFuture<Void> next = null;
+      synchronized (lock) {
+        while (!waiters.isEmpty()) {
+          CompletableFuture<Void> w = waiters.pollFirst();
+          if (!w.isDone()) {
+            next = w;
+            break;
+          }
+        }
+        if (next == null) {
+          available++;
+          return;
         }
       }
-      if (next == null) {
-        available++;
+      if (next.complete(null)) {
+        return;
       }
-    }
-    if (next != null) {
-      next.complete(null);
     }
   }
 

@@ -103,8 +103,8 @@ public final class MarketDataClient implements AutoCloseable {
         new Object[] {Version.current(), this.baseUrl, this.apiVersion, this.demoMode});
     if (this.demoMode) {
       LOG.warning(
-          "No API token provided — running in demo mode. Authenticated endpoints will"
-              + " fail; rate-limit initialization is skipped.");
+          "No API token provided — running in demo mode. Authenticated endpoints will fail with"
+              + " AuthenticationError on first call.");
     } else if (LOG.isLoggable(Level.FINE)) {
       LOG.log(Level.FINE, "Token: {0}", Tokens.redact(this.token));
     }
@@ -146,7 +146,12 @@ public final class MarketDataClient implements AutoCloseable {
     return validateOnStartup;
   }
 
-  /** Latest client-level rate-limit snapshot, or {@code null} if none has been received yet. */
+  /**
+   * Latest client-level rate-limit snapshot, or {@code null} if no rate-limit-bearing response has
+   * been received yet. Once populated, the snapshot persists across subsequent calls — a successful
+   * response that arrives without {@code x-api-ratelimit-*} headers (e.g. during a server-side
+   * middleware outage) does not clear it.
+   */
   public @Nullable RateLimits getRateLimits() {
     return transport.getLatestRateLimits();
   }

@@ -46,7 +46,9 @@ record RequestSpec(String path, Map<String, String> queryParams) {
     }
 
     RequestSpec build() {
-      return new RequestSpec(path, Collections.unmodifiableMap(queryParams));
+      // Pass the raw LinkedHashMap — the record's compact constructor defensively copies and
+      // wraps it as unmodifiable, so wrapping here too would just rebuild a redundant view.
+      return new RequestSpec(path, queryParams);
     }
   }
 }

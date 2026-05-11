@@ -14,6 +14,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.WebSocket;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -91,6 +93,67 @@ class HttpTransportTest {
     // Permit released even though the catch took the Error branch — a leak here would
     // accumulate over a long-lived process and eventually deadlock the pool.
     assertThat(permits.availablePermits()).isEqualTo(initial);
+  }
+
+  /**
+   * Regression for the slow-path cancellation leak (Issue #1, Component A). When the pool is
+   * saturated, {@code acquire()} returns a pending waiter that is enqueued. The future the caller
+   * actually sees is the downstream {@code thenCompose} result, NOT the waiter. Cancelling the
+   * downstream does <em>not</em> propagate to the waiter (standard CompletableFuture semantics), so
+   * the waiter is still alive when {@code release()} runs — release() "transfers" the permit by
+   * completing the waiter, but the {@code thenCompose} function never executes because its
+   * dependent future is already cancelled. Result: the permit is lost forever.
+   *
+   * <p>This test saturates the pool with {@link HttpTransport#CONCURRENCY_LIMIT} fast-path
+   * dispatches whose HTTP futures we control, queues {@code extras} slow-path callers, cancels all
+   * the slow-path futures, and then completes the fast-path HTTP futures so {@code release()}
+   * fires. Once every dispatch has settled, every permit must be back in the pool.
+   */
+  @Test
+  void permitsAreReleasedWhenSlowPathFuturesAreCancelled() throws Exception {
+    ControllableHttpClient client = new ControllableHttpClient();
+    HttpTransport transport = new HttpTransport("http://localhost", "v1", "test/0.0", null, client);
+
+    AsyncSemaphore permits = readSemaphore(transport);
+    int initial = permits.availablePermits();
+    assertThat(initial).isEqualTo(HttpTransport.CONCURRENCY_LIMIT);
+
+    // Saturate the pool — these go through the fast path (acquire returns an already-completed
+    // future), dispatch is invoked, sendAsync is called → ControllableHttpClient returns a
+    // pending future we hold the handle to.
+    List<CompletableFuture<Object>> fastPath = new ArrayList<>(initial);
+    for (int i = 0; i < initial; i++) {
+      fastPath.add(transport.executeAsync(RequestSpec.get("ping").build(), Object.class));
+    }
+    assertThat(permits.availablePermits()).isZero();
+    assertThat(permits.queueLength()).isZero();
+    assertThat(client.pendingCount()).isEqualTo(initial);
+
+    // Slow path — these enqueue waiters in the semaphore. dispatch is NOT yet called for them.
+    int extras = 5;
+    List<CompletableFuture<Object>> slowPath = new ArrayList<>(extras);
+    for (int i = 0; i < extras; i++) {
+      slowPath.add(transport.executeAsync(RequestSpec.get("ping").build(), Object.class));
+    }
+    assertThat(permits.queueLength()).isEqualTo(extras);
+
+    // Caller cancels every slow-path future. Without the fix, the waiters stay live in the
+    // queue — release() will later transfer permits into the cancelled-downstream waiters
+    // and the permits disappear.
+    for (CompletableFuture<Object> f : slowPath) {
+      f.cancel(false);
+    }
+
+    // Complete every fast-path HTTP future. Each completion fires whenComplete(release).
+    // Failing the future bypasses body decoding (which would NPE on a null response) while
+    // still exercising the release path.
+    client.failAll(new IOException("simulated end of test"));
+
+    // After every dispatch has settled, the pool must be fully restored.
+    assertThat(permits.queueLength()).isZero();
+    assertThat(permits.availablePermits())
+        .as("every permit should be back in the pool — no leaks from cancelled slow-path futures")
+        .isEqualTo(initial);
   }
 
   // ---------- asRuntime: covers the three branches in the executeSync catch ----------
@@ -189,6 +252,100 @@ class HttpTransportTest {
     public <T> CompletableFuture<HttpResponse<T>> sendAsync(
         HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler) {
       throw new IllegalArgumentException("simulated synchronous throw from sendAsync");
+    }
+
+    @Override
+    public Optional<CookieHandler> cookieHandler() {
+      return Optional.empty();
+    }
+
+    @Override
+    public Optional<Duration> connectTimeout() {
+      return Optional.empty();
+    }
+
+    @Override
+    public Redirect followRedirects() {
+      return Redirect.NEVER;
+    }
+
+    @Override
+    public Optional<ProxySelector> proxy() {
+      return Optional.empty();
+    }
+
+    @Override
+    public SSLContext sslContext() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public SSLParameters sslParameters() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Optional<Authenticator> authenticator() {
+      return Optional.empty();
+    }
+
+    @Override
+    public Version version() {
+      return Version.HTTP_1_1;
+    }
+
+    @Override
+    public Optional<Executor> executor() {
+      return Optional.empty();
+    }
+
+    @Override
+    public <T> HttpResponse<T> send(
+        HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler)
+        throws IOException, InterruptedException {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public <T> CompletableFuture<HttpResponse<T>> sendAsync(
+        HttpRequest request,
+        HttpResponse.BodyHandler<T> responseBodyHandler,
+        HttpResponse.PushPromiseHandler<T> pushPromiseHandler) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public WebSocket.Builder newWebSocketBuilder() {
+      throw new UnsupportedOperationException();
+    }
+  }
+
+  /**
+   * Stub {@link HttpClient} whose {@code sendAsync} returns a fresh, never-auto-completing future
+   * for each call. The test holds the references and chooses when to complete them — that's the
+   * lever the slow-path cancellation regression test pulls to deterministically drive the {@code
+   * whenComplete(release)} path.
+   */
+  private static final class ControllableHttpClient extends HttpClient {
+    private final List<CompletableFuture<HttpResponse<?>>> pending = new ArrayList<>();
+
+    @SuppressWarnings("unchecked")
+    @Override
+    public <T> CompletableFuture<HttpResponse<T>> sendAsync(
+        HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler) {
+      CompletableFuture<HttpResponse<T>> f = new CompletableFuture<>();
+      pending.add((CompletableFuture<HttpResponse<?>>) (CompletableFuture<?>) f);
+      return f;
+    }
+
+    int pendingCount() {
+      return pending.size();
+    }
+
+    void failAll(Throwable t) {
+      for (CompletableFuture<HttpResponse<?>> f : pending) {
+        f.completeExceptionally(t);
+      }
     }
 
     @Override

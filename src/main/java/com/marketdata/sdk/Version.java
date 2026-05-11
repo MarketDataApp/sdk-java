@@ -15,7 +15,7 @@ final class Version {
 
   private Version() {}
 
-  public static String current() {
+  static String current() {
     return resolve(Version.class.getPackage().getImplementationVersion());
   }
 

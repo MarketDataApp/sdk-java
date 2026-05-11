@@ -77,6 +77,23 @@ class HttpTransportE2ETest {
     assertThat(capturedUri.get().getPath()).doesNotContain("//");
   }
 
+  /**
+   * RequestSpec's Javadoc says paths should not start with {@code /}, but a caller mistake would
+   * otherwise produce {@code /v1//ping/} (double slash, which some HTTP routers reject). The
+   * transport strips the leading slash defensively so a path of {@code "/ping"} produces the same
+   * URL as {@code "ping"}.
+   */
+  @Test
+  void pathStartingWithSlashIsStripped() {
+    handler.setResponse(200, "{\"value\":\"ok\"}");
+
+    Echo result = newTransport().executeSync(RequestSpec.get("/ping").build(), Echo.class);
+
+    assertThat(result.value()).isEqualTo("ok");
+    assertThat(capturedUri.get().getPath()).isEqualTo("/v1/ping/");
+    assertThat(capturedUri.get().getPath()).doesNotContain("//");
+  }
+
   // ---------- in-process server plumbing ----------
 
   private final class RouteHandler implements HttpHandler {

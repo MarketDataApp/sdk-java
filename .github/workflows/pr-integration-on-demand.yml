@@ -1,15 +1,24 @@
 name: Integration tests on demand
 
-# Manually triggered by commenting on an open PR:
-#   `integrationtest`     → JDK 17 only
-#   `integrationtestfull` → full matrix {17, 21, 25}
+# Manually triggered by commenting on an open PR with a slash-command on
+# the FIRST line of the comment body (everything after the first line is
+# ignored):
+#   /integrationtest      → JDK 17 only
+#   /integrationtestfull  → full matrix {17, 21, 25}
+#
+# The slash + first-line constraint prevents accidental triggers from
+# review comments that mention the workflow by name, quoted replies
+# (`> /integrationtest`), pasted documentation, or stack traces. The
+# Guard job below filters on `startsWith(... '/integrationtest')` and
+# then a strict bash `case` validates the exact command — anything that
+# slips through is rejected before any live-API request is made.
 #
 # Integration tests hit the live Market Data API, so we don't run them
 # automatically on every PR open/sync (saves API quota + CI minutes).
 # They ARE required for merge — branch protection on `main` should list
 # "Integration tests pass" as a required status check, which is the
 # aggregator job below. PRs cannot merge until a reviewer comments one
-# of the two trigger phrases AND the resulting run is green.
+# of the two slash-commands AND the resulting run is green.
 #
 # Important security note: workflows triggered by `issue_comment` always
 # run from the *default branch's* version of the workflow file, not from
@@ -32,16 +41,15 @@ jobs:
   guard:
     name: Guard
     runs-on: ubuntu-latest
-    # Only fire on PR comments (not generic issue comments) that contain
-    # one of the two accepted slash-style commands. `contains` is
-    # substring match — note that `integrationtest` is itself a substring
-    # of `integrationtestfull`, so this OR matches both, and the matrix
-    # decision below disambiguates.
+    # Only fire on PR comments whose body starts with `/integrationtest`.
+    # `startsWith` rejects comments that merely mention the command in
+    # passing (quoted replies start with `>`, prose with anything else,
+    # so they don't match). The strict `case` in the matrix step below
+    # rejects anything that slips through (e.g. `/integrationtest-foo`)
+    # before any live-API request fires.
     if: |
-      github.event.issue.pull_request != null && (
-        contains(github.event.comment.body, 'integrationtest') ||
-        contains(github.event.comment.body, 'integrationtestfull')
-      )
+      github.event.issue.pull_request != null &&
+      startsWith(github.event.comment.body, '/integrationtest')
     outputs:
       head_sha: ${{ steps.pr.outputs.head_sha }}
       jdks: ${{ steps.matrix.outputs.jdks }}
@@ -96,16 +104,29 @@ jobs:
         env:
           BODY: ${{ github.event.comment.body }}
         run: |
-          # Check for the long form first because it contains 'integrationtest' as a substring.
-          if [[ "$BODY" == *"integrationtestfull"* ]]; then
-            echo 'jdks=["17","21","25"]' >> "$GITHUB_OUTPUT"
-            echo 'mode=full' >> "$GITHUB_OUTPUT"
-            echo "Trigger: integrationtestfull → matrix {17, 21, 25}"
-          else
-            echo 'jdks=["17"]' >> "$GITHUB_OUTPUT"
-            echo 'mode=single' >> "$GITHUB_OUTPUT"
-            echo "Trigger: integrationtest → JDK 17"
-          fi
+          # The if: filter above only guarantees the body starts with
+          # '/integrationtest'. We still need to disambiguate single vs
+          # full and reject anything that just shares the prefix
+          # (e.g. '/integrationtest-foo' or '/integrationtestlong').
+          # Match on the first line only — trailing context in the
+          # comment body is ignored.
+          first_line=$(printf '%s' "$BODY" | head -n 1 | tr -d '[:space:]')
+          case "$first_line" in
+            /integrationtest)
+              echo 'jdks=["17"]' >> "$GITHUB_OUTPUT"
+              echo 'mode=single' >> "$GITHUB_OUTPUT"
+              echo "Trigger: /integrationtest → JDK 17"
+              ;;
+            /integrationtestfull)
+              echo 'jdks=["17","21","25"]' >> "$GITHUB_OUTPUT"
+              echo 'mode=full' >> "$GITHUB_OUTPUT"
+              echo "Trigger: /integrationtestfull → matrix {17, 21, 25}"
+              ;;
+            *)
+              echo "::error::Unrecognized command on first line: '$first_line' (expected '/integrationtest' or '/integrationtestfull')"
+              exit 1
+              ;;
+          esac
 
   integration-tests:
     name: Integration tests (JDK ${{ matrix.java }})

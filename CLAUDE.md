@@ -90,6 +90,14 @@ The Java SDK must also satisfy the canonical, cross-language [SDK Requirements](
 
 When picking up new work, check this list before reaching for the SDK requirements doc — most foundational rules are already encoded in code; missing pieces are deferred deliberately, not by accident.
 
+**Known latent gaps to revisit when retry/timeout lands:**
+- `HttpTransport.executeSync` only catches `CompletionException` from `.join()`, not `CancellationException`. Today the latter is unreachable — the user can't cancel a future they never see (the future is local to `executeSync`), no internal code cancels it, and `dispatch`'s `handle((response, error) -> ...)` translates every upstream error (including a hypothetical `CancellationException` from `sendAsync`) into `CompletionException(NetworkError)`. The gap becomes real once we add:
+  - `dispatched.orTimeout(99s)` / `completeOnTimeout` to enforce the §10 timeout strictly (these produce `CancellationException` on the downstream future).
+  - A retry coordinator (§9) that cancels in-flight futures when aborting a retry chain.
+  - A bump to JDK 21+ where `HttpClient.close()` cancels in-flight futures.
+  When any of those land, extend the catch in `executeSync` (or fold it into `asRuntime`) so cancellations don't escape as raw `RuntimeException` to sync callers. Tracked as Issue #2 of the 2026-05-11 review (`REVIEW-2026-05-11-markets-status.md`).
+- `HttpTransport.buildUri` URL-encodes query-param values with `URLEncoder.encode(..., UTF_8)`, which is form-encoding semantics: spaces become `+`, not `%20`. Fine for today's typed params (dates, numerics) but a future endpoint that takes an arbitrary string (e.g. `symbol="BRK A"`) would round-trip differently against an RFC-3986-strict server. Switch to a path/query-segment-aware encoder when the first such param lands. Tracked as Issue #10 of the 2026-05-11 review.
+
 ## Acceptance checklist
 
 `docs/java-sdk-requirements.md` ends with an "Acceptance Checklist" mapping each Java-specific requirements section to verifiable items. Treat it as the definition of done for v1: when implementing, work toward making each box checkable, and use it as a self-review pass before declaring a section complete.
