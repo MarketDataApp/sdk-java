@@ -178,6 +178,101 @@ class HttpTransportRetryTest {
     assertThat(client.callCount()).isEqualTo(3);
   }
 
+  // ---------- sync-throw bugs do NOT retry ----------
+
+  /**
+   * If {@code httpClient.sendAsync} throws synchronously (malformed request, internal NPE, {@code
+   * IllegalArgumentException}), the failure is wrapped as {@code NetworkError} but its cause is not
+   * an {@link IOException}. {@link RetryPolicy} treats that as non-retriable: a deterministic bug
+   * doesn't get better with 1s+2s of backoff.
+   */
+  @Test
+  void synchronousThrowDoesNotRetry() {
+    SyncThrowingHttpClient client = new SyncThrowingHttpClient();
+    HttpTransport transport =
+        new HttpTransport("http://stub.local", "v1", "test/0.0", null, client, fastPolicy(3));
+
+    assertThatThrownBy(() -> transport.executeSync(RequestSpec.get("ping").build(), Echo.class))
+        .isInstanceOf(NetworkError.class)
+        .hasMessageContaining("before dispatch")
+        .hasCauseInstanceOf(IllegalArgumentException.class);
+
+    assertThat(client.callCount())
+        .as("a sync-throw is deterministic — retrying just burns backoff for the same crash")
+        .isEqualTo(1);
+  }
+
+  // ---------- rate-limit snapshot consistency under retry ----------
+
+  /**
+   * If attempt 1 returns 503 with rate-limit headers and attempt 2 returns 200 without them, the
+   * snapshot must reflect attempt 1's values (Issue #4 conservation rule applies cross-attempt, not
+   * just cross-request).
+   */
+  @Test
+  void rateLimitSnapshotPreservedAcrossRetryAttempts() {
+    MultiResponseHttpClient client =
+        new MultiResponseHttpClient(
+            response(
+                503,
+                "{}",
+                Map.of(
+                    "x-api-ratelimit-limit", "50000",
+                    "x-api-ratelimit-remaining", "12345",
+                    "x-api-ratelimit-reset", "1735689600",
+                    "x-api-ratelimit-consumed", "37655")),
+            response(200, "{\"value\":\"ok\"}", Map.of()));
+
+    HttpTransport transport = newTransport(client, fastPolicy(3));
+    transport.executeSync(RequestSpec.get("ping").build(), Echo.class);
+
+    RateLimits snapshot = transport.getLatestRateLimits();
+    assertThat(snapshot).isNotNull();
+    assertThat(snapshot.remaining())
+        .as("the snapshot must keep the headers from the 503 attempt, not be cleared by the 200")
+        .isEqualTo(12345L);
+  }
+
+  // ---------- mid-backoff cancellation ----------
+
+  /**
+   * Cancelling the returned future while a backoff is pending must (a) skip the next attempt and
+   * (b) leave the permit pool intact. The cascade-cancel chain is the trickiest piece of {@link
+   * HttpTransport}; this test is the explicit regression for it.
+   */
+  @Test
+  void cancellationMidBackoffSkipsRemainingAttempts() throws Exception {
+    // Use a slow policy so we have a real backoff window to cancel into. 200 ms is short enough
+    // to keep the test fast but long enough to reliably interleave the cancel.
+    RetryPolicy slowPolicy = new RetryPolicy(3, Duration.ofMillis(200), Duration.ofSeconds(1));
+    MultiResponseHttpClient client =
+        new MultiResponseHttpClient(
+            response(503, "{}"), response(503, "{}"), response(200, "{\"value\":\"ok\"}"));
+    HttpTransport transport = newTransport(client, slowPolicy);
+
+    java.util.concurrent.CompletableFuture<Echo> future =
+        transport.executeAsync(RequestSpec.get("ping").build(), Echo.class);
+
+    // Let attempt 1 run and fail (503 → schedule retry with 200 ms backoff). Then cancel before
+    // the delayedExecutor fires the second attempt.
+    Thread.sleep(50);
+    boolean cancelled = future.cancel(false);
+    assertThat(cancelled).isTrue();
+
+    // Give the would-be next attempt plenty of time to fire if cancellation didn't stop it.
+    Thread.sleep(400);
+
+    assertThat(client.callCount())
+        .as("after mid-backoff cancellation, no further attempts may run")
+        .isEqualTo(1);
+
+    AsyncSemaphore permits = readSemaphore(transport);
+    assertThat(permits.availablePermits())
+        .as("permit lent to attempt 1 must have come back to the pool")
+        .isEqualTo(HttpTransport.CONCURRENCY_LIMIT);
+    assertThat(permits.queueLength()).isZero();
+  }
+
   // ---------- permits are still conserved across retries ----------
 
   @Test
@@ -204,7 +299,12 @@ class HttpTransportRetryTest {
   }
 
   private static Supplier<CompletableFuture<HttpResponse<byte[]>>> response(int code, String body) {
-    return () -> CompletableFuture.completedFuture(new StubHttpResponse(code, body, Map.of()));
+    return response(code, body, Map.of());
+  }
+
+  private static Supplier<CompletableFuture<HttpResponse<byte[]>>> response(
+      int code, String body, Map<String, String> headers) {
+    return () -> CompletableFuture.completedFuture(new StubHttpResponse(code, body, headers));
   }
 
   private static Supplier<CompletableFuture<HttpResponse<byte[]>>> failedResponse(Throwable t) {
@@ -240,6 +340,90 @@ class HttpTransportRetryTest {
             new AssertionError("Retry overshot the test script — call #" + callCount));
       }
       return (CompletableFuture<HttpResponse<T>>) (CompletableFuture<?>) next.get();
+    }
+
+    @Override
+    public Optional<CookieHandler> cookieHandler() {
+      return Optional.empty();
+    }
+
+    @Override
+    public Optional<Duration> connectTimeout() {
+      return Optional.empty();
+    }
+
+    @Override
+    public Redirect followRedirects() {
+      return Redirect.NEVER;
+    }
+
+    @Override
+    public Optional<ProxySelector> proxy() {
+      return Optional.empty();
+    }
+
+    @Override
+    public SSLContext sslContext() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public SSLParameters sslParameters() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Optional<Authenticator> authenticator() {
+      return Optional.empty();
+    }
+
+    @Override
+    public Version version() {
+      return Version.HTTP_1_1;
+    }
+
+    @Override
+    public Optional<Executor> executor() {
+      return Optional.empty();
+    }
+
+    @Override
+    public <T> HttpResponse<T> send(
+        HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public <T> CompletableFuture<HttpResponse<T>> sendAsync(
+        HttpRequest request,
+        HttpResponse.BodyHandler<T> responseBodyHandler,
+        HttpResponse.PushPromiseHandler<T> pushPromiseHandler) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public WebSocket.Builder newWebSocketBuilder() {
+      throw new UnsupportedOperationException();
+    }
+  }
+
+  /**
+   * Stub {@link HttpClient} whose {@code sendAsync} throws {@link IllegalArgumentException}
+   * synchronously. Used by {@link #synchronousThrowDoesNotRetry()} to drive the pre-dispatch-fault
+   * path.
+   */
+  private static final class SyncThrowingHttpClient extends HttpClient {
+    private int callCount = 0;
+
+    int callCount() {
+      return callCount;
+    }
+
+    @Override
+    public <T> CompletableFuture<HttpResponse<T>> sendAsync(
+        HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler) {
+      callCount++;
+      throw new IllegalArgumentException("simulated synchronous throw from sendAsync");
     }
 
     @Override

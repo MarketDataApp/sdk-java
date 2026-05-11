@@ -117,36 +117,52 @@ final class HttpTransport implements AutoCloseable {
 
   /**
    * Async-first request execution with retry. Orchestrates one or more attempts according to {@link
-   * RetryPolicy}: retries 501–599 and {@link NetworkError} with exponential backoff, surfaces every
-   * other failure immediately. Cancellation of the returned future bails out of any pending backoff
-   * and skips further attempts.
+   * RetryPolicy}: retries 501–599 and IOException-shaped {@link NetworkError}s with exponential
+   * backoff, surfaces every other failure immediately. Cancellation of the returned future bails
+   * out of any pending backoff and propagates to the current in-flight attempt.
    */
   <T> CompletableFuture<T> executeAsync(RequestSpec spec, Class<T> responseType) {
     CompletableFuture<T> result = new CompletableFuture<>();
-    attempt(spec, responseType, 0, result);
+    // One cascade-cancel handler installed once: whichever attempt is currently in flight is
+    // tracked in `currentDispatched`; cancelling `result` cancels that. Previous attempts in
+    // the chain are already done by the time the next one updates the reference, so this
+    // avoids accumulating a handler per attempt.
+    AtomicReference<@Nullable CompletableFuture<T>> currentDispatched = new AtomicReference<>();
+    result.whenComplete(
+        (r, t) -> {
+          if (t instanceof CancellationException) {
+            CompletableFuture<T> inFlight = currentDispatched.get();
+            if (inFlight != null && !inFlight.isDone()) {
+              inFlight.cancel(false);
+            }
+          }
+        });
+    attempt(spec, responseType, 0, result, currentDispatched);
     return result;
   }
 
   private <T> void attempt(
-      RequestSpec spec, Class<T> responseType, int attemptIdx, CompletableFuture<T> result) {
+      RequestSpec spec,
+      Class<T> responseType,
+      int attemptIdx,
+      CompletableFuture<T> result,
+      AtomicReference<@Nullable CompletableFuture<T>> currentDispatched) {
     if (result.isDone()) {
       // Caller cancelled (or completed exceptionally from a previous attempt's whenComplete).
       // Don't burn another HTTP request.
       return;
     }
     CompletableFuture<T> dispatched = executeOnce(spec, responseType);
+    currentDispatched.set(dispatched);
 
-    // Cascade cancel from `result` (returned to caller) to `dispatched` (single-attempt internal
-    // future). Without this, a caller cancelling `result` would leave a slow-path waiter alive
-    // in the semaphore queue: a later release() would transfer the permit but the dispatch
-    // function would never run, leaking the permit. The cascade re-enters executeOnce's own
-    // CancellationException handler, which cancels the waiter so release() skips it.
-    result.whenComplete(
-        (r, t) -> {
-          if (t instanceof CancellationException && !dispatched.isDone()) {
-            dispatched.cancel(false);
-          }
-        });
+    // If the caller cancelled `result` between attempts (during a backoff window), the handler
+    // installed in executeAsync has fired but `currentDispatched` was either null or pointing
+    // to the previous (already-done) attempt — so the new one was never cancelled. Check here
+    // and propagate immediately.
+    if (result.isCancelled() && !dispatched.isDone()) {
+      dispatched.cancel(false);
+      return;
+    }
 
     dispatched.whenComplete(
         (value, error) -> {
@@ -161,7 +177,8 @@ final class HttpTransport implements AutoCloseable {
           if (retryPolicy.shouldRetry(cause, attemptIdx)) {
             long delayMs = retryPolicy.backoffDelay(attemptIdx).toMillis();
             CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS)
-                .execute(() -> attempt(spec, responseType, attemptIdx + 1, result));
+                .execute(
+                    () -> attempt(spec, responseType, attemptIdx + 1, result, currentDispatched));
           } else {
             result.completeExceptionally(cause);
           }

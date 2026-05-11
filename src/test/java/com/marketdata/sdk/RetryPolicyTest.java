@@ -20,8 +20,33 @@ class RetryPolicyTest {
   // ---------- shouldRetry: which errors are retriable ----------
 
   @Test
-  void networkErrorsAreRetriable() {
-    assertThat(DEFAULTS.shouldRetry(new NetworkError("boom", ErrorContext.empty()), 0)).isTrue();
+  void networkErrorsWithIoCauseAreRetriable() {
+    // The canonical "real network failure" shape: NetworkError wraps an IOException (or
+    // subtype like ConnectException / HttpTimeoutException).
+    NetworkError err =
+        new NetworkError(
+            "connect refused", ErrorContext.empty(), new java.io.IOException("connect refused"));
+    assertThat(DEFAULTS.shouldRetry(err, 0)).isTrue();
+  }
+
+  @Test
+  void networkErrorsWithoutCauseAreNotRetriable() {
+    // A NetworkError with no cause has no signal that it was an actual network failure.
+    // Better to surface immediately than burn 3 attempts on a possibly-deterministic bug.
+    assertThat(DEFAULTS.shouldRetry(new NetworkError("boom", ErrorContext.empty()), 0)).isFalse();
+  }
+
+  @Test
+  void networkErrorsWrappingNonIoCauseAreNotRetriable() {
+    // Sync-throws from httpClient.sendAsync() (malformed request, internal NPE,
+    // IllegalArgumentException, etc.) get wrapped as NetworkError in `dispatch`, but they're
+    // deterministic — retrying just wastes the 1s+2s backoff for the same crash.
+    NetworkError syncThrow =
+        new NetworkError(
+            "Request failed before dispatch",
+            ErrorContext.empty(),
+            new IllegalArgumentException("malformed URI"));
+    assertThat(DEFAULTS.shouldRetry(syncThrow, 0)).isFalse();
   }
 
   @Test
@@ -78,7 +103,8 @@ class RetryPolicyTest {
 
   @Test
   void retriesStopAfterMaxAttempts() {
-    NetworkError retriable = new NetworkError("net", ErrorContext.empty());
+    NetworkError retriable =
+        new NetworkError("net", ErrorContext.empty(), new java.io.IOException("transport down"));
     // Defaults: maxAttempts = 3 → only attempts 0 and 1 are eligible to be followed by a retry
     // (attempt 2 was the third try; no fourth attempt allowed).
     assertThat(DEFAULTS.shouldRetry(retriable, 0)).isTrue();
@@ -104,6 +130,16 @@ class RetryPolicyTest {
     assertThat(DEFAULTS.backoffDelay(10)).isEqualTo(Duration.ofSeconds(30));
   }
 
+  @Test
+  void backoffSaturatesOnExtremeAttemptIndices() {
+    // The shift `1L << attempt` is undefined for attempt >= 63 (the shift count is masked to
+    // the bottom 6 bits, wrapping silently); the implementation guards against this by
+    // capping at maxBackoff once the multiplier would overflow.
+    assertThat(DEFAULTS.backoffDelay(62)).isEqualTo(Duration.ofSeconds(30));
+    assertThat(DEFAULTS.backoffDelay(70)).isEqualTo(Duration.ofSeconds(30));
+    assertThat(DEFAULTS.backoffDelay(Integer.MAX_VALUE)).isEqualTo(Duration.ofSeconds(30));
+  }
+
   // ---------- custom-tuned policy (used by tests that need fast retries) ----------
 
   @Test
@@ -111,7 +147,8 @@ class RetryPolicyTest {
     RetryPolicy tiny =
         new RetryPolicy(/* maxAttempts */ 5, Duration.ofMillis(1), Duration.ofMillis(10));
 
-    NetworkError net = new NetworkError("n", ErrorContext.empty());
+    NetworkError net =
+        new NetworkError("n", ErrorContext.empty(), new java.io.IOException("transport down"));
     assertThat(tiny.shouldRetry(net, 3)).isTrue();
     assertThat(tiny.shouldRetry(net, 4)).isFalse();
     assertThat(tiny.backoffDelay(0)).isEqualTo(Duration.ofMillis(1));
