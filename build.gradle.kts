@@ -110,6 +110,30 @@ tasks.jacocoTestReport {
     }
 }
 
+// Aggregate coverage across unit tests and integration tests. Opt-in: not
+// wired into `check` so PR builds stay fast and don't require the IT secret.
+// Invoke as `MARKETDATA_RUN_INTEGRATION_TESTS=true ./gradlew jacocoAggregateReport`.
+tasks.register<JacocoReport>("jacocoAggregateReport") {
+    description = "Generates a JaCoCo report aggregating unit + integration test coverage."
+    group = "verification"
+
+    dependsOn(tasks.test, integrationTestTask)
+
+    sourceSets(sourceSets.main.get())
+    executionData(
+        fileTree(layout.buildDirectory.dir("jacoco")) {
+            include("*.exec")
+        },
+    )
+
+    reports {
+        xml.required = true
+        html.required = true
+        html.outputLocation = layout.buildDirectory.dir("reports/jacoco/aggregate/html")
+        xml.outputLocation = layout.buildDirectory.file("reports/jacoco/aggregate/jacoco.xml")
+    }
+}
+
 // Coverage ratchet (line coverage cannot drop more than 5 pp below
 // main's last value) is enforced in CI — see .github/workflows/pull-request.yml
 // and .github/scripts/check-coverage-delta.py. Not enforced locally so that

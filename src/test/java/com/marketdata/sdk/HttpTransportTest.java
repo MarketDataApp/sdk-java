@@ -93,6 +93,86 @@ class HttpTransportTest {
     assertThat(permits.availablePermits()).isEqualTo(initial);
   }
 
+  // ---------- asRuntime: covers the three branches in the executeSync catch ----------
+
+  @Test
+  void asRuntimeReturnsMarketDataExceptionUnchanged() {
+    // The `instanceof MarketDataException` branch — the only one reached from the public
+    // surface today (every failure from executeAsync is wrapped as an MDE subtype).
+    com.marketdata.sdk.exception.BadRequestError mde =
+        new com.marketdata.sdk.exception.BadRequestError(
+            "bad", com.marketdata.sdk.exception.ErrorContext.empty());
+
+    RuntimeException result = HttpTransport.asRuntime(mde);
+
+    assertThat(result).isSameAs(mde);
+  }
+
+  @Test
+  void asRuntimeRethrowsNonMdeRuntimeExceptionUnchanged() {
+    // Defensive guardrail: if some future code path lets a non-MDE RuntimeException reach
+    // .join()'s cause, surface it as-is rather than wrapping it.
+    IllegalStateException re = new IllegalStateException("unexpected");
+
+    RuntimeException result = HttpTransport.asRuntime(re);
+
+    assertThat(result).isSameAs(re);
+  }
+
+  @Test
+  void asRuntimeWrapsNonRuntimeCauseInNetworkError() {
+    // Last-resort branch: cause is an Error (or null). Wrap in NetworkError so the public
+    // surface still observes the sealed MarketDataException hierarchy.
+    OutOfMemoryError error = new OutOfMemoryError("simulated");
+
+    RuntimeException result = HttpTransport.asRuntime(error);
+
+    assertThat(result).isInstanceOf(com.marketdata.sdk.exception.NetworkError.class);
+    assertThat(result.getCause()).isSameAs(error);
+    assertThat(result.getMessage()).contains("Unexpected failure invoking SDK");
+  }
+
+  @Test
+  void asRuntimeWrapsNullCauseInNetworkError() {
+    // CompletableFuture.join() can in principle deliver a CompletionException whose cause
+    // is null (defensive: should never happen in practice but ergonomically harmless).
+    RuntimeException result = HttpTransport.asRuntime(null);
+
+    assertThat(result).isInstanceOf(com.marketdata.sdk.exception.NetworkError.class);
+    assertThat(result.getCause()).isNull();
+  }
+
+  // ---------- unwrap: covers all 4 branches of `t instanceof CE && t.getCause() != null`
+  // ----------
+
+  @Test
+  void unwrapReturnsNonCompletionExceptionUnchanged() {
+    // First branch of `&&` is false → short-circuit, return t as-is. The most common path
+    // in production: handle() in CompletableFuture already unwraps CompletionException.
+    java.io.IOException io = new java.io.IOException("boom");
+    assertThat(HttpTransport.unwrap(io)).isSameAs(io);
+  }
+
+  @Test
+  void unwrapReturnsCauseOfNestedCompletionException() {
+    // Both branches true: CompletionException with a cause. Returns the cause.
+    java.io.IOException root = new java.io.IOException("root");
+    CompletionException wrapped = new CompletionException(root);
+
+    assertThat(HttpTransport.unwrap(wrapped)).isSameAs(root);
+  }
+
+  @Test
+  void unwrapReturnsCompletionExceptionWithoutCauseUnchanged() {
+    // First branch true, second branch false: CompletionException with `null` cause. The
+    // method returns t itself rather than dereferencing the missing cause.
+    CompletionException causeless = new CompletionException(null);
+
+    assertThat(HttpTransport.unwrap(causeless)).isSameAs(causeless);
+  }
+
+  // ---------- helpers ----------
+
   private static AsyncSemaphore readSemaphore(HttpTransport t) throws Exception {
     Field f = HttpTransport.class.getDeclaredField("concurrencyPermits");
     f.setAccessible(true);

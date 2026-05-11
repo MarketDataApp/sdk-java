@@ -158,15 +158,22 @@ final class HttpTransport implements AutoCloseable {
     try {
       return executeAsync(spec, responseType).join();
     } catch (CompletionException e) {
-      Throwable cause = e.getCause();
-      if (cause instanceof MarketDataException mde) {
-        throw mde;
-      }
-      if (cause instanceof RuntimeException re) {
-        throw re;
-      }
-      throw new NetworkError("Unexpected failure invoking SDK", ErrorContext.empty(), cause);
+      throw asRuntime(e.getCause());
     }
+  }
+
+  // Visible for tests: under our current SDK design, executeAsync always wraps failures as
+  // MarketDataException so the `MDE` branch is the only one reached from the public surface.
+  // The other two branches are defensive guardrails — extracted so they can be exercised
+  // directly by tests rather than relying on a synthetic public-API path.
+  static RuntimeException asRuntime(@Nullable Throwable cause) {
+    if (cause instanceof MarketDataException mde) {
+      return mde;
+    }
+    if (cause instanceof RuntimeException re) {
+      return re;
+    }
+    return new NetworkError("Unexpected failure invoking SDK", ErrorContext.empty(), cause);
   }
 
   @Override
@@ -243,7 +250,8 @@ final class HttpTransport implements AutoCloseable {
     return mapper;
   }
 
-  private static Throwable unwrap(Throwable t) {
+  // Package-private so the unwrap-when-nested-and-when-not branches are reachable from tests.
+  static Throwable unwrap(Throwable t) {
     return (t instanceof CompletionException && t.getCause() != null) ? t.getCause() : t;
   }
 }

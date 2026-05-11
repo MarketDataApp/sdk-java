@@ -1,5 +1,7 @@
 package com.marketdata.sdk;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Reads the SDK's version from the JAR manifest's {@code Implementation-Version} attribute (SDK
  * requirements §15: "version must be automatically detected from package metadata").
@@ -9,12 +11,17 @@ package com.marketdata.sdk;
  */
 final class Version {
 
-  private static final String FALLBACK = "0.0.0-dev";
+  static final String FALLBACK = "0.0.0-dev";
 
   private Version() {}
 
   public static String current() {
-    String version = Version.class.getPackage().getImplementationVersion();
-    return version != null && !version.isBlank() ? version : FALLBACK;
+    return resolve(Version.class.getPackage().getImplementationVersion());
+  }
+
+  // Extracted so tests can exercise both the present-version and fallback branches without
+  // requiring the SDK to be loaded from an actual JAR with an Implementation-Version manifest.
+  static String resolve(@Nullable String detected) {
+    return detected != null && !detected.isBlank() ? detected : FALLBACK;
   }
 }
