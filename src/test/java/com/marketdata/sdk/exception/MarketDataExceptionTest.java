@@ -99,6 +99,25 @@ class MarketDataExceptionTest {
   }
 
   @Test
+  void supportInfoFormatsNullContextAsNotApplicable() {
+    // When the exception is built from ErrorContext.empty() (e.g. client-side validation
+    // errors that fire before any HTTP request), getSupportInfo() must render each null
+    // field as "(n/a)" instead of literal "null". Covers the null-branches of the three
+    // ternaries in MarketDataException.getSupportInfo.
+    var error = new BadRequestError("symbol must not be blank", ErrorContext.empty());
+
+    String supportInfo = error.getSupportInfo();
+
+    assertThat(supportInfo)
+        .contains("BadRequestError")
+        .contains("symbol must not be blank")
+        .contains("Status code: (n/a)")
+        .contains("Request ID:  (n/a)")
+        .contains("Request URL: (n/a)")
+        .doesNotContain("null");
+  }
+
+  @Test
   void supportInfoNeverContainsSensitiveData() {
     // The exception itself never receives the token; we just
     // double-check that the canonical message+URL form doesn't leak.

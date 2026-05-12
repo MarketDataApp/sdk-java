@@ -41,7 +41,12 @@ tasks.jar {
 }
 
 // ADR-003: integration tests live in a separate, env-var-gated source set.
-val integrationTest by sourceSets.creating
+val integrationTest by sourceSets.creating {
+    // Wire the main and unit-test outputs into the integration test classpath
+    // so ITs can use both production code and test helpers (junit, assertj).
+    compileClasspath += sourceSets.main.get().output + sourceSets.test.get().output
+    runtimeClasspath += output + compileClasspath
+}
 
 val integrationTestImplementation by configurations.getting {
     extendsFrom(configurations.testImplementation.get())
@@ -81,18 +86,19 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
     finalizedBy(tasks.jacocoTestReport)
+}
 
-    // ADR-002 CI matrix: optionally run tests on a specific JDK while
-    // compilation stays pinned to --release 17. The CI workflow passes
-    // -PtestJdk=17|21|25; locally you can do ./gradlew test -PtestJdk=21
-    // (Gradle will provision the JDK via the foojay resolver if missing).
-    val testJdk = providers.gradleProperty("testJdk").orNull
-    if (testJdk != null) {
-        javaLauncher.set(
-            javaToolchains.launcherFor {
-                languageVersion = JavaLanguageVersion.of(testJdk.toInt())
-            }
-        )
+// ADR-002 CI matrix: optionally run any Test task on a specific JDK
+// while compilation stays pinned to --release 17. The flag is wired to
+// every Test task (unit `test` + `integrationTest`) so on-demand and
+// merge-to-main matrix runs cover the live API on JDK 17/21/25 too.
+val testJdkProperty = providers.gradleProperty("testJdk").orNull
+if (testJdkProperty != null) {
+    val launcher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(testJdkProperty.toInt())
+    }
+    tasks.withType<Test>().configureEach {
+        javaLauncher.set(launcher)
     }
 }
 
@@ -101,6 +107,30 @@ tasks.jacocoTestReport {
     reports {
         xml.required = true
         html.required = true
+    }
+}
+
+// Aggregate coverage across unit tests and integration tests. Opt-in: not
+// wired into `check` so PR builds stay fast and don't require the IT secret.
+// Invoke as `MARKETDATA_RUN_INTEGRATION_TESTS=true ./gradlew jacocoAggregateReport`.
+tasks.register<JacocoReport>("jacocoAggregateReport") {
+    description = "Generates a JaCoCo report aggregating unit + integration test coverage."
+    group = "verification"
+
+    dependsOn(tasks.test, integrationTestTask)
+
+    sourceSets(sourceSets.main.get())
+    executionData(
+        fileTree(layout.buildDirectory.dir("jacoco")) {
+            include("*.exec")
+        },
+    )
+
+    reports {
+        xml.required = true
+        html.required = true
+        html.outputLocation = layout.buildDirectory.dir("reports/jacoco/aggregate/html")
+        xml.outputLocation = layout.buildDirectory.file("reports/jacoco/aggregate/jacoco.xml")
     }
 }
 

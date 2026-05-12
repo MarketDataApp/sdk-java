@@ -122,6 +122,17 @@ install — the wrapper downloads the right Gradle version on first run.
 MARKETDATA_RUN_INTEGRATION_TESTS=true ./gradlew integrationTest
 ```
 
+On PRs, integration tests are not run automatically (live-API quota +
+CI minutes). A reviewer with `write` access triggers them by posting a
+slash-command on the **first line** of a PR comment:
+
+- `/integrationtest` — JDK 17 only.
+- `/integrationtestfull` — full matrix `{17, 21, 25}`.
+
+The first-line rule means quoted replies (`> /integrationtest`) and
+prose that merely mentions the command do not fire a run. Anything that
+isn't an exact match is rejected before any request is made.
+
 ## Package layout
 
 ```
