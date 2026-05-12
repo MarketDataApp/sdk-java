@@ -68,7 +68,7 @@ class MarketDataClientLoggingTest {
 
     assertThat(sdkLogger.getLevel()).isEqualTo(Level.FINE);
     assertThat(Arrays.stream(sdkLogger.getHandlers()))
-        .anyMatch(h -> h.getFormatter() instanceof MarketDataLogFormatter);
+        .anyMatch(h -> h instanceof MarketDataConsoleHandler);
     assertThat(sdkLogger.getUseParentHandlers())
         .as("our handler bypasses parent so we don't double-emit with the JVM default formatter")
         .isFalse();
@@ -90,7 +90,7 @@ class MarketDataClientLoggingTest {
 
     long sdkHandlers =
         Arrays.stream(sdkLogger.getHandlers())
-            .filter(h -> h.getFormatter() instanceof MarketDataLogFormatter)
+            .filter(h -> h instanceof MarketDataConsoleHandler)
             .count();
     assertThat(sdkHandlers)
         .as("second call should refresh the level, not add a second handler")
@@ -98,7 +98,7 @@ class MarketDataClientLoggingTest {
     assertThat(sdkLogger.getLevel()).isEqualTo(Level.WARNING);
     // The handler's own level should track the latest call too.
     Arrays.stream(sdkLogger.getHandlers())
-        .filter(h -> h.getFormatter() instanceof MarketDataLogFormatter)
+        .filter(h -> h instanceof MarketDataConsoleHandler)
         .forEach(h -> assertThat(h.getLevel()).isEqualTo(Level.WARNING));
   }
 
@@ -122,7 +122,72 @@ class MarketDataClientLoggingTest {
     MarketDataClient.configureLogging(newConfig(Map.of(EnvVars.LOGGING_LEVEL, "   ")));
 
     assertThat(Arrays.stream(sdkLogger.getHandlers()))
-        .noneMatch(h -> h.getFormatter() instanceof MarketDataLogFormatter);
+        .noneMatch(h -> h instanceof MarketDataConsoleHandler);
+  }
+
+  // ---------- end-to-end: env var → real log emission with spec shape ----------
+
+  /**
+   * Closes the loop between {@link MarketDataClient#configureLogging} and {@link
+   * MarketDataLogFormatter}. The other tests in this class verify the mechanics of configureLogging
+   * (level applied, handler installed) and {@code MarketDataLogFormatterTest} verifies the
+   * formatter shape in isolation — but neither alone catches a regression where the two stop
+   * composing (e.g. configureLogging starts using a different formatter, or the level filter blocks
+   * records the formatter would have rendered).
+   *
+   * <p>Strategy: let {@code configureLogging} install its handler, then add a parallel capturing
+   * handler that reuses the same {@link MarketDataLogFormatter} so we observe the same line that
+   * goes to stderr. Emit a record on a child of the SDK logger and assert the captured line matches
+   * the spec shape exactly.
+   */
+  @Test
+  void emittedRecordsAreFormattedPerSpec() {
+    MarketDataClient.configureLogging(newConfig(Map.of(EnvVars.LOGGING_LEVEL, "FINE")));
+
+    java.util.logging.Handler installed =
+        Arrays.stream(sdkLogger.getHandlers())
+            .filter(h -> h instanceof MarketDataConsoleHandler)
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("configureLogging did not install its handler"));
+
+    CapturingHandler capture = new CapturingHandler();
+    capture.setFormatter(installed.getFormatter());
+    capture.setLevel(Level.ALL);
+    sdkLogger.addHandler(capture);
+
+    Logger child = Logger.getLogger("com.marketdata.sdk.example");
+    child.fine("hello world");
+
+    assertThat(capture.formattedLines)
+        .as("end-to-end logging must produce the spec-mandated shape")
+        .anyMatch(
+            line ->
+                line.matches(
+                    "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z"
+                        + " - com\\.marketdata\\.sdk\\.example - FINE - hello world"
+                        + java.util.regex.Pattern.quote(System.lineSeparator())));
+  }
+
+  /**
+   * Minimal {@link java.util.logging.Handler} that runs the configured formatter and stashes the
+   * rendered string. Tests assert against {@link #formattedLines}; the raw records are not exposed
+   * because the formatter is what we actually care about end-to-end.
+   */
+  private static final class CapturingHandler extends java.util.logging.Handler {
+    final java.util.List<String> formattedLines = new java.util.ArrayList<>();
+
+    @Override
+    public void publish(java.util.logging.LogRecord record) {
+      if (isLoggable(record)) {
+        formattedLines.add(getFormatter().format(record));
+      }
+    }
+
+    @Override
+    public void flush() {}
+
+    @Override
+    public void close() {}
   }
 
   @Test
@@ -133,6 +198,6 @@ class MarketDataClientLoggingTest {
 
     assertThat(Arrays.stream(sdkLogger.getHandlers()))
         .as("invalid level must not install a handler — that would lie about the SDK's config")
-        .noneMatch(h -> h.getFormatter() instanceof MarketDataLogFormatter);
+        .noneMatch(h -> h instanceof MarketDataConsoleHandler);
   }
 }

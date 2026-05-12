@@ -214,6 +214,32 @@ public final class MarketDataClient implements AutoCloseable {
    * <p>When the env var is unset (or blank, or malformed), the method is a no-op — the SDK inherits
    * whatever {@code java.util.logging} configuration the host JVM has, which is what library code
    * is expected to do.
+   *
+   * <p><strong>Side effect when the env var is set:</strong> the SDK logger's {@code
+   * useParentHandlers} is flipped to {@code false}, so handlers attached to the root logger no
+   * longer receive {@code com.marketdata.sdk.*} records. That prevents double emission (root
+   * handler with the JVM default formatter + our handler with the spec format) but means consumers
+   * that previously intercepted all logs through a root handler will stop seeing SDK records. To
+   * re-route, attach the consumer's handler directly to the SDK logger:
+   *
+   * <pre>{@code
+   * Logger.getLogger("com.marketdata.sdk").addHandler(myHandler);
+   * }</pre>
+   *
+   * <p><strong>Records emitted before this method completes</strong> use whatever formatter the JVM
+   * has by default, not {@link MarketDataLogFormatter}. Two paths produce such records:
+   *
+   * <ul>
+   *   <li>{@link Configuration#loadFromProcess()} runs first in the constructor and may warn about
+   *       a malformed {@code .env} file before {@code configureLogging} has had a chance to install
+   *       the formatter.
+   *   <li>The {@code "Ignoring invalid MARKETDATA_LOGGING_LEVEL=…"} warning below fires while the
+   *       method is bailing out — by definition before any handler gets installed.
+   * </ul>
+   *
+   * These edges are accepted: warnings still reach the user (default JVM level is {@code INFO} ≤
+   * {@code WARNING}); they just don't carry the spec timestamp prefix. Spec-shaped output starts
+   * with the first record emitted after this method returns normally.
    */
   static void configureLogging(Configuration config) {
     String requestedLevel = config.resolve(null, EnvVars.LOGGING_LEVEL);
@@ -230,8 +256,7 @@ public final class MarketDataClient implements AutoCloseable {
     Logger sdkLogger = Logger.getLogger(SDK_LOGGER_NAME);
     sdkLogger.setLevel(parsed);
     if (!hasSdkHandler(sdkLogger)) {
-      Handler handler = new java.util.logging.ConsoleHandler();
-      handler.setFormatter(new MarketDataLogFormatter());
+      Handler handler = new MarketDataConsoleHandler();
       handler.setLevel(parsed);
       sdkLogger.addHandler(handler);
       // Bypass the root logger's default handlers; they would otherwise re-emit each record
@@ -239,7 +264,7 @@ public final class MarketDataClient implements AutoCloseable {
       sdkLogger.setUseParentHandlers(false);
     } else {
       for (Handler h : sdkLogger.getHandlers()) {
-        if (isSdkHandler(h)) {
+        if (h instanceof MarketDataConsoleHandler) {
           h.setLevel(parsed);
         }
       }
@@ -248,14 +273,10 @@ public final class MarketDataClient implements AutoCloseable {
 
   private static boolean hasSdkHandler(Logger logger) {
     for (Handler h : logger.getHandlers()) {
-      if (isSdkHandler(h)) {
+      if (h instanceof MarketDataConsoleHandler) {
         return true;
       }
     }
     return false;
-  }
-
-  private static boolean isSdkHandler(Handler h) {
-    return h.getFormatter() instanceof MarketDataLogFormatter;
   }
 }

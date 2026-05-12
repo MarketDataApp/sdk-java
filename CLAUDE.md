@@ -94,6 +94,30 @@ When picking up new work, check this list before reaching for the SDK requiremen
 - `HttpTransport.buildUri` URL-encodes query-param values with `URLEncoder.encode(..., UTF_8)`, which is form-encoding semantics: spaces become `+`, not `%20`. Fine for today's typed params (dates, numerics) but a future endpoint that takes an arbitrary string (e.g. `symbol="BRK A"`) would round-trip differently against an RFC-3986-strict server. Switch to a path/query-segment-aware encoder when the first such param lands. Tracked as Issue #10 of the 2026-05-11 review.
 - `Retry-After` server header is parsed and respected by neither `RetryPolicy` nor `HttpTransport`. Today every retry uses the calculated exponential backoff (`min(1s × 2^N, 30s)`). Implementing the override needs the response headers to reach `RetryPolicy.backoffDelay`, which today only sees the attempt index — most natural path is to surface a `Duration` on `ServerError` (or thread it through a separate channel) when 5xx responses carry the header. Follow-up of the §9 work.
 
+## Test policy: unit tests are network-free
+
+Unit tests under `src/test/` **must not** make real network calls. Anything that needs the live
+API goes to `src/integrationTest/` (gated by `MARKETDATA_RUN_INTEGRATION_TESTS=true`).
+
+This matters because §5 made `MarketDataClient`'s constructor perform a `GET /user/` when
+`validateOnStartup=true` (the default). A test that builds `new MarketDataClient("any-token",
+null, null, true)` now hits `api.marketdata.app` over the network — exactly the failure mode
+this policy prevents.
+
+Concrete rules for unit tests that construct `MarketDataClient`:
+
+- Use the 4-arg constructor with `validateOnStartup=false` when verifying field wiring only.
+- Use a local server (`com.sun.net.httpserver.HttpServer` in-process) and point `baseUrl` at it
+  when you genuinely need to exercise the validate-on-startup flow — see
+  `MarketDataClientStartupValidationTest` for the pattern.
+- Tests that need the **real** API for smoke verification (e.g. the no-arg ctor end-to-end) go to
+  `src/integrationTest/.../MarketDataClientIT.java`.
+
+No automated enforcement today (a future ArchUnit rule or a grep step in CI could close that
+gap). Code review is the gate. Whenever you introduce a test that touches `new
+MarketDataClient(..., true)` with a default URL, ask: "does this need to live in `integrationTest`
+instead?"
+
 ## Acceptance checklist
 
 `docs/java-sdk-requirements.md` ends with an "Acceptance Checklist" mapping each Java-specific requirements section to verifiable items. Treat it as the definition of done for v1: when implementing, work toward making each box checkable, and use it as a self-review pass before declaring a section complete.

@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.marketdata.sdk.exception.AuthenticationError;
 import com.marketdata.sdk.exception.NetworkError;
+import com.marketdata.sdk.exception.ServerError;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -81,6 +82,29 @@ class MarketDataClientStartupValidationTest {
 
     assertThat(requestCount.get())
         .as("startup validation must fail fast — no retry on auth errors")
+        .isEqualTo(1);
+  }
+
+  /**
+   * Regression: {@code validateToken} must be single-attempt. {@code HttpTransport.executeAsync}
+   * normally retries 503 with exponential backoff, so if a refactor accidentally routes the startup
+   * probe through it the server would see 3 calls and (in this test) eventually succeed with a 200.
+   * Forcing the test to script enough responses to satisfy a 3-attempt chain — and then asserting
+   * {@code requestCount == 1} — fails determinístically the moment the path stops being
+   * single-shot.
+   */
+  @Test
+  void validateTokenDoesNotRetryTransient5xx() {
+    route(503, "{}");
+
+    assertThatThrownBy(() -> new MarketDataClient("token", baseUrl(), null, true))
+        .isInstanceOf(ServerError.class)
+        .satisfies(t -> assertThat(((ServerError) t).getStatusCode()).isEqualTo(503));
+
+    assertThat(requestCount.get())
+        .as(
+            "validateToken must call executeOnce (not executeAsync) so a refactor that"
+                + " accidentally enables retry on the startup path is caught here")
         .isEqualTo(1);
   }
 

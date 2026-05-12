@@ -121,6 +121,14 @@ final class HttpTransport implements AutoCloseable {
    * RetryPolicy}: retries 501–599 and IOException-shaped {@link NetworkError}s with exponential
    * backoff, surfaces every other failure immediately. Cancellation of the returned future bails
    * out of any pending backoff and propagates to the current in-flight attempt.
+   *
+   * <p><strong>Interaction between the §8 pre-flight check and the retry chain:</strong> each
+   * attempt re-runs the pre-flight check against the latest rate-limit snapshot. If a transient 5xx
+   * triggers a backoff and another concurrent caller's response drains the snapshot to {@code
+   * remaining=0} during that window, the next attempt's pre-flight fires and the chain ends with
+   * {@link com.marketdata.sdk.exception.RateLimitError} — not the upstream 5xx. The synthetic error
+   * reflects what the server would have returned anyway (a guaranteed 429 once the quota was gone),
+   * but callers that grep for "last server status" should know the substitution can happen.
    */
   <T> CompletableFuture<T> executeAsync(RequestSpec spec, Class<T> responseType) {
     CompletableFuture<T> result = new CompletableFuture<>();
@@ -219,11 +227,17 @@ final class HttpTransport implements AutoCloseable {
     // seeds it, so this is a no-op for cold clients.
     RateLimits snapshot = latestRateLimits.get();
     if (snapshot != null && snapshot.remaining() <= 0) {
+      // `reset == EPOCH` means the response carried partial rate-limit headers (e.g.
+      // remaining without reset) and `RateLimitHeaders.parse` defaulted the missing field to
+      // 0. Rendering "1970-01-01" in the user-facing message looks like a bug; omit the
+      // suffix when the value is meaningless.
+      String resetSuffix =
+          snapshot.reset().equals(java.time.Instant.EPOCH)
+              ? ""
+              : " (resets at " + snapshot.reset() + ")";
       return CompletableFuture.failedFuture(
           new RateLimitError(
-              "Pre-flight rate-limit check failed: 0 credits remaining (resets at "
-                  + snapshot.reset()
-                  + ")",
+              "Pre-flight rate-limit check failed: 0 credits remaining" + resetSuffix,
               new ErrorContext(null, uri.toString(), null)));
     }
 

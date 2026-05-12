@@ -310,6 +310,29 @@ class HttpTransportRetryTest {
   }
 
   @Test
+  void preflightMessageOmitsResetSuffixWhenResetIsEpoch() {
+    // Partial rate-limit headers: server returned `remaining` without a `reset`, so
+    // RateLimitHeaders.parse defaulted reset to Instant.EPOCH. Rendering "(resets at
+    // 1970-01-01T00:00:00Z)" in the user-facing message looks like a bug — verify we omit it.
+    MultiResponseHttpClient client =
+        new MultiResponseHttpClient(
+            response(
+                200,
+                "{\"value\":\"ok\"}",
+                Map.of(
+                    "x-api-ratelimit-limit", "50000",
+                    "x-api-ratelimit-remaining", "0",
+                    "x-api-ratelimit-consumed", "50000")));
+
+    HttpTransport transport = newTransport(client, fastPolicy(3));
+    transport.executeSync(RequestSpec.get("ping").build(), Echo.class);
+
+    assertThatThrownBy(() -> transport.executeSync(RequestSpec.get("ping").build(), Echo.class))
+        .isInstanceOf(RateLimitError.class)
+        .hasMessage("Pre-flight rate-limit check failed: 0 credits remaining");
+  }
+
+  @Test
   void preflightAllowsRequestWhenRemainingPositive() {
     MultiResponseHttpClient client =
         new MultiResponseHttpClient(
