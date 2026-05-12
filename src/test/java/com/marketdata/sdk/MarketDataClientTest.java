@@ -14,7 +14,10 @@ class MarketDataClientTest {
 
   @Test
   void buildsWithExplicitToken() {
-    try (var client = new MarketDataClient("test-key", null, null, true)) {
+    // validateOnStartup=false: this test verifies field-wiring on the explicit ctor, not the
+    // /user/ probe. The probe path is exercised end-to-end against an in-process server in
+    // MarketDataClientStartupValidationTest, and against the live API in MarketDataClientIT.
+    try (var client = new MarketDataClient("test-key", null, null, false)) {
       assertThat(client.isDemoMode()).isFalse();
       assertThat(client.getBaseUrl()).isEqualTo(Configuration.DEFAULT_BASE_URL);
       assertThat(client.getApiVersion()).isEqualTo(Configuration.DEFAULT_API_VERSION);
@@ -22,15 +25,17 @@ class MarketDataClientTest {
   }
 
   @Test
-  void demoModeWhenNoTokenAvailable() {
-    // Demo mode iff the full cascade (env var → .env → null) yields nothing. Deriving the
-    // expectation from the same Configuration helper the constructor uses keeps the test
-    // valid both on CI (no token anywhere → demoMode) and locally (.env-supplied token →
-    // not demoMode); a plain `System.getenv` check would miss the .env source and break
-    // locally.
-    try (var client = new MarketDataClient()) {
-      boolean expectDemo = Configuration.loadFromProcess().resolve(null, EnvVars.TOKEN) == null;
-      assertThat(client.isDemoMode()).isEqualTo(expectDemo);
+  void demoModeWhenAllSourcesYieldNull() {
+    // Demo mode iff the full cascade (apiKey → env var → .env → null) yields nothing. We use
+    // the 4-arg ctor with validateOnStartup=false so the constructor never touches the network
+    // — the assertion is purely about cascade resolution. assumeTrue gates the test on the
+    // CI/local environment having no token; otherwise we couldn't reach demo mode without
+    // mocking env vars from inside a unit test.
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+        Configuration.loadFromProcess().resolve(null, EnvVars.TOKEN) == null,
+        "MARKETDATA_TOKEN present in env — cannot exercise demo mode from a unit test");
+    try (var client = new MarketDataClient(null, null, null, false)) {
+      assertThat(client.isDemoMode()).isTrue();
     }
   }
 
@@ -85,26 +90,10 @@ class MarketDataClientTest {
     public void close() {}
   }
 
-  @Test
-  void noArgConstructorAppliesProductionDefaults() {
-    // The no-arg constructor must be equivalent to `new MarketDataClient(null, null, null,
-    // true)` — production path with everything resolved from the cascade and startup
-    // validation enabled. validateOnStartup and the userAgent format are env-independent,
-    // so we assert them unconditionally; baseUrl/apiVersion fall back to the documented
-    // defaults only when the cascade has no override, so we gate those assertions on the
-    // env vars being unset (mirrors the demo-mode test above).
-    try (var client = new MarketDataClient()) {
-      assertThat(client.isValidateOnStartup()).isTrue();
-      assertThat(client.getUserAgent()).startsWith("marketdata-sdk-java/");
-
-      if (System.getenv("MARKETDATA_BASE_URL") == null) {
-        assertThat(client.getBaseUrl()).isEqualTo(Configuration.DEFAULT_BASE_URL);
-      }
-      if (System.getenv("MARKETDATA_API_VERSION") == null) {
-        assertThat(client.getApiVersion()).isEqualTo(Configuration.DEFAULT_API_VERSION);
-      }
-    }
-  }
+  // `noArgConstructorAppliesProductionDefaults` (verifying the no-arg ctor end-to-end against
+  // the production defaults) now lives in `src/integrationTest/.../MarketDataClientIT.java`,
+  // because the post-§5 constructor hits /user/ when validateOnStartup=true and unit tests
+  // must not depend on real network.
 
   @Test
   void overridesAreHonored() {
@@ -117,14 +106,17 @@ class MarketDataClientTest {
 
   @Test
   void userAgentMatchesSpec() {
-    try (var client = new MarketDataClient("KEY", null, null, true)) {
+    // validateOnStartup=false so the userAgent assertion doesn't depend on a real /user/ call.
+    try (var client = new MarketDataClient("KEY", null, null, false)) {
       assertThat(client.getUserAgent()).startsWith("marketdata-sdk-java/");
     }
   }
 
   @Test
   void rateLimitsStartUnpopulated() {
-    try (var client = new MarketDataClient("KEY", null, null, true)) {
+    // validateOnStartup=false so the constructor does not hit /user/ and seed the snapshot;
+    // this test asserts the pre-network state of the client.
+    try (var client = new MarketDataClient("KEY", null, null, false)) {
       assertThat(client.getRateLimits()).isNull();
     }
   }

@@ -6,6 +6,7 @@ import com.marketdata.sdk.exception.ErrorContext;
 import com.marketdata.sdk.exception.MarketDataException;
 import com.marketdata.sdk.exception.NetworkError;
 import com.marketdata.sdk.exception.ParseError;
+import com.marketdata.sdk.exception.RateLimitError;
 import com.marketdata.sdk.markets.MarketStatus;
 import java.io.IOException;
 import java.net.URI;
@@ -186,12 +187,45 @@ final class HttpTransport implements AutoCloseable {
   }
 
   /**
+   * SDK requirements §5: hit {@code /user/} to confirm the token is valid. Used by {@link
+   * MarketDataClient}'s constructor when {@code validateOnStartup=true}. Single-attempt
+   * deliberately: a 3-attempt retry chain on the construction path would block the caller for
+   * 99s+1s+2s before reporting a bad token — worse UX than failing fast. The response body is
+   * irrelevant; what matters is that the status is 2xx (token valid) vs 401 (token invalid) vs a
+   * network exception.
+   */
+  void validateToken() {
+    RequestSpec spec = RequestSpec.get("user").build();
+    try {
+      executeOnce(spec, java.util.Map.class).join();
+    } catch (CompletionException e) {
+      throw asRuntime(e.getCause());
+    } catch (CancellationException e) {
+      throw asRuntime(e);
+    }
+  }
+
+  /**
    * Single-shot dispatch — one HTTP request, one permit lease, one response decode. Public retry
    * orchestration lives in {@link #executeAsync}.
    */
   private <T> CompletableFuture<T> executeOnce(RequestSpec spec, Class<T> responseType) {
     URI uri = buildUri(spec);
     HttpRequest request = buildRequest(uri);
+
+    // SDK requirements §8: pre-flight check. If the last response we saw left us with no
+    // credits, fail fast — there's no point burning a permit and an RTT for what the server
+    // will reject as 429 anyway. The snapshot can only be `null` until the first response
+    // seeds it, so this is a no-op for cold clients.
+    RateLimits snapshot = latestRateLimits.get();
+    if (snapshot != null && snapshot.remaining() <= 0) {
+      return CompletableFuture.failedFuture(
+          new RateLimitError(
+              "Pre-flight rate-limit check failed: 0 credits remaining (resets at "
+                  + snapshot.reset()
+                  + ")",
+              new ErrorContext(null, uri.toString(), null)));
+    }
 
     // ADR-007: acquire returns a CompletableFuture instead of parking the caller's thread.
     // When permits are available the future is already completed (fast path) and thenCompose

@@ -63,7 +63,9 @@ The Java SDK must also satisfy the canonical, cross-language [SDK Requirements](
 **Already wired in:**
 - §1.1 client object — `MarketDataClient` with two public constructors: a no-arg one for production (everything from the cascade) and a 4-arg `(apiKey, baseUrl, apiVersion, validateOnStartup)` for tests and short-lived runtimes. All fields `final` (immutable). Default base URL `https://api.marketdata.app`, default API version `v1`, single shared `HttpClient`, `User-Agent: marketdata-sdk-java/{version}` (version auto-detected from JAR manifest), `close()` for resource release, `getRateLimits()` accessor.
 - §4 configuration cascade — `Configuration.resolve(...)` does explicit → `MARKETDATA_*` env var → `.env` in CWD → default. Env var names live in `EnvVars` (package-private, in the SDK root package). The 4-arg constructor's parameters feed step 1; the no-arg constructor skips it and starts at step 2.
-- §5 demo mode + `validateOnStartup` parameter on the 4-arg constructor (defaults to `true` via the no-arg constructor); token redaction via `Tokens.redact` (matches the spec example `***…***YKT0`).
+- §5 demo mode + `validateOnStartup` parameter on the 4-arg constructor (defaults to `true` via the no-arg constructor); token redaction via `Tokens.redact` (matches the spec example `***…***YKT0`). When `validateOnStartup` is true and not in demo mode, the constructor hits `GET /user/` via `HttpTransport.validateToken` (single-attempt, no retry) so invalid tokens surface as `AuthenticationError` from the constructor instead of from the first business call.
+- §7 logging: `MARKETDATA_LOGGING_LEVEL` (via cascade) is applied to the `com.marketdata.sdk` logger at client construction. When set, a `MarketDataLogFormatter` (producing the spec-mandated `{timestamp} - {logger_name} - {level} - {message}` shape, UTC second resolution) is installed on a dedicated `ConsoleHandler` and parent handlers are bypassed to avoid duplicate emission. When unset, the SDK does not touch the JVM logging config.
+- §8 pre-flight rate-limit check: `HttpTransport.executeOnce` short-circuits with `RateLimitError` before acquiring a permit if the latest snapshot reports `remaining <= 0`. No-op for cold clients (snapshot starts null).
 - §6 sealed `MarketDataException` hierarchy with the 7 canonical subtypes and full support context (`requestId`, `requestUrl`, `statusCode`, `timestamp`, `exceptionType`) + `getSupportInfo()`.
 - §10 timeouts: `REQUEST_TIMEOUT = 99s` and `CONNECT_TIMEOUT = 2s` exposed as constants on `MarketDataClient`. Connect timeout is wired into the `HttpClient`; the per-request 99 s timeout is applied via `HttpRequest.Builder#timeout` in `HttpTransport.buildRequest`.
 - §12 concurrency: 50-permit `AsyncSemaphore` on `HttpTransport` with acquire/release wired around every dispatch. The custom semaphore replaces `java.util.concurrent.Semaphore` so `executeAsync` never parks the caller's thread on a full pool (ADR-007).
@@ -82,9 +84,7 @@ The Java SDK must also satisfy the canonical, cross-language [SDK Requirements](
 **Deliberately deferred (require the request/endpoint layer to land first):**
 - §1.2 resource groupings (`client.stocks`, `client.options`, `client.funds`, `client.markets`, `client.utilities`).
 - §2 endpoint method coverage; §3 universal parameters; §11 wire-format decoding.
-- §5 actual `/user/` startup validation call (the `validateOnStartup` flag is the seam; the call itself comes with the request layer).
-- §7 honoring `MARKETDATA_LOGGING_LEVEL` and the spec's exact `{timestamp} - {logger_name} - {level} - {message}` format. Currently the SDK uses `java.util.logging` with default formatting; consumers can attach their own handler.
-- §8 rate-limit header parsing, pre-flight check, request-scoped attachment.
+- §8 request-scoped attachment of rate-limit metadata to the response object (the client-level snapshot is wired; the per-response carrier is not).
 - §9 `/status/` cache workflow and `Retry-After` header override (retry/backoff itself lives in `RetryPolicy` and is wired; what is missing is the `/status/` pre-check before retrying 501–599 and respecting the server-specified `Retry-After` over the calculated exponential backoff).
 - §13 100% coverage threshold via JaCoCo `violationRules`; deferred until there is functional code worth the threshold.
 

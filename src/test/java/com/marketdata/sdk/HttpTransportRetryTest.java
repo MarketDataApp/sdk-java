@@ -273,6 +273,64 @@ class HttpTransportRetryTest {
     assertThat(permits.queueLength()).isZero();
   }
 
+  // ---------- §8 pre-flight rate-limit check ----------
+
+  /**
+   * Spec §8: "If credits_remaining &lt;= 0, throw RateLimitError immediately (no request)." Once a
+   * response seeds the snapshot with {@code remaining = 0}, the next call must fail fast without
+   * dispatching anything — saves both the round trip and a guaranteed 429 from the server.
+   */
+  @Test
+  void preflightFailsImmediatelyWhenRemainingIsZero() {
+    MultiResponseHttpClient client =
+        new MultiResponseHttpClient(
+            response(
+                200,
+                "{\"value\":\"ok\"}",
+                Map.of(
+                    "x-api-ratelimit-limit", "50000",
+                    "x-api-ratelimit-remaining", "0",
+                    "x-api-ratelimit-reset", "1735689600",
+                    "x-api-ratelimit-consumed", "50000")));
+
+    HttpTransport transport = newTransport(client, fastPolicy(3));
+
+    // First call: snapshot is still null, request proceeds; response seeds remaining=0.
+    transport.executeSync(RequestSpec.get("ping").build(), Echo.class);
+    assertThat(client.callCount()).isEqualTo(1);
+
+    // Second call: pre-flight check sees remaining=0 and fails fast without touching the wire.
+    assertThatThrownBy(() -> transport.executeSync(RequestSpec.get("ping").build(), Echo.class))
+        .isInstanceOf(RateLimitError.class)
+        .hasMessageContaining("Pre-flight");
+
+    assertThat(client.callCount())
+        .as("pre-flight must short-circuit before a second request hits the network")
+        .isEqualTo(1);
+  }
+
+  @Test
+  void preflightAllowsRequestWhenRemainingPositive() {
+    MultiResponseHttpClient client =
+        new MultiResponseHttpClient(
+            response(
+                200,
+                "{\"value\":\"ok\"}",
+                Map.of(
+                    "x-api-ratelimit-limit", "50000",
+                    "x-api-ratelimit-remaining", "100",
+                    "x-api-ratelimit-reset", "1735689600",
+                    "x-api-ratelimit-consumed", "49900")),
+            response(200, "{\"value\":\"ok\"}", Map.of()));
+
+    HttpTransport transport = newTransport(client, fastPolicy(3));
+
+    transport.executeSync(RequestSpec.get("ping").build(), Echo.class);
+    transport.executeSync(RequestSpec.get("ping").build(), Echo.class);
+
+    assertThat(client.callCount()).isEqualTo(2);
+  }
+
   // ---------- permits are still conserved across retries ----------
 
   @Test
