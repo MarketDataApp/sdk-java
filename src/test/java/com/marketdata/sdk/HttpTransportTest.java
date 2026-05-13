@@ -17,6 +17,9 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+// These tests cover the SINGLE-ATTEMPT semantics of executeAsync. Retry behavior is exercised
+// separately in HttpTransportRetryTest; here we explicitly disable retry so a permit-release
+// assertion reflects exactly one HTTP call per executeAsync invocation.
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
@@ -25,6 +28,10 @@ import javax.net.ssl.SSLParameters;
 import org.junit.jupiter.api.Test;
 
 class HttpTransportTest {
+
+  /** Policy with a single attempt — disables retry so each test asserts one HTTP call only. */
+  private static final RetryPolicy NO_RETRY =
+      new RetryPolicy(1, Duration.ofMillis(1), Duration.ofMillis(1));
 
   /**
    * Regression for the synchronous-throw permit leak: if {@code httpClient.sendAsync(...)} throws
@@ -40,7 +47,8 @@ class HttpTransportTest {
   @Test
   void permitReleasedWhenSendAsyncThrowsSynchronously() throws Exception {
     HttpTransport transport =
-        new HttpTransport("http://localhost", "v1", "test/0.0", null, new SyncThrowingHttpClient());
+        new HttpTransport(
+            "http://localhost", "v1", "test/0.0", null, new SyncThrowingHttpClient(), NO_RETRY);
 
     AsyncSemaphore permits = readSemaphore(transport);
     int initial = permits.availablePermits();
@@ -76,7 +84,7 @@ class HttpTransportTest {
   void errorThrownSynchronouslyIsPreservedAsRootCause() throws Exception {
     HttpTransport transport =
         new HttpTransport(
-            "http://localhost", "v1", "test/0.0", null, new ErrorThrowingHttpClient());
+            "http://localhost", "v1", "test/0.0", null, new ErrorThrowingHttpClient(), NO_RETRY);
 
     AsyncSemaphore permits = readSemaphore(transport);
     int initial = permits.availablePermits();
@@ -112,7 +120,8 @@ class HttpTransportTest {
   @Test
   void permitsAreReleasedWhenSlowPathFuturesAreCancelled() throws Exception {
     ControllableHttpClient client = new ControllableHttpClient();
-    HttpTransport transport = new HttpTransport("http://localhost", "v1", "test/0.0", null, client);
+    HttpTransport transport =
+        new HttpTransport("http://localhost", "v1", "test/0.0", null, client, NO_RETRY);
 
     AsyncSemaphore permits = readSemaphore(transport);
     int initial = permits.availablePermits();

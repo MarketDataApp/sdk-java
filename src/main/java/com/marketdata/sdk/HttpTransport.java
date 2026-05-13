@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.jspecify.annotations.Nullable;
 
@@ -55,6 +56,7 @@ final class HttpTransport implements AutoCloseable {
   private final HttpClient httpClient;
   private final ObjectMapper jsonMapper;
   private final AsyncSemaphore concurrencyPermits;
+  private final RetryPolicy retryPolicy;
   private final AtomicReference<@Nullable RateLimits> latestRateLimits = new AtomicReference<>();
 
   private final String baseUrl;
@@ -63,7 +65,7 @@ final class HttpTransport implements AutoCloseable {
   private final @Nullable String token;
 
   HttpTransport(String baseUrl, String apiVersion, String userAgent, @Nullable String token) {
-    this(baseUrl, apiVersion, userAgent, token, defaultHttpClient());
+    this(baseUrl, apiVersion, userAgent, token, defaultHttpClient(), RetryPolicy.defaults());
   }
 
   // Package-private constructor used by tests to inject a stubbed HttpClient
@@ -74,6 +76,17 @@ final class HttpTransport implements AutoCloseable {
       String userAgent,
       @Nullable String token,
       HttpClient httpClient) {
+    this(baseUrl, apiVersion, userAgent, token, httpClient, RetryPolicy.defaults());
+  }
+
+  // Package-private constructor used by retry tests to drive sub-millisecond backoffs.
+  HttpTransport(
+      String baseUrl,
+      String apiVersion,
+      String userAgent,
+      @Nullable String token,
+      HttpClient httpClient,
+      RetryPolicy retryPolicy) {
     this.baseUrl = baseUrl;
     this.apiVersion = apiVersion;
     this.userAgent = userAgent;
@@ -81,6 +94,7 @@ final class HttpTransport implements AutoCloseable {
     this.concurrencyPermits = new AsyncSemaphore(CONCURRENCY_LIMIT);
     this.jsonMapper = buildJsonMapper();
     this.httpClient = httpClient;
+    this.retryPolicy = retryPolicy;
   }
 
   private static HttpClient defaultHttpClient() {
@@ -102,14 +116,80 @@ final class HttpTransport implements AutoCloseable {
   }
 
   /**
-   * Async-first request execution.
-   *
-   * <p>Acquires a concurrency permit, fires the request, parses rate-limit headers, decodes the
-   * body when the status is 200/203/404 (the API returns 404 with {@code {"s":"no_data"}} as a
-   * sentinel — see SDK requirements §9.1), and translates other status codes to the appropriate
-   * {@link MarketDataException} subtype.
+   * Async-first request execution with retry. Orchestrates one or more attempts according to {@link
+   * RetryPolicy}: retries 501–599 and IOException-shaped {@link NetworkError}s with exponential
+   * backoff, surfaces every other failure immediately. Cancellation of the returned future bails
+   * out of any pending backoff and propagates to the current in-flight attempt.
    */
   <T> CompletableFuture<T> executeAsync(RequestSpec spec, Class<T> responseType) {
+    CompletableFuture<T> result = new CompletableFuture<>();
+    // One cascade-cancel handler installed once: whichever attempt is currently in flight is
+    // tracked in `currentDispatched`; cancelling `result` cancels that. Previous attempts in
+    // the chain are already done by the time the next one updates the reference, so this
+    // avoids accumulating a handler per attempt.
+    AtomicReference<@Nullable CompletableFuture<T>> currentDispatched = new AtomicReference<>();
+    result.whenComplete(
+        (r, t) -> {
+          if (t instanceof CancellationException) {
+            CompletableFuture<T> inFlight = currentDispatched.get();
+            if (inFlight != null && !inFlight.isDone()) {
+              inFlight.cancel(false);
+            }
+          }
+        });
+    attempt(spec, responseType, 0, result, currentDispatched);
+    return result;
+  }
+
+  private <T> void attempt(
+      RequestSpec spec,
+      Class<T> responseType,
+      int attemptIdx,
+      CompletableFuture<T> result,
+      AtomicReference<@Nullable CompletableFuture<T>> currentDispatched) {
+    if (result.isDone()) {
+      // Caller cancelled (or completed exceptionally from a previous attempt's whenComplete).
+      // Don't burn another HTTP request.
+      return;
+    }
+    CompletableFuture<T> dispatched = executeOnce(spec, responseType);
+    currentDispatched.set(dispatched);
+
+    // If the caller cancelled `result` between attempts (during a backoff window), the handler
+    // installed in executeAsync has fired but `currentDispatched` was either null or pointing
+    // to the previous (already-done) attempt — so the new one was never cancelled. Check here
+    // and propagate immediately.
+    if (result.isCancelled() && !dispatched.isDone()) {
+      dispatched.cancel(false);
+      return;
+    }
+
+    dispatched.whenComplete(
+        (value, error) -> {
+          if (result.isDone()) {
+            return;
+          }
+          if (error == null) {
+            result.complete(value);
+            return;
+          }
+          Throwable cause = unwrap(error);
+          if (retryPolicy.shouldRetry(cause, attemptIdx)) {
+            long delayMs = retryPolicy.backoffDelay(attemptIdx).toMillis();
+            CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS)
+                .execute(
+                    () -> attempt(spec, responseType, attemptIdx + 1, result, currentDispatched));
+          } else {
+            result.completeExceptionally(cause);
+          }
+        });
+  }
+
+  /**
+   * Single-shot dispatch — one HTTP request, one permit lease, one response decode. Public retry
+   * orchestration lives in {@link #executeAsync}.
+   */
+  private <T> CompletableFuture<T> executeOnce(RequestSpec spec, Class<T> responseType) {
     URI uri = buildUri(spec);
     HttpRequest request = buildRequest(uri);
 
@@ -186,12 +266,19 @@ final class HttpTransport implements AutoCloseable {
   /**
    * Sync wrapper around {@link #executeAsync}. Per ADR-006, calls {@code .join()} and unwraps
    * {@link CompletionException} so callers see the underlying {@link MarketDataException} directly.
+   *
+   * <p>{@link CancellationException} can in principle escape {@code .join()} as a sibling of {@link
+   * CompletionException} (not nested), so it's caught explicitly. Today no internal code cancels
+   * the future {@code executeSync} owns, but covering it keeps the contract honest if a future
+   * change (timeout watchdog, retry coordinator) starts cancelling internally.
    */
   <T> T executeSync(RequestSpec spec, Class<T> responseType) {
     try {
       return executeAsync(spec, responseType).join();
     } catch (CompletionException e) {
       throw asRuntime(e.getCause());
+    } catch (CancellationException e) {
+      throw asRuntime(e);
     }
   }
 

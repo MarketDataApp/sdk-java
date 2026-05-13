@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Default retry attempts corrected from 3 to 4 (one initial + three retries) to
+  match SDK requirements §9.3 ("max 3 retries, yielding 4 total attempts").
+
 ### Added
 - Project scaffold per ADRs 001–007: Gradle Kotlin DSL build, JDK 17 toolchain,
   `integrationTest` source set, Spotless + JaCoCo, Vanniktech Maven Publish.
