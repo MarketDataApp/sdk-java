@@ -7,15 +7,15 @@ import java.io.IOException;
 import java.time.Duration;
 
 /**
- * Decides which failures get retried and how long to wait between attempts. SDK requirements §9
- * fixes the parameters: max 3 attempts total (one initial + two retries), exponential backoff
- * starting at 1s, capped at 30s. Network errors (only when wrapping an {@link IOException}-shaped
- * cause — see {@link #shouldRetry}) and HTTP 501–599 are retriable; 500 specifically is not, and
- * 4xx (including 401/429) surfaces immediately.
+ * Decides which failures get retried and how long to wait between attempts. Per SDK requirements
+ * §9.3: max 3 retries (yielding 4 total attempts) with exponential backoff {@code initial *
+ * 2^retry} starting at 1s, capped at 30s. Network errors (only when wrapping an {@link
+ * IOException}-shaped cause — see {@link #shouldRetry}) and HTTP 501–599 are retriable; 500
+ * specifically is not, and 4xx (including 401/429) surfaces immediately.
  *
- * <p><strong>Worst-case wall-clock per {@code executeAsync} call (defaults):</strong> 3 attempts ×
- * 99s per-request timeout + 1s + 2s backoff ≈ 5 minutes. SDK requirements §10 only mandates the
- * per-request timeout, not an overall deadline, so this is compliant — but callers in
+ * <p><strong>Worst-case wall-clock per {@code executeAsync} call (defaults):</strong> 4 attempts ×
+ * 99s per-request timeout + 1s + 2s + 4s backoff ≈ 6.75 minutes. SDK requirements §10 only mandates
+ * the per-request timeout, not an overall deadline, so this is compliant — but callers in
  * latency-sensitive contexts may want to wrap calls with their own {@code orTimeout} cap.
  *
  * <p>The constructor accepts custom values so tests can drive retries with sub-millisecond delays
@@ -36,9 +36,9 @@ final class RetryPolicy {
     this.maxBackoff = maxBackoff;
   }
 
-  /** Spec defaults: 3 attempts, 1s → 30s exponential. */
+  /** Defaults: 4 attempts, 1s → 30s exponential. */
   static RetryPolicy defaults() {
-    return new RetryPolicy(3, Duration.ofSeconds(1), Duration.ofSeconds(30));
+    return new RetryPolicy(4, Duration.ofSeconds(1), Duration.ofSeconds(30));
   }
 
   /**

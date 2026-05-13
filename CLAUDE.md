@@ -67,7 +67,7 @@ The Java SDK must also satisfy the canonical, cross-language [SDK Requirements](
 - §6 sealed `MarketDataException` hierarchy with the 7 canonical subtypes and full support context (`requestId`, `requestUrl`, `statusCode`, `timestamp`, `exceptionType`) + `getSupportInfo()`.
 - §10 timeouts: `REQUEST_TIMEOUT = 99s` and `CONNECT_TIMEOUT = 2s` exposed as constants on `MarketDataClient`. Connect timeout is wired into the `HttpClient`; the per-request 99 s timeout is applied via `HttpRequest.Builder#timeout` in `HttpTransport.buildRequest`.
 - §12 concurrency: 50-permit `AsyncSemaphore` on `HttpTransport` with acquire/release wired around every dispatch. The custom semaphore replaces `java.util.concurrent.Semaphore` so `executeAsync` never parks the caller's thread on a full pool (ADR-007).
-- §9 retry/backoff: `RetryPolicy` (3 attempts, exponential 1s→30s) wired into `HttpTransport.executeAsync` via a per-attempt loop using `CompletableFuture.delayedExecutor` (no scheduled threads). Network errors and HTTP 501–599 retry; 500 and 4xx do not.
+- §9 retry/backoff: `RetryPolicy` (4 total attempts = 1 initial + 3 retries, exponential 1s→30s per §9.3) wired into `HttpTransport.executeAsync` via a per-attempt loop using `CompletableFuture.delayedExecutor` (no scheduled threads). Network errors and HTTP 501–599 retry; 500 and 4xx do not.
 - §15 packaging: SemVer, MIT `LICENSE`, `CHANGELOG.md` in Keep a Changelog format, version auto-detected via JAR manifest (`Implementation-Version`).
 - §16 security: tokens never logged verbatim (use `Tokens.redact`); TLS validated by default (`HttpClient` does not expose a skip-verify option).
 - ADR-002 CI: split into four workflows.

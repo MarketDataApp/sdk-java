@@ -105,11 +105,12 @@ class RetryPolicyTest {
   void retriesStopAfterMaxAttempts() {
     NetworkError retriable =
         new NetworkError("net", ErrorContext.empty(), new java.io.IOException("transport down"));
-    // Defaults: maxAttempts = 3 → only attempts 0 and 1 are eligible to be followed by a retry
-    // (attempt 2 was the third try; no fourth attempt allowed).
+    // Defaults: maxAttempts = 4 → attempts 0, 1, 2 are eligible to be followed by a retry
+    // (attempt 3 was the fourth try; no fifth attempt allowed).
     assertThat(DEFAULTS.shouldRetry(retriable, 0)).isTrue();
     assertThat(DEFAULTS.shouldRetry(retriable, 1)).isTrue();
-    assertThat(DEFAULTS.shouldRetry(retriable, 2)).isFalse();
+    assertThat(DEFAULTS.shouldRetry(retriable, 2)).isTrue();
+    assertThat(DEFAULTS.shouldRetry(retriable, 3)).isFalse();
     assertThat(DEFAULTS.shouldRetry(retriable, 99)).isFalse();
   }
 
