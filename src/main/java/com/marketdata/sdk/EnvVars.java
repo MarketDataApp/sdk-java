@@ -1,6 +1,7 @@
 package com.marketdata.sdk;
 
 import java.util.function.Function;
+import org.jspecify.annotations.Nullable;
 
 final class EnvVars {
 
@@ -10,7 +11,7 @@ final class EnvVars {
   static final String LOGGING_LEVEL = "MARKETDATA_LOGGING_LEVEL";
   static final String DATE_FORMAT = "MARKETDATA_DATE_FORMAT";
 
-  static Function<String, String> systemLookup() {
+  static Function<String, @Nullable String> systemLookup() {
     return System::getenv;
   }
 
