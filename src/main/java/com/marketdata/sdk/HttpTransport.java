@@ -16,6 +16,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -50,6 +51,7 @@ final class HttpTransport implements AutoCloseable {
 
   private final HttpDispatcher dispatcher;
   private final RetryExecutor retryExecutor;
+  private final Supplier<@Nullable StatusCache> statusCacheSupplier;
   private final AtomicReference<@Nullable RateLimitSnapshot> latestRateLimits =
       new AtomicReference<>();
 
@@ -59,17 +61,30 @@ final class HttpTransport implements AutoCloseable {
   private final @Nullable String token;
 
   HttpTransport(String baseUrl, String apiVersion, String userAgent, @Nullable String token) {
+    this(baseUrl, apiVersion, userAgent, token, () -> null);
+  }
+
+  // Default-infra ctor with a status-cache supplier. MarketDataClient uses this so the §9.5
+  // gate is wired without each caller having to assemble the dispatcher + retry executor.
+  HttpTransport(
+      String baseUrl,
+      String apiVersion,
+      String userAgent,
+      @Nullable String token,
+      Supplier<@Nullable StatusCache> statusCacheSupplier) {
     this(
         baseUrl,
         apiVersion,
         userAgent,
         token,
         new HttpDispatcher(defaultHttpClient(), CONCURRENCY_LIMIT),
-        new RetryExecutor(RetryPolicy.defaults()));
+        new RetryExecutor(RetryPolicy.defaults()),
+        statusCacheSupplier);
   }
 
   // Package-private constructor for tests: inject a stubbed dispatcher and/or a fast retry
-  // policy so tests don't hit the wire and don't wait on real backoffs.
+  // policy. The status cache is omitted on this path (no §9.5 gate) so existing tests don't
+  // need to thread one through; tests that exercise the gate use the 7-arg overload.
   HttpTransport(
       String baseUrl,
       String apiVersion,
@@ -77,12 +92,27 @@ final class HttpTransport implements AutoCloseable {
       @Nullable String token,
       HttpDispatcher dispatcher,
       RetryExecutor retryExecutor) {
+    this(baseUrl, apiVersion, userAgent, token, dispatcher, retryExecutor, () -> null);
+  }
+
+  // Full ctor with status-cache supplier. The supplier is consulted on every executeAsync call
+  // so MarketDataClient can construct the cache AFTER the transport (the cache's fetcher uses
+  // the transport via UtilitiesResource — chicken-and-egg resolved by a deferred reference).
+  HttpTransport(
+      String baseUrl,
+      String apiVersion,
+      String userAgent,
+      @Nullable String token,
+      HttpDispatcher dispatcher,
+      RetryExecutor retryExecutor,
+      Supplier<@Nullable StatusCache> statusCacheSupplier) {
     this.baseUrl = baseUrl;
     this.apiVersion = apiVersion;
     this.userAgent = userAgent;
     this.token = token;
     this.dispatcher = dispatcher;
     this.retryExecutor = retryExecutor;
+    this.statusCacheSupplier = statusCacheSupplier;
   }
 
   private static HttpClient defaultHttpClient() {
@@ -109,8 +139,21 @@ final class HttpTransport implements AutoCloseable {
   CompletableFuture<HttpResponseEnvelope> executeAsync(RequestSpec spec) {
     URI uri = buildUri(spec);
     HttpRequest request = buildHttpRequest(uri, spec.format());
+    RetryPolicy policy = retryExecutor.policy();
     return retryExecutor.execute(
-        () -> dispatcher.dispatch(request).thenApply(response -> routeAndEnvelope(response, uri)));
+        () -> dispatcher.dispatch(request).thenApply(response -> routeAndEnvelope(response, uri)),
+        // §9.5: gate retries on retryable server errors through the /status/ cache. Even if the
+        // policy says yes, an "offline" cache entry for this URI's service blocks the retry so
+        // the caller fails fast instead of hammering a known-down service.
+        (cause, attempt) -> policy.shouldRetry(cause, attempt) && cacheAllowsRetry(uri));
+  }
+
+  private boolean cacheAllowsRetry(URI uri) {
+    StatusCache cache = statusCacheSupplier.get();
+    if (cache == null) {
+      return true; // pre-wire state or test setup without a cache
+    }
+    return cache.check(uri) == StatusCache.Decision.ALLOW;
   }
 
   /**

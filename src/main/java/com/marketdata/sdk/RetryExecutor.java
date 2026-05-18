@@ -5,6 +5,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiPredicate;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 
@@ -30,12 +31,27 @@ final class RetryExecutor {
     this.policy = policy;
   }
 
+  /** Visible to callers that need to compose their own retry predicate. */
+  RetryPolicy policy() {
+    return policy;
+  }
+
   /**
    * Drive {@code supplier} with retry. Each invocation of the supplier represents one attempt; if
    * the resulting future fails with a retriable cause, {@code supplier} is invoked again after the
-   * policy-determined backoff.
+   * policy-determined backoff. The retry decision uses the policy's own {@code shouldRetry}.
    */
   <T> CompletableFuture<T> execute(Supplier<CompletableFuture<T>> supplier) {
+    return execute(supplier, policy::shouldRetry);
+  }
+
+  /**
+   * Like {@link #execute(Supplier)}, but the caller supplies a custom retry predicate. Used when an
+   * external gate (e.g. the {@code /status/} pre-check from §9.5) needs to veto a retry the policy
+   * would otherwise allow. {@link RetryPolicy#backoffDelay} still controls timing.
+   */
+  <T> CompletableFuture<T> execute(
+      Supplier<CompletableFuture<T>> supplier, BiPredicate<Throwable, Integer> shouldRetry) {
     CompletableFuture<T> result = new CompletableFuture<>();
     // One cancellation handler installed once: whichever attempt is currently in flight is
     // tracked in `currentAttempt`; cancelling `result` cancels that. Previous attempts are
@@ -51,12 +67,13 @@ final class RetryExecutor {
             }
           }
         });
-    attempt(supplier, 0, result, currentAttempt);
+    attempt(supplier, shouldRetry, 0, result, currentAttempt);
     return result;
   }
 
   private <T> void attempt(
       Supplier<CompletableFuture<T>> supplier,
+      BiPredicate<Throwable, Integer> shouldRetry,
       int attemptIdx,
       CompletableFuture<T> result,
       AtomicReference<@Nullable CompletableFuture<T>> currentAttempt) {
@@ -87,10 +104,11 @@ final class RetryExecutor {
             return;
           }
           Throwable cause = unwrap(error);
-          if (policy.shouldRetry(cause, attemptIdx)) {
+          if (shouldRetry.test(cause, attemptIdx)) {
             long delayMs = policy.backoffDelay(attemptIdx).toMillis();
             CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS)
-                .execute(() -> attempt(supplier, attemptIdx + 1, result, currentAttempt));
+                .execute(
+                    () -> attempt(supplier, shouldRetry, attemptIdx + 1, result, currentAttempt));
           } else {
             result.completeExceptionally(cause);
           }

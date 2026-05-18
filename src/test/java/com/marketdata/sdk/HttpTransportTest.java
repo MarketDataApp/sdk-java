@@ -308,6 +308,88 @@ class HttpTransportTest {
         .isInstanceOf(ServerError.class); // not CompletionException, not wrapped
   }
 
+  // ---------- §9.5 status-cache gate ----------
+
+  /**
+   * Even with a 5xx that the policy would retry, an "offline" entry in the cache must veto the
+   * retry. The dispatcher should see exactly one call: the original attempt; no retries are
+   * scheduled.
+   */
+  @Test
+  void cacheOfflineEntryVetoesA5xxRetry() throws Exception {
+    com.marketdata.sdk.utilities.ApiStatus offlineForService =
+        new com.marketdata.sdk.utilities.ApiStatus(
+            java.util.List.of(
+                new com.marketdata.sdk.utilities.ServiceStatus(
+                    "/v1/markets/status/", "offline", false, 0.5, 0.5, java.time.Instant.EPOCH)));
+    StatusCache cache =
+        new StatusCache(
+            () -> CompletableFuture.completedFuture(offlineForService),
+            java.time.Clock.systemUTC());
+    cache.triggerRefresh();
+    // Wait for the snapshot to land — the fetcher returns a completed future, so the
+    // whenComplete fires synchronously on the same thread, but be defensive.
+    Thread.sleep(20);
+
+    // Allow 4 retries so we'd retry on a 5xx — IF the cache didn't veto.
+    RetryPolicy fourAttempts = new RetryPolicy(4, Duration.ofMillis(1), Duration.ofMillis(1));
+    CapturingClient client =
+        new CapturingClient(503, new byte[0], HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport =
+        new HttpTransport(
+            "http://localhost",
+            "v1",
+            "test/0.0",
+            "secret-token",
+            new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
+            new RetryExecutor(fourAttempts),
+            () -> cache);
+
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(ServerError.class);
+
+    // The cache vetoed: exactly one HTTP dispatch, no retries scheduled.
+    assertThat(client.captured).hasSize(1);
+  }
+
+  /** When the cache says online (or no entry matches), retries proceed normally. */
+  @Test
+  void cacheOnlineEntryAllowsNormalRetryFlow() throws Exception {
+    com.marketdata.sdk.utilities.ApiStatus online =
+        new com.marketdata.sdk.utilities.ApiStatus(
+            java.util.List.of(
+                new com.marketdata.sdk.utilities.ServiceStatus(
+                    "/v1/markets/status/", "online", true, 1.0, 1.0, java.time.Instant.EPOCH)));
+    StatusCache cache =
+        new StatusCache(
+            () -> CompletableFuture.completedFuture(online), java.time.Clock.systemUTC());
+    cache.triggerRefresh();
+    Thread.sleep(20);
+
+    RetryPolicy fourAttempts = new RetryPolicy(4, Duration.ofMillis(1), Duration.ofMillis(1));
+    CapturingClient client =
+        new CapturingClient(503, new byte[0], HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport =
+        new HttpTransport(
+            "http://localhost",
+            "v1",
+            "test/0.0",
+            "secret-token",
+            new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
+            new RetryExecutor(fourAttempts),
+            () -> cache);
+
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(ServerError.class);
+
+    // 4 attempts: initial + 3 retries (policy allows; cache doesn't veto).
+    assertThat(client.captured).hasSize(4);
+  }
+
   // ---------- stub HttpClient ----------
 
   /**

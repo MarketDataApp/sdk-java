@@ -1,6 +1,8 @@
 package com.marketdata.sdk;
 
 import java.nio.file.Path;
+import java.time.Clock;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import org.jspecify.annotations.Nullable;
 
@@ -44,14 +46,23 @@ public final class MarketDataClient implements AutoCloseable {
       Path dotEnvPath,
       Runnable startupValidator) {
     this.config = Configuration.resolve(apiKey, baseUrl, apiVersion, env, dotEnvPath);
+
+    // §9.5: the status cache pre-checks /status/ before retrying 5xx. The cache's fetcher uses
+    // `utilities.statusAsync()`, which goes through this transport — a chicken-and-egg. We
+    // resolve it with a deferred reference: the transport reads the cache through a supplier,
+    // which returns null until the cache is constructed (just below this transport instance).
+    AtomicReference<StatusCache> cacheRef = new AtomicReference<>();
     this.transport =
         new HttpTransport(
             config.baseUrl(),
             config.apiVersion(),
             "marketdata-sdk-java/" + Version.sdkVersion(),
-            config.apiKey());
+            config.apiKey(),
+            cacheRef::get);
     JsonResponseParser parser = new JsonResponseParser();
     this.utilities = new UtilitiesResource(transport, parser);
+    cacheRef.set(new StatusCache(utilities::statusAsync, Clock.systemUTC()));
+
     if (validateOnStartup) {
       startupValidator.run();
     }

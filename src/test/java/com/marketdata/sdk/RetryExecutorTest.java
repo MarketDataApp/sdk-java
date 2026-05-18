@@ -175,6 +175,50 @@ class RetryExecutorTest {
 
   // ---------- result shape ----------
 
+  // ---------- custom retry predicate overload ----------
+
+  /**
+   * The overload that accepts a custom {@code BiPredicate} is the seam HttpTransport uses to AND
+   * the policy with a status-cache veto (§9.5). Verify that when the predicate returns false even
+   * though the policy would have said true, no retry happens.
+   */
+  @Test
+  void customPredicateCanVetoARetryThePolicyWouldHaveAllowed() {
+    AtomicInteger calls = new AtomicInteger();
+    RetryExecutor exec = new RetryExecutor(FAST_RETRY);
+
+    CompletableFuture<String> f =
+        exec.execute(
+            () -> {
+              calls.incrementAndGet();
+              return CompletableFuture.failedFuture(retriableNet());
+            },
+            /* shouldRetry */ (cause, attempt) -> false);
+
+    assertThatThrownBy(f::join)
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(com.marketdata.sdk.exception.NetworkError.class);
+    assertThat(calls).hasValue(1); // policy would have allowed; predicate vetoed
+  }
+
+  @Test
+  void customPredicateReceivesUnwrappedCauseAndAttemptIndex() {
+    java.util.List<Integer> seenAttempts = new java.util.ArrayList<>();
+    RetryExecutor exec = new RetryExecutor(FAST_RETRY);
+
+    exec.execute(
+            () -> CompletableFuture.failedFuture(retriableNet()),
+            (cause, attempt) -> {
+              seenAttempts.add(attempt);
+              // Allow first two retries, then veto.
+              return attempt < 2;
+            })
+        .exceptionally(e -> null)
+        .join();
+
+    assertThat(seenAttempts).containsExactly(0, 1, 2);
+  }
+
   @Test
   void resultFutureCarriesCancellationException() {
     RetryExecutor exec = new RetryExecutor(NO_RETRY);
