@@ -201,9 +201,15 @@ final class HttpTransport implements AutoCloseable {
     if ((status >= 200 && status < 300) || status == 404) {
       return new HttpResponseEnvelope(response.body(), status, requestId, response.headers(), uri);
     }
-    ErrorContext context =
-        ErrorContext.forResponse(uri.toString(), status, requestId, Instant.now());
-    MarketDataException ex = HttpStatusMapper.map(status, context);
+    Instant now = Instant.now();
+    ErrorContext context = ErrorContext.forResponse(uri.toString(), status, requestId, now);
+    java.time.Duration retryAfter =
+        response
+            .headers()
+            .firstValue("Retry-After")
+            .flatMap(v -> RetryAfterHeader.parse(v, now))
+            .orElse(null);
+    MarketDataException ex = HttpStatusMapper.map(status, context, retryAfter);
     if (ex != null) {
       throw ex;
     }

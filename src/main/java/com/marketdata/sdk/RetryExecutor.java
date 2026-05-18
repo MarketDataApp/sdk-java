@@ -105,7 +105,7 @@ final class RetryExecutor {
           }
           Throwable cause = unwrap(error);
           if (shouldRetry.test(cause, attemptIdx)) {
-            long delayMs = policy.backoffDelay(attemptIdx).toMillis();
+            long delayMs = policy.backoffDelay(cause, attemptIdx).toMillis();
             CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS)
                 .execute(
                     () -> attempt(supplier, shouldRetry, attemptIdx + 1, result, currentAttempt));

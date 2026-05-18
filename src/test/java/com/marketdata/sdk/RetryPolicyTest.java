@@ -10,6 +10,7 @@ import com.marketdata.sdk.exception.NotFoundError;
 import com.marketdata.sdk.exception.ParseError;
 import com.marketdata.sdk.exception.RateLimitError;
 import com.marketdata.sdk.exception.ServerError;
+import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
@@ -172,6 +173,37 @@ class RetryPolicyTest {
     assertThat(tiny.backoffDelay(0)).isEqualTo(Duration.ofMillis(1));
     assertThat(tiny.backoffDelay(1)).isEqualTo(Duration.ofMillis(2));
     assertThat(tiny.backoffDelay(20)).isEqualTo(Duration.ofMillis(10));
+  }
+
+  // ---------- backoffDelay(cause, attempt) honors Retry-After ----------
+
+  @Test
+  void backoffWithCauseFallsBackToExponentialWhenCauseHasNoRetryAfter() {
+    // ServerError without Retry-After → exponential as before.
+    ServerError noRetryAfter = new ServerError("503", ctxWithStatus(503));
+    assertThat(DEFAULTS.backoffDelay(noRetryAfter, 0)).isEqualTo(Duration.ofSeconds(1));
+    assertThat(DEFAULTS.backoffDelay(noRetryAfter, 3)).isEqualTo(Duration.ofSeconds(8));
+  }
+
+  @Test
+  void backoffWithCauseHonorsRetryAfterOnServerError() {
+    // The server's Retry-After completely replaces the calculated exponential — even when the
+    // exponential would have been smaller (server knows better).
+    ServerError withRetryAfter =
+        new ServerError(
+            "503", ctxWithStatus(503), /* cause */ null, /* retryAfter */ Duration.ofSeconds(45));
+
+    // Attempt 0 would normally be 1s; Retry-After overrides to 45s.
+    assertThat(DEFAULTS.backoffDelay(withRetryAfter, 0)).isEqualTo(Duration.ofSeconds(45));
+    // Attempt 5 would normally cap at 30s; Retry-After still wins with 45s.
+    assertThat(DEFAULTS.backoffDelay(withRetryAfter, 5)).isEqualTo(Duration.ofSeconds(45));
+  }
+
+  @Test
+  void backoffWithCauseIgnoresRetryAfterOnNonServerErrorCauses() {
+    // NetworkError doesn't carry Retry-After at all → exponential math.
+    NetworkError net = new NetworkError("n", ctxNoResponse(), new IOException("down"));
+    assertThat(DEFAULTS.backoffDelay(net, 1)).isEqualTo(Duration.ofSeconds(2));
   }
 
   @Test

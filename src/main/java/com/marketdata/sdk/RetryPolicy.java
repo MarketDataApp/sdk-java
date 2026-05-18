@@ -21,11 +21,11 @@ import java.time.Duration;
  * <p>The constructor accepts custom values so tests can drive retries with sub-millisecond delays
  * without waiting on real wall-clock backoffs.
  *
- * <p>TODO §9: this policy is purely about whether a cause is retriable in principle. The {@code
- * /status/} cache pre-check (skip a 5xx retry when the server is marked down) and the {@code
- * Retry-After} header override (replace the calculated backoff with the server-specified delay) are
- * deliberately handled by {@code HttpTransport}, not here — they depend on external runtime state
- * and response headers that this class doesn't see. See {@code CLAUDE.md} "Known latent gaps".
+ * <p>§9.4 {@code Retry-After} override: when the failing cause is a {@link ServerError} that
+ * carries a server-supplied delay, {@link #backoffDelay(Throwable, int)} returns that delay
+ * verbatim instead of the exponential calculation. §9.5 {@code /status/} cache pre-check is handled
+ * at the {@code HttpTransport} layer via {@code StatusCache}, not here — that gate depends on
+ * external runtime state this class doesn't see.
  */
 final class RetryPolicy {
 
@@ -57,6 +57,21 @@ final class RetryPolicy {
       return false;
     }
     return isRetriable(cause);
+  }
+
+  /**
+   * Backoff before the next attempt, honoring a server-supplied {@code Retry-After} when the cause
+   * is a {@link ServerError} that carried one (§9.4). Otherwise falls back to the exponential
+   * calculation from {@link #backoffDelay(int)}.
+   */
+  Duration backoffDelay(Throwable cause, int attempt) {
+    if (cause instanceof ServerError server) {
+      Duration override = server.getRetryAfter().orElse(null);
+      if (override != null) {
+        return override;
+      }
+    }
+    return backoffDelay(attempt);
   }
 
   /**

@@ -308,6 +308,47 @@ class HttpTransportTest {
         .isInstanceOf(ServerError.class); // not CompletionException, not wrapped
   }
 
+  // ---------- §9.4 Retry-After header ----------
+
+  /**
+   * When the server attaches a {@code Retry-After} header to a 5xx response, the resulting {@link
+   * ServerError} must carry the parsed {@link Duration} so the retry policy can override its
+   * calculated backoff with the server's directive.
+   */
+  @Test
+  void serverErrorCarriesParsedRetryAfterDuration() {
+    HttpHeaders headers = TestHttpClients.headersOf(Map.of("Retry-After", "7"));
+    CapturingClient client = new CapturingClient(503, new byte[0], headers);
+    HttpTransport transport = newTransport(client);
+
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(ServerError.class)
+        .satisfies(
+            t -> {
+              ServerError se = (ServerError) t.getCause();
+              assertThat(se.getRetryAfter()).contains(Duration.ofSeconds(7));
+            });
+  }
+
+  @Test
+  void serverErrorRetryAfterIsEmptyWhenHeaderAbsent() {
+    CapturingClient client =
+        new CapturingClient(503, new byte[0], HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(ServerError.class)
+        .satisfies(
+            t -> {
+              ServerError se = (ServerError) t.getCause();
+              assertThat(se.getRetryAfter()).isEmpty();
+            });
+  }
+
   // ---------- §9.5 status-cache gate ----------
 
   /**
