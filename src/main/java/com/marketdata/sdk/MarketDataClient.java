@@ -8,6 +8,7 @@ public final class MarketDataClient implements AutoCloseable {
 
   private final Configuration config;
   private final HttpTransport transport;
+  private final UtilitiesResource utilities;
 
   public MarketDataClient() {
     this(null, null, null, true);
@@ -43,9 +44,16 @@ public final class MarketDataClient implements AutoCloseable {
             config.apiVersion(),
             "marketdata-sdk-java/" + Version.sdkVersion(),
             config.apiKey());
+    JsonResponseParser parser = new JsonResponseParser();
+    this.utilities = new UtilitiesResource(transport, parser);
     if (validateOnStartup) {
       startupValidator.run();
     }
+  }
+
+  /** System endpoints documented at the API root: {@code /headers/} (and more to come). */
+  public UtilitiesResource utilities() {
+    return utilities;
   }
 
   /**
