@@ -120,7 +120,10 @@ class MarketDataClientTest {
 
   @Test
   void quick_start_usage_resolves_real_environment_and_never_leaks_token() {
-    try (MarketDataClient client = new MarketDataClient()) {
+    // The no-arg public ctor now hits /v1/user/ for startup validation (§5). Don't exercise
+    // that path here — this test asserts config resolution and token redaction, not the live
+    // call. Use the 4-arg variant with validateOnStartup=false to keep this a pure unit test.
+    try (MarketDataClient client = new MarketDataClient(null, null, null, false)) {
       assertThat(client.getRateLimits()).isEqualTo(RateLimitSnapshot.EMPTY);
       assertThat(client.toString()).startsWith("MarketDataClient[").endsWith("]");
 

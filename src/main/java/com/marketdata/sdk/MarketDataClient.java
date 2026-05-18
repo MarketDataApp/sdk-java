@@ -19,14 +19,20 @@ public final class MarketDataClient implements AutoCloseable {
       @Nullable String baseUrl,
       @Nullable String apiVersion,
       boolean validateOnStartup) {
+    // Delegate with validateOnStartup=false so the inner ctor's runnable seam stays a no-op on
+    // this path — we run the real validation below, where `this.utilities` is reachable.
+    // Tests still drive the runnable seam directly via the 7-arg ctor.
     this(
         apiKey,
         baseUrl,
         apiVersion,
-        validateOnStartup,
+        /* validateOnStartup */ false,
         EnvVars.systemLookup(),
         Configuration.DEFAULT_DOTENV_PATH,
         () -> {});
+    if (validateOnStartup) {
+      runStartupValidation();
+    }
   }
 
   MarketDataClient(
@@ -54,6 +60,27 @@ public final class MarketDataClient implements AutoCloseable {
   /** System endpoints documented at the API root: {@code /headers/} (and more to come). */
   public UtilitiesResource utilities() {
     return utilities;
+  }
+
+  /**
+   * Fire a single call to {@code GET /v1/user/} to confirm the token is accepted and a billing plan
+   * is attached (SDK requirements §5). A 401 surfaces as {@link
+   * com.marketdata.sdk.exception.AuthenticationError} directly via the sync wrapper. On any failure
+   * we close the transport before re-throwing so a partially-constructed client doesn't leak its
+   * HttpClient — the caller's try-with-resources is never triggered if the constructor itself
+   * fails.
+   */
+  private void runStartupValidation() {
+    try {
+      utilities.user();
+    } catch (Throwable t) {
+      try {
+        close();
+      } catch (Throwable closeFailure) {
+        t.addSuppressed(closeFailure);
+      }
+      throw t;
+    }
   }
 
   /**
