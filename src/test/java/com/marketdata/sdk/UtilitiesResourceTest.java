@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.marketdata.sdk.exception.AuthenticationError;
+import com.marketdata.sdk.utilities.ApiStatus;
 import com.marketdata.sdk.utilities.RequestHeaders;
 import com.marketdata.sdk.utilities.User;
 import java.net.URI;
@@ -149,6 +150,60 @@ class UtilitiesResourceTest {
     UtilitiesResource utilities = resourceWith(client);
 
     assertThatThrownBy(utilities::user).isInstanceOf(AuthenticationError.class);
+  }
+
+  // ---------- /status/ endpoint ----------
+
+  @Test
+  void statusHitsTheUnversionedRootEndpoint() {
+    String body =
+        "{\"s\":\"ok\",\"service\":[\"/v1/x/\"],\"status\":[\"online\"],\"online\":[true],"
+            + "\"uptimePct30d\":[1.0],\"uptimePct90d\":[1.0],\"updated\":[1700000000]}";
+    CapturingClient client =
+        new CapturingClient(200, body.getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    utilities.statusAsync().join();
+
+    // /status/ is at the API root, not under /v1/.
+    assertThat(client.captured.get(0).uri().toString()).isEqualTo("http://localhost/status/");
+  }
+
+  @Test
+  void statusAsyncReturnsZippedServiceList() {
+    String body =
+        "{\"s\":\"ok\","
+            + "\"service\":[\"/v1/a/\",\"/v1/b/\"],"
+            + "\"status\":[\"online\",\"offline\"],"
+            + "\"online\":[true,false],"
+            + "\"uptimePct30d\":[1.0,0.9],"
+            + "\"uptimePct90d\":[1.0,0.95],"
+            + "\"updated\":[1700000000,1700000001]}";
+    CapturingClient client =
+        new CapturingClient(200, body.getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    ApiStatus status = utilities.statusAsync().join();
+
+    assertThat(status.services()).hasSize(2);
+    assertThat(status.services().get(0).service()).isEqualTo("/v1/a/");
+    assertThat(status.services().get(0).online()).isTrue();
+    assertThat(status.services().get(1).service()).isEqualTo("/v1/b/");
+    assertThat(status.services().get(1).online()).isFalse();
+  }
+
+  @Test
+  void statusSyncMirrorsAsync() {
+    String body =
+        "{\"s\":\"ok\",\"service\":[\"/v1/x/\"],\"status\":[\"online\"],\"online\":[true],"
+            + "\"uptimePct30d\":[1.0],\"uptimePct90d\":[1.0],\"updated\":[1700000000]}";
+    CapturingClient client =
+        new CapturingClient(200, body.getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    ApiStatus status = utilities.status();
+
+    assertThat(status.services()).hasSize(1);
   }
 
   // ---------- error surfacing through sync ----------

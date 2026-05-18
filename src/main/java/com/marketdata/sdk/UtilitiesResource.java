@@ -1,6 +1,7 @@
 package com.marketdata.sdk;
 
 import com.marketdata.sdk.exception.MarketDataException;
+import com.marketdata.sdk.utilities.ApiStatus;
 import com.marketdata.sdk.utilities.RequestHeaders;
 import com.marketdata.sdk.utilities.User;
 import java.util.concurrent.CancellationException;
@@ -65,6 +66,30 @@ public final class UtilitiesResource {
   public User user() {
     try {
       return userAsync().join();
+    } catch (CompletionException e) {
+      throw HttpTransport.asRuntime(e.getCause());
+    } catch (CancellationException e) {
+      throw HttpTransport.asRuntime(e);
+    }
+  }
+
+  /**
+   * Async: fetch the per-service health snapshot of the API. Unversioned ({@code /status/} lives at
+   * the API root) and public — works without a token. The server refreshes the snapshot every five
+   * minutes; polling more often than that is wasted work.
+   */
+  public CompletableFuture<ApiStatus> statusAsync() {
+    RequestSpec spec = RequestSpec.get("status").unversioned().build();
+    return transport.executeAsync(spec).thenApply(env -> parser.parse(env, ApiStatus.class));
+  }
+
+  /**
+   * Sync wrapper for {@link #statusAsync()}; same {@link CompletionException}-unwrapping semantics
+   * as {@link #headers()} and {@link #user()}.
+   */
+  public ApiStatus status() {
+    try {
+      return statusAsync().join();
     } catch (CompletionException e) {
       throw HttpTransport.asRuntime(e.getCause());
     } catch (CancellationException e) {

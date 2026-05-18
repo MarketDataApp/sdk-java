@@ -4,10 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.marketdata.sdk.exception.ParseError;
+import com.marketdata.sdk.utilities.ApiStatus;
 import com.marketdata.sdk.utilities.RequestHeaders;
+import com.marketdata.sdk.utilities.ServiceStatus;
 import com.marketdata.sdk.utilities.User;
 import java.net.URI;
 import java.net.http.HttpHeaders;
+import java.time.Instant;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -100,6 +103,106 @@ class JsonResponseParserTest {
     assertThat(u.requestsRemaining()).isZero();
     assertThat(u.requestsLimit()).isEqualTo(500);
     assertThat(u.optionsDataPermissions()).isEmpty();
+  }
+
+  // ---------- ApiStatus: parallel-arrays wire format zipped into List<ServiceStatus> ----------
+
+  @Test
+  void parsesApiStatusByZippingParallelArrays() {
+    // Canonical happy-path payload — six arrays of equal length plus the leading "s":"ok".
+    String body =
+        "{"
+            + "\"s\":\"ok\","
+            + "\"service\":[\"/v1/stocks/quotes/\",\"/v1/options/chain/\"],"
+            + "\"status\":[\"online\",\"offline\"],"
+            + "\"online\":[true,false],"
+            + "\"uptimePct30d\":[1.0,0.9961],"
+            + "\"uptimePct90d\":[0.99828,0.95],"
+            + "\"updated\":[1734036832,1734036833]"
+            + "}";
+
+    ApiStatus status = new JsonResponseParser().parse(env(body), ApiStatus.class);
+
+    assertThat(status.services()).hasSize(2);
+    ServiceStatus first = status.services().get(0);
+    assertThat(first.service()).isEqualTo("/v1/stocks/quotes/");
+    assertThat(first.status()).isEqualTo("online");
+    assertThat(first.online()).isTrue();
+    assertThat(first.uptimePct30d()).isEqualTo(1.0);
+    assertThat(first.uptimePct90d()).isEqualTo(0.99828);
+    assertThat(first.updated()).isEqualTo(Instant.ofEpochSecond(1734036832L));
+
+    ServiceStatus second = status.services().get(1);
+    assertThat(second.service()).isEqualTo("/v1/options/chain/");
+    assertThat(second.online()).isFalse();
+    assertThat(second.uptimePct30d()).isEqualTo(0.9961);
+  }
+
+  @Test
+  void parsesApiStatusWithEmptyArrays() {
+    String body =
+        "{\"s\":\"ok\",\"service\":[],\"status\":[],\"online\":[],"
+            + "\"uptimePct30d\":[],\"uptimePct90d\":[],\"updated\":[]}";
+
+    ApiStatus status = new JsonResponseParser().parse(env(body), ApiStatus.class);
+
+    assertThat(status.services()).isEmpty();
+  }
+
+  @Test
+  void apiStatusServicesListIsImmutable() {
+    String body =
+        "{\"s\":\"ok\",\"service\":[\"a\"],\"status\":[\"online\"],\"online\":[true],"
+            + "\"uptimePct30d\":[1.0],\"uptimePct90d\":[1.0],\"updated\":[0]}";
+    ApiStatus status = new JsonResponseParser().parse(env(body), ApiStatus.class);
+
+    assertThatThrownBy(() -> status.services().add(null))
+        .isInstanceOf(UnsupportedOperationException.class);
+  }
+
+  @Test
+  void apiStatusServerSideErrorBecomesParseError() {
+    // `s: "error"` is the server's soft-error path — the body is valid JSON but doesn't carry
+    // the usable arrays. Surface as ParseError so it doesn't masquerade as an empty success.
+    String body = "{\"s\":\"error\",\"errmsg\":\"database connection refused\"}";
+
+    assertThatThrownBy(() -> new JsonResponseParser().parse(env(body), ApiStatus.class))
+        .isInstanceOf(ParseError.class)
+        .hasMessageContaining("database connection refused");
+  }
+
+  @Test
+  void apiStatusMismatchedArrayLengthsBecomeParseError() {
+    String body =
+        "{\"s\":\"ok\","
+            + "\"service\":[\"a\",\"b\"],"
+            + "\"status\":[\"online\"]," // 1 vs 2
+            + "\"online\":[true,false],"
+            + "\"uptimePct30d\":[1.0,1.0],"
+            + "\"uptimePct90d\":[1.0,1.0],"
+            + "\"updated\":[0,0]}";
+
+    assertThatThrownBy(() -> new JsonResponseParser().parse(env(body), ApiStatus.class))
+        .isInstanceOf(ParseError.class)
+        .hasMessageContaining("mismatched lengths");
+  }
+
+  @Test
+  void apiStatusMissingArrayBecomesParseError() {
+    // No `online` array — could happen if a backend refactor drops a field; better to fail
+    // loudly than silently default booleans to false for every row.
+    String body =
+        "{\"s\":\"ok\","
+            + "\"service\":[\"a\"],"
+            + "\"status\":[\"online\"],"
+            + "\"uptimePct30d\":[1.0],"
+            + "\"uptimePct90d\":[1.0],"
+            + "\"updated\":[0]}";
+
+    assertThatThrownBy(() -> new JsonResponseParser().parse(env(body), ApiStatus.class))
+        .isInstanceOf(ParseError.class)
+        .hasMessageContaining("missing or non-array")
+        .hasMessageContaining("online");
   }
 
   @Test
