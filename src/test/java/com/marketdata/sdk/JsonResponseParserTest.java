@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.marketdata.sdk.exception.ParseError;
 import com.marketdata.sdk.utilities.RequestHeaders;
+import com.marketdata.sdk.utilities.User;
 import java.net.URI;
 import java.net.http.HttpHeaders;
 import java.util.Map;
@@ -50,6 +51,55 @@ class JsonResponseParserTest {
 
     assertThatThrownBy(() -> rh.headers().put("hacked", "value"))
         .isInstanceOf(UnsupportedOperationException.class);
+  }
+
+  // ---------- User: hyphenated wire keys → camelCase record ----------
+
+  @Test
+  void parsesUserMappingHyphenatedKeysToCamelCase() {
+    JsonResponseParser parser = new JsonResponseParser();
+
+    User u =
+        parser.parse(
+            env(
+                "{\"x-ratelimit-requests-remaining\":5421,"
+                    + "\"x-ratelimit-requests-limit\":100000,"
+                    + "\"x-options-data-permissions\":\"OPRA data delayed 15 minutes\"}"),
+            User.class);
+
+    assertThat(u.requestsRemaining()).isEqualTo(5421);
+    assertThat(u.requestsLimit()).isEqualTo(100000);
+    assertThat(u.optionsDataPermissions()).isEqualTo("OPRA data delayed 15 minutes");
+  }
+
+  @Test
+  void parsesUserWithEmptyOptionsPermissionsAsRealTimeMarker() {
+    // Empty string is the server's convention for "real-time access"; the SDK preserves it
+    // verbatim so consumers can detect realTime via `permissions.isEmpty()`.
+    JsonResponseParser parser = new JsonResponseParser();
+
+    User u =
+        parser.parse(
+            env(
+                "{\"x-ratelimit-requests-remaining\":10,"
+                    + "\"x-ratelimit-requests-limit\":10,"
+                    + "\"x-options-data-permissions\":\"\"}"),
+            User.class);
+
+    assertThat(u.optionsDataPermissions()).isEmpty();
+  }
+
+  @Test
+  void missingUserFieldsDefaultLeniently() {
+    // The server sends all three fields today, but if a future regression drops one, the SDK
+    // should produce a populated record with defaults rather than blow up parsing.
+    JsonResponseParser parser = new JsonResponseParser();
+
+    User u = parser.parse(env("{\"x-ratelimit-requests-limit\":500}"), User.class);
+
+    assertThat(u.requestsRemaining()).isZero();
+    assertThat(u.requestsLimit()).isEqualTo(500);
+    assertThat(u.optionsDataPermissions()).isEmpty();
   }
 
   @Test

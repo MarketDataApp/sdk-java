@@ -2,6 +2,7 @@ package com.marketdata.sdk;
 
 import com.marketdata.sdk.exception.MarketDataException;
 import com.marketdata.sdk.utilities.RequestHeaders;
+import com.marketdata.sdk.utilities.User;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -40,6 +41,30 @@ public final class UtilitiesResource {
   public RequestHeaders headers() {
     try {
       return headersAsync().join();
+    } catch (CompletionException e) {
+      throw HttpTransport.asRuntime(e.getCause());
+    } catch (CancellationException e) {
+      throw HttpTransport.asRuntime(e);
+    }
+  }
+
+  /**
+   * Async: fetch the caller's current quota state and data-tier permissions. Returns a 401 (as
+   * {@link com.marketdata.sdk.exception.AuthenticationError}) when no billing plan is associated
+   * with the token — the typical use case for {@code validateOnStartup}.
+   */
+  public CompletableFuture<User> userAsync() {
+    RequestSpec spec = RequestSpec.get("user").build();
+    return transport.executeAsync(spec).thenApply(env -> parser.parse(env, User.class));
+  }
+
+  /**
+   * Sync wrapper for {@link #userAsync()}; same {@link CompletionException}-unwrapping semantics as
+   * {@link #headers()}.
+   */
+  public User user() {
+    try {
+      return userAsync().join();
     } catch (CompletionException e) {
       throw HttpTransport.asRuntime(e.getCause());
     } catch (CancellationException e) {

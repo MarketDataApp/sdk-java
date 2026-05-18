@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.marketdata.sdk.exception.AuthenticationError;
 import com.marketdata.sdk.utilities.RequestHeaders;
+import com.marketdata.sdk.utilities.User;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpHeaders;
@@ -80,6 +81,74 @@ class UtilitiesResourceTest {
     RequestHeaders rh = utilities.headers();
 
     assertThat(rh.headers()).containsEntry("x", "1");
+  }
+
+  // ---------- /v1/user/ endpoint ----------
+
+  @Test
+  void userHitsVersionedEndpoint() {
+    // Contrast with /headers/ — /v1/user/ is under the versioned prefix.
+    CapturingClient client =
+        new CapturingClient(
+            200,
+            ("{\"x-ratelimit-requests-remaining\":1,\"x-ratelimit-requests-limit\":2,"
+                    + "\"x-options-data-permissions\":\"\"}")
+                .getBytes(),
+            HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    utilities.userAsync().join();
+
+    assertThat(client.captured.get(0).uri().toString()).isEqualTo("http://localhost/v1/user/");
+  }
+
+  @Test
+  void userAsyncReturnsDecodedRecord() {
+    CapturingClient client =
+        new CapturingClient(
+            200,
+            ("{\"x-ratelimit-requests-remaining\":42,\"x-ratelimit-requests-limit\":100,"
+                    + "\"x-options-data-permissions\":\"OPRA data delayed 15 minutes\"}")
+                .getBytes(),
+            HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    User u = utilities.userAsync().join();
+
+    assertThat(u.requestsRemaining()).isEqualTo(42);
+    assertThat(u.requestsLimit()).isEqualTo(100);
+    assertThat(u.optionsDataPermissions()).isEqualTo("OPRA data delayed 15 minutes");
+  }
+
+  @Test
+  void userSyncMirrorsAsync() {
+    CapturingClient client =
+        new CapturingClient(
+            200,
+            ("{\"x-ratelimit-requests-remaining\":7,\"x-ratelimit-requests-limit\":7,"
+                    + "\"x-options-data-permissions\":\"\"}")
+                .getBytes(),
+            HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    User u = utilities.user();
+
+    assertThat(u.requestsRemaining()).isEqualTo(7);
+  }
+
+  /**
+   * The {@code /v1/user/} endpoint's typical failure mode is "no billing plan" — surfaces as 401.
+   * The sync method must unwrap it to {@link AuthenticationError} directly so {@code
+   * validateOnStartup} (when wired) can catch it without digging through {@code
+   * CompletionException}.
+   */
+  @Test
+  void user401SurfacesAuthenticationErrorDirectly() {
+    CapturingClient client =
+        new CapturingClient(401, new byte[0], HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    assertThatThrownBy(utilities::user).isInstanceOf(AuthenticationError.class);
   }
 
   // ---------- error surfacing through sync ----------

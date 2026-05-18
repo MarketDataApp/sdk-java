@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.marketdata.sdk.exception.ErrorContext;
 import com.marketdata.sdk.exception.ParseError;
 import com.marketdata.sdk.utilities.RequestHeaders;
+import com.marketdata.sdk.utilities.User;
 import java.io.IOException;
 import java.time.Instant;
 
@@ -27,6 +28,7 @@ final class JsonResponseParser {
     ObjectMapper m = new ObjectMapper();
     SimpleModule wireModule = new SimpleModule("marketdata-wire");
     wireModule.addDeserializer(RequestHeaders.class, new RequestHeadersDeserializer());
+    wireModule.addDeserializer(User.class, new UserDeserializer());
     m.registerModule(wireModule);
     this.mapper = m;
   }
