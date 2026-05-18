@@ -119,6 +119,23 @@ class RequestSpecTest {
     assertThat(spec.queryParams()).containsEntry("limit", "50").containsEntry("offset", "100");
   }
 
+  // ---------- versioned / unversioned ----------
+
+  @Test
+  void specsAreVersionedByDefault() {
+    // Every business endpoint lives under /v1/, so the default has to be the common case.
+    RequestSpec spec = RequestSpec.get("markets/status").build();
+    assertThat(spec.versioned()).isTrue();
+  }
+
+  @Test
+  void unversionedFlipsThePrefixOff() {
+    // /status/ and /headers/ live at the API root, not under /v1/.
+    RequestSpec spec = RequestSpec.get("status").unversioned().build();
+    assertThat(spec.versioned()).isFalse();
+    assertThat(spec.path()).isEqualTo("status");
+  }
+
   @Test
   void universalParamsAccumulateAlongsideArbitraryQueryParams() {
     // The universal-setter API does not replace `.query(...)` — both coexist, ordered by

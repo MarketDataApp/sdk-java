@@ -18,15 +18,19 @@ import java.util.Map;
  * resources don't reach for {@link Builder#query} for the common cross-cutting cases.
  *
  * @param path API-relative path with no leading {@code /v1/} prefix and no trailing slash, e.g.
- *     {@code "markets/status"}. The transport adds the base URL, version prefix, and trailing
- *     slash.
+ *     {@code "markets/status"}. The transport adds the base URL, version prefix (when {@link
+ *     #versioned} is true), and trailing slash.
  * @param queryParams ordered query parameters (insertion order preserved for predictable URLs in
  *     tests). Values are URL-encoded by the transport.
  * @param format wire response format. The transport mirrors this in the {@code Accept} request
  *     header; the {@code ?format=} query param is also written into {@code queryParams} by the
  *     builder when set.
+ * @param versioned when true, the transport interpolates the API version segment between base URL
+ *     and path (the default, used by every {@code /v1/...} endpoint); when false, the path is
+ *     appended directly to the base URL. The handful of system endpoints documented at the API root
+ *     — {@code /status/}, {@code /headers/} — opt into the unversioned form.
  */
-record RequestSpec(String path, Map<String, String> queryParams, Format format) {
+record RequestSpec(String path, Map<String, String> queryParams, Format format, boolean versioned) {
 
   static final Format DEFAULT_FORMAT = Format.JSON;
 
@@ -45,6 +49,7 @@ record RequestSpec(String path, Map<String, String> queryParams, Format format) 
     private final String path;
     private final Map<String, String> queryParams = new LinkedHashMap<>();
     private Format format = DEFAULT_FORMAT;
+    private boolean versioned = true;
 
     private Builder(String path) {
       this.path = path;
@@ -55,6 +60,17 @@ record RequestSpec(String path, Map<String, String> queryParams, Format format) 
       if (value != null) {
         queryParams.put(key, value.toString());
       }
+      return this;
+    }
+
+    /**
+     * Marks this request as targeting the unversioned root of the API ({@code
+     * https://api.marketdata.app/path/}), rather than the default {@code
+     * https://api.marketdata.app/v1/path/}. Only a handful of system endpoints — {@code /status/}
+     * and {@code /headers/} — live there.
+     */
+    Builder unversioned() {
+      this.versioned = false;
       return this;
     }
 
@@ -112,7 +128,7 @@ record RequestSpec(String path, Map<String, String> queryParams, Format format) 
     RequestSpec build() {
       // Pass the raw LinkedHashMap — the record's compact constructor defensively copies and
       // wraps it as unmodifiable, so wrapping here too would just rebuild a redundant view.
-      return new RequestSpec(path, queryParams, format);
+      return new RequestSpec(path, queryParams, format, versioned);
     }
   }
 }

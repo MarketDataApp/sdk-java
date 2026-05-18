@@ -179,7 +179,11 @@ final class HttpTransport implements AutoCloseable {
       path = path.substring(1);
     }
     StringBuilder sb = new StringBuilder();
-    sb.append(baseUrl).append('/').append(apiVersion).append('/').append(path);
+    sb.append(baseUrl).append('/');
+    if (spec.versioned()) {
+      sb.append(apiVersion).append('/');
+    }
+    sb.append(path);
     if (!path.endsWith("/")) {
       sb.append('/');
     }

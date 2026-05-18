@@ -92,6 +92,19 @@ class HttpTransportTest {
   }
 
   @Test
+  void unversionedSpecOmitsTheVersionSegment() {
+    // /status/ and /headers/ are documented at the API root, not under /v1/. The transport must
+    // honor the spec's unversioned flag so those system endpoints reach the right URL.
+    CapturingClient client =
+        new CapturingClient(200, "ok".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    transport.executeAsync(RequestSpec.get("status").unversioned().build()).join();
+
+    assertThat(client.captured.get(0).uri().toString()).isEqualTo("http://localhost/status/");
+  }
+
+  @Test
   void leadingSlashInPathIsStripped() {
     CapturingClient client =
         new CapturingClient(200, "ok".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
