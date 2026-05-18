@@ -7,7 +7,7 @@ import org.jspecify.annotations.Nullable;
 public final class MarketDataClient implements AutoCloseable {
 
   private final Configuration config;
-  private volatile RateLimitSnapshot rateLimits;
+  private final HttpTransport transport;
 
   public MarketDataClient() {
     this(null, null, null, true);
@@ -37,18 +37,30 @@ public final class MarketDataClient implements AutoCloseable {
       Path dotEnvPath,
       Runnable startupValidator) {
     this.config = Configuration.resolve(apiKey, baseUrl, apiVersion, env, dotEnvPath);
-    this.rateLimits = RateLimitSnapshot.EMPTY;
+    this.transport =
+        new HttpTransport(
+            config.baseUrl(),
+            config.apiVersion(),
+            "marketdata-sdk-java/" + Version.sdkVersion(),
+            config.apiKey());
     if (validateOnStartup) {
       startupValidator.run();
     }
   }
 
+  /**
+   * Latest rate-limit snapshot recorded from any successful response. Returns {@link
+   * RateLimitSnapshot#EMPTY} until the first rate-limit-bearing response has arrived; never null.
+   */
   public RateLimitSnapshot getRateLimits() {
-    return rateLimits;
+    RateLimitSnapshot latest = transport.getLatestRateLimits();
+    return latest != null ? latest : RateLimitSnapshot.EMPTY;
   }
 
   @Override
-  public void close() {}
+  public void close() {
+    transport.close();
+  }
 
   @Override
   public String toString() {
