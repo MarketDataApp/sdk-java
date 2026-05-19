@@ -203,13 +203,7 @@ final class HttpTransport implements AutoCloseable {
    * {@link CompletionException} so callers see the underlying {@link MarketDataException}.
    */
   HttpResponseEnvelope executeSync(RequestSpec spec) {
-    try {
-      return executeAsync(spec).join();
-    } catch (CompletionException e) {
-      throw asRuntime(e.getCause());
-    } catch (CancellationException e) {
-      throw asRuntime(e);
-    }
+    return joinSync(executeAsync(spec));
   }
 
   @Override
@@ -310,6 +304,24 @@ final class HttpTransport implements AutoCloseable {
       b.header("Authorization", "Bearer " + token);
     }
     return b.build();
+  }
+
+  /**
+   * Sync bridge for resource façades: waits on {@code future}, unwrapping {@link
+   * CompletionException} so the caller sees the underlying {@link MarketDataException} directly
+   * (ADR-006), and routing cancellations through {@link #asRuntime} so the surface is uniform.
+   *
+   * <p>One place to fix the sync semantics; every {@code public T xxx()} wrapper in a resource is
+   * just {@code return joinSync(xxxAsync())}.
+   */
+  static <T> T joinSync(CompletableFuture<T> future) {
+    try {
+      return future.join();
+    } catch (CompletionException e) {
+      throw asRuntime(e.getCause());
+    } catch (CancellationException e) {
+      throw asRuntime(e);
+    }
   }
 
   // Visible for tests: under the current SDK design, executeAsync always wraps failures as

@@ -1,12 +1,9 @@
 package com.marketdata.sdk;
 
-import com.marketdata.sdk.exception.MarketDataException;
 import com.marketdata.sdk.utilities.ApiStatus;
 import com.marketdata.sdk.utilities.RequestHeaders;
 import com.marketdata.sdk.utilities.User;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 
 /**
  * System endpoints documented at {@code https://api.marketdata.app/docs/api/utilities/}. None of
@@ -35,18 +32,9 @@ public final class UtilitiesResource {
     return transport.executeAsync(spec).thenApply(env -> parser.parse(env, RequestHeaders.class));
   }
 
-  /**
-   * Sync wrapper for {@link #headersAsync()}. Per ADR-006, calls {@code .join()} and unwraps {@link
-   * CompletionException} so the caller sees the underlying {@link MarketDataException} directly.
-   */
+  /** Sync wrapper for {@link #headersAsync()}; see {@link HttpTransport#joinSync} for semantics. */
   public RequestHeaders headers() {
-    try {
-      return headersAsync().join();
-    } catch (CompletionException e) {
-      throw HttpTransport.asRuntime(e.getCause());
-    } catch (CancellationException e) {
-      throw HttpTransport.asRuntime(e);
-    }
+    return HttpTransport.joinSync(headersAsync());
   }
 
   /**
@@ -70,32 +58,14 @@ public final class UtilitiesResource {
     return transport.executeAsync(spec, policy).thenApply(env -> parser.parse(env, User.class));
   }
 
-  /**
-   * Sync wrapper for {@link #userAsync()}; same {@link CompletionException}-unwrapping semantics as
-   * {@link #headers()}.
-   */
+  /** Sync wrapper for {@link #userAsync()}. */
   public User user() {
-    try {
-      return userAsync().join();
-    } catch (CompletionException e) {
-      throw HttpTransport.asRuntime(e.getCause());
-    } catch (CancellationException e) {
-      throw HttpTransport.asRuntime(e);
-    }
+    return HttpTransport.joinSync(userAsync());
   }
 
-  /**
-   * Sync wrapper for {@link #userAsync(RetryPolicy)}; package-private. Same companion as {@link
-   * #user()} for callers that need a custom retry policy.
-   */
+  /** Sync wrapper for {@link #userAsync(RetryPolicy)}; package-private. */
   User user(RetryPolicy policy) {
-    try {
-      return userAsync(policy).join();
-    } catch (CompletionException e) {
-      throw HttpTransport.asRuntime(e.getCause());
-    } catch (CancellationException e) {
-      throw HttpTransport.asRuntime(e);
-    }
+    return HttpTransport.joinSync(userAsync(policy));
   }
 
   /**
@@ -108,17 +78,8 @@ public final class UtilitiesResource {
     return transport.executeAsync(spec).thenApply(env -> parser.parse(env, ApiStatus.class));
   }
 
-  /**
-   * Sync wrapper for {@link #statusAsync()}; same {@link CompletionException}-unwrapping semantics
-   * as {@link #headers()} and {@link #user()}.
-   */
+  /** Sync wrapper for {@link #statusAsync()}. */
   public ApiStatus status() {
-    try {
-      return statusAsync().join();
-    } catch (CompletionException e) {
-      throw HttpTransport.asRuntime(e.getCause());
-    } catch (CancellationException e) {
-      throw HttpTransport.asRuntime(e);
-    }
+    return HttpTransport.joinSync(statusAsync());
   }
 }
