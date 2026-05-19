@@ -8,7 +8,6 @@ import java.net.ServerSocket;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -18,7 +17,6 @@ import org.junit.jupiter.api.io.TempDir;
 class MarketDataClientTest {
 
   private static final Function<String, @Nullable String> NO_ENV = key -> null;
-  private static final Runnable NO_VALIDATION = () -> {};
 
   private static Function<String, @Nullable String> envOf(Map<String, String> values) {
     return values::get;
@@ -28,10 +26,19 @@ class MarketDataClientTest {
     return tmp.resolve("missing.env");
   }
 
+  /** Reserves a fresh port and immediately releases it so connects target a known-closed socket. */
+  private static String reserveClosedLocalUrl() throws Exception {
+    int port;
+    try (ServerSocket s = new ServerSocket(0)) {
+      port = s.getLocalPort();
+    }
+    return "http://127.0.0.1:" + port;
+  }
+
   @Test
   void no_arg_constructor_resolves_defaults_and_returns_empty_rate_limits(@TempDir Path tmp) {
     try (MarketDataClient client =
-        new MarketDataClient(null, null, null, false, NO_ENV, noDotEnv(tmp), NO_VALIDATION)) {
+        new MarketDataClient(null, null, null, false, NO_ENV, noDotEnv(tmp))) {
       assertThat(client.getRateLimits()).isEqualTo(RateLimitSnapshot.EMPTY);
     }
   }
@@ -40,13 +47,7 @@ class MarketDataClientTest {
   void four_arg_constructor_uses_explicit_values(@TempDir Path tmp) {
     try (MarketDataClient client =
         new MarketDataClient(
-            "explicit-key",
-            "https://explicit.example",
-            "v9",
-            false,
-            NO_ENV,
-            noDotEnv(tmp),
-            NO_VALIDATION)) {
+            "explicit-key", "https://explicit.example", "v9", false, NO_ENV, noDotEnv(tmp))) {
       assertThat(client.toString())
           .contains("baseUrl=https://explicit.example")
           .contains("apiVersion=v9")
@@ -58,8 +59,7 @@ class MarketDataClientTest {
   @Test
   void to_string_redacts_token(@TempDir Path tmp) {
     try (MarketDataClient client =
-        new MarketDataClient(
-            "supersecret-token-YKT0", null, null, false, NO_ENV, noDotEnv(tmp), NO_VALIDATION)) {
+        new MarketDataClient("supersecret-token-YKT0", null, null, false, NO_ENV, noDotEnv(tmp))) {
       String repr = client.toString();
 
       assertThat(repr).doesNotContain("supersecret-token-YKT0");
@@ -70,32 +70,38 @@ class MarketDataClientTest {
   @Test
   void to_string_shows_demo_mode_when_no_api_key(@TempDir Path tmp) {
     try (MarketDataClient client =
-        new MarketDataClient(null, null, null, false, NO_ENV, noDotEnv(tmp), NO_VALIDATION)) {
+        new MarketDataClient(null, null, null, false, NO_ENV, noDotEnv(tmp))) {
       assertThat(client.toString()).contains("demoMode=true");
     }
   }
 
-  @Test
-  void validate_on_startup_true_invokes_validator(@TempDir Path tmp) {
-    AtomicInteger calls = new AtomicInteger();
+  // ---------- validateOnStartup wiring (end-to-end, no Runnable seam) ----------
 
-    try (MarketDataClient client =
-        new MarketDataClient(
-            "key", null, null, true, NO_ENV, noDotEnv(tmp), calls::incrementAndGet)) {
-      assertThat(calls.get()).isEqualTo(1);
-      assertThat(client.getRateLimits()).isEqualTo(RateLimitSnapshot.EMPTY);
-    }
+  @Test
+  @Timeout(value = 5, unit = TimeUnit.SECONDS)
+  void validate_on_startup_true_attempts_validation(@TempDir Path tmp) throws Exception {
+    // With a non-demo token and an unreachable baseUrl, the ctor must attempt the /user/ call
+    // and surface the failure to the caller. If the validation hook ever gets disconnected from
+    // the ctor flow, this test fails because construction would succeed silently.
+    String unreachable = reserveClosedLocalUrl();
+
+    assertThatThrownBy(
+            () -> new MarketDataClient("any-token", unreachable, null, true, NO_ENV, noDotEnv(tmp)))
+        .isInstanceOf(MarketDataException.class);
   }
 
   @Test
-  void validate_on_startup_false_does_not_invoke_validator(@TempDir Path tmp) {
-    AtomicInteger calls = new AtomicInteger();
+  @Timeout(value = 5, unit = TimeUnit.SECONDS)
+  void validate_on_startup_false_skips_validation_even_with_token(@TempDir Path tmp)
+      throws Exception {
+    // Symmetric case: a non-demo token + unreachable baseUrl + validateOnStartup=false must
+    // construct cleanly. Any latent path that fires validation despite the flag would surface
+    // here as a thrown ctor.
+    String unreachable = reserveClosedLocalUrl();
 
     try (MarketDataClient client =
-        new MarketDataClient(
-            "key", null, null, false, NO_ENV, noDotEnv(tmp), calls::incrementAndGet)) {
-      assertThat(calls.get()).isZero();
-      assertThat(client.getRateLimits()).isEqualTo(RateLimitSnapshot.EMPTY);
+        new MarketDataClient("any-token", unreachable, null, false, NO_ENV, noDotEnv(tmp))) {
+      assertThat(client.toString()).contains("demoMode=false");
     }
   }
 
@@ -108,16 +114,14 @@ class MarketDataClientTest {
             null,
             false,
             envOf(Map.of(EnvVars.TOKEN, "env-token-ABCD")),
-            noDotEnv(tmp),
-            NO_VALIDATION)) {
+            noDotEnv(tmp))) {
       assertThat(client.toString()).contains("***…***ABCD").contains("demoMode=false");
     }
   }
 
   @Test
   void close_is_idempotent(@TempDir Path tmp) {
-    MarketDataClient client =
-        new MarketDataClient(null, null, null, false, NO_ENV, noDotEnv(tmp), NO_VALIDATION);
+    MarketDataClient client = new MarketDataClient(null, null, null, false, NO_ENV, noDotEnv(tmp));
 
     client.close();
     client.close();
@@ -130,15 +134,10 @@ class MarketDataClientTest {
     // doesn't burn the full retry budget (~6.75 min worst case with defaults) before the
     // constructor returns. Drive a real connection-refused (closed local port) and assert the
     // failure surfaces well below even one default-policy retry would.
-    int closedPort;
-    try (ServerSocket s = new ServerSocket(0)) {
-      closedPort = s.getLocalPort();
-    }
-    String unreachable = "http://127.0.0.1:" + closedPort;
+    String unreachable = reserveClosedLocalUrl();
 
     try (MarketDataClient client =
-        new MarketDataClient(
-            "any-token", unreachable, null, false, NO_ENV, noDotEnv(tmp), NO_VALIDATION)) {
+        new MarketDataClient("any-token", unreachable, null, false, NO_ENV, noDotEnv(tmp))) {
       long start = System.nanoTime();
       assertThatThrownBy(client::runStartupValidation).isInstanceOf(MarketDataException.class);
       long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
@@ -160,7 +159,7 @@ class MarketDataClientTest {
     // the tires" without a token. The @Timeout guards against regression: if the skip ever
     // breaks, the test fails in 5s instead of hanging on the full retry budget (~6.75 min).
     try (MarketDataClient client =
-        new MarketDataClient(null, null, null, false, NO_ENV, noDotEnv(tmp), NO_VALIDATION)) {
+        new MarketDataClient(null, null, null, false, NO_ENV, noDotEnv(tmp))) {
       assertThat(client.toString()).contains("demoMode=true");
       client.runStartupValidation(); // must return immediately, not make a network call
     }

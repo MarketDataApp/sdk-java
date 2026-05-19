@@ -24,30 +24,27 @@ public final class MarketDataClient implements AutoCloseable {
       @Nullable String baseUrl,
       @Nullable String apiVersion,
       boolean validateOnStartup) {
-    // Delegate with validateOnStartup=false so the inner ctor's runnable seam stays a no-op on
-    // this path — we run the real validation below, where `this.utilities` is reachable.
-    // Tests still drive the runnable seam directly via the 7-arg ctor.
     this(
         apiKey,
         baseUrl,
         apiVersion,
-        /* validateOnStartup */ false,
+        validateOnStartup,
         EnvVars.systemLookup(),
-        Configuration.DEFAULT_DOTENV_PATH,
-        () -> {});
-    if (validateOnStartup) {
-      runStartupValidation();
-    }
+        Configuration.DEFAULT_DOTENV_PATH);
   }
 
+  /**
+   * Package-private ctor with the env-lookup and dotEnv-path seams exposed so tests can drive the
+   * configuration cascade hermetically. The public 4-arg ctor delegates here with {@link
+   * EnvVars#systemLookup()} and {@link Configuration#DEFAULT_DOTENV_PATH}.
+   */
   MarketDataClient(
       @Nullable String apiKey,
       @Nullable String baseUrl,
       @Nullable String apiVersion,
       boolean validateOnStartup,
       Function<String, @Nullable String> env,
-      Path dotEnvPath,
-      Runnable startupValidator) {
+      Path dotEnvPath) {
     this.config = Configuration.resolve(apiKey, baseUrl, apiVersion, env, dotEnvPath);
     MarketDataLogging.configure(config.loggingLevel());
     LOGGER.info(
@@ -78,7 +75,7 @@ public final class MarketDataClient implements AutoCloseable {
     cacheRef.set(new StatusCache(utilities::statusAsync, Clock.systemUTC()));
 
     if (validateOnStartup) {
-      startupValidator.run();
+      runStartupValidation();
     }
   }
 
