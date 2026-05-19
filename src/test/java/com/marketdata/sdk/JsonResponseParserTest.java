@@ -187,6 +187,25 @@ class JsonResponseParserTest {
   }
 
   @Test
+  void apiStatusNonArrayFieldBecomesParseError() {
+    // Field exists in the response but is not an array (e.g. a string). The "missing or
+    // non-array" guard treats this as malformed.
+    String body =
+        "{\"s\":\"ok\","
+            + "\"service\":\"not-an-array\","
+            + "\"status\":[\"online\"],"
+            + "\"online\":[true],"
+            + "\"uptimePct30d\":[1.0],"
+            + "\"uptimePct90d\":[1.0],"
+            + "\"updated\":[0]}";
+
+    assertThatThrownBy(() -> new JsonResponseParser().parse(env(body), ApiStatus.class))
+        .isInstanceOf(ParseError.class)
+        .hasMessageContaining("missing or non-array")
+        .hasMessageContaining("service");
+  }
+
+  @Test
   void apiStatusMissingArrayBecomesParseError() {
     // No `online` array — could happen if a backend refactor drops a field; better to fail
     // loudly than silently default booleans to false for every row.
