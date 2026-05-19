@@ -65,7 +65,7 @@ class UtilitiesResourceTest {
         new CapturingClient(200, body.getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
     UtilitiesResource utilities = resourceWith(client);
 
-    RequestHeaders rh = utilities.headersAsync().join();
+    RequestHeaders rh = utilities.headersAsync().join().data();
 
     assertThat(rh.headers())
         .containsEntry("accept", "*/*")
@@ -80,7 +80,7 @@ class UtilitiesResourceTest {
             200, "{\"x\":\"1\"}".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
     UtilitiesResource utilities = resourceWith(client);
 
-    RequestHeaders rh = utilities.headers();
+    RequestHeaders rh = utilities.headers().data();
 
     assertThat(rh.headers()).containsEntry("x", "1");
   }
@@ -115,7 +115,7 @@ class UtilitiesResourceTest {
             HttpHeaders.of(Map.of(), (a, b) -> true));
     UtilitiesResource utilities = resourceWith(client);
 
-    User u = utilities.userAsync().join();
+    User u = utilities.userAsync().join().data();
 
     assertThat(u.requestsRemaining()).isEqualTo(42);
     assertThat(u.requestsLimit()).isEqualTo(100);
@@ -133,7 +133,7 @@ class UtilitiesResourceTest {
             HttpHeaders.of(Map.of(), (a, b) -> true));
     UtilitiesResource utilities = resourceWith(client);
 
-    User u = utilities.user();
+    User u = utilities.user().data();
 
     assertThat(u.requestsRemaining()).isEqualTo(7);
   }
@@ -184,7 +184,7 @@ class UtilitiesResourceTest {
         new CapturingClient(200, body.getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
     UtilitiesResource utilities = resourceWith(client);
 
-    ApiStatus status = utilities.statusAsync().join();
+    ApiStatus status = utilities.statusAsync().join().data();
 
     assertThat(status.services()).hasSize(2);
     assertThat(status.services().get(0).service()).isEqualTo("/v1/a/");
@@ -202,9 +202,34 @@ class UtilitiesResourceTest {
         new CapturingClient(200, body.getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
     UtilitiesResource utilities = resourceWith(client);
 
-    ApiStatus status = utilities.status();
+    ApiStatus status = utilities.status().data();
 
     assertThat(status.services()).hasSize(1);
+  }
+
+  // ---------- Response wrapper composition ----------
+
+  /**
+   * The resource layer is responsible for composing typed model + raw body + format into a {@link
+   * Response}. This verifies the wiring end-to-end: the bytes from the wire reach {@code rawBody},
+   * the request URL is preserved for support, and the format from the spec is reflected in the
+   * format accessors.
+   */
+  @Test
+  void resourceWrapsTypedDataWithRawBodyAndMetadata() {
+    String body = "{\"x\":\"1\"}";
+    CapturingClient client =
+        new CapturingClient(200, body.getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    Response<RequestHeaders> r = utilities.headers();
+
+    assertThat(r.data().headers()).containsEntry("x", "1");
+    assertThat(new String(r.rawBody())).isEqualTo(body);
+    assertThat(r.statusCode()).isEqualTo(200);
+    assertThat(r.isJson()).isTrue();
+    assertThat(r.isNoData()).isFalse();
+    assertThat(r.requestUrl().toString()).isEqualTo("http://localhost/headers/");
   }
 
   // ---------- error surfacing through sync ----------

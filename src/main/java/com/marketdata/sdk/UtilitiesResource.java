@@ -11,6 +11,10 @@ import java.util.concurrent.CompletableFuture;
  *
  * <p>Constructed once per {@link MarketDataClient}; the consumer reaches it through {@code
  * client.utilities()}. Constructor is package-private (ADR-007) — consumers cannot instantiate.
+ *
+ * <p>Every endpoint returns a {@link Response} carrying both the typed model and the raw body so
+ * consumers can access §13.5 response features ({@code isCsv()}, {@code saveToFile()}, …) without
+ * the resource caring about format choice.
  */
 public final class UtilitiesResource {
 
@@ -27,13 +31,13 @@ public final class UtilitiesResource {
    * {@code Authorization}) redacted server-side. Useful for diagnosing auth issues from a deployed
    * consumer.
    */
-  public CompletableFuture<RequestHeaders> headersAsync() {
+  public CompletableFuture<Response<RequestHeaders>> headersAsync() {
     RequestSpec spec = RequestSpec.get("headers").unversioned().build();
-    return transport.executeAsync(spec).thenApply(env -> parser.parse(env, RequestHeaders.class));
+    return executeAndWrap(spec, RequestHeaders.class);
   }
 
   /** Sync wrapper for {@link #headersAsync()}; see {@link HttpTransport#joinSync} for semantics. */
-  public RequestHeaders headers() {
+  public Response<RequestHeaders> headers() {
     return HttpTransport.joinSync(headersAsync());
   }
 
@@ -42,9 +46,8 @@ public final class UtilitiesResource {
    * {@link com.marketdata.sdk.exception.AuthenticationError}) when no billing plan is associated
    * with the token — the typical use case for {@code validateOnStartup}.
    */
-  public CompletableFuture<User> userAsync() {
-    RequestSpec spec = RequestSpec.get("user").build();
-    return transport.executeAsync(spec).thenApply(env -> parser.parse(env, User.class));
+  public CompletableFuture<Response<User>> userAsync() {
+    return executeAndWrap(RequestSpec.get("user").build(), User.class);
   }
 
   /**
@@ -53,18 +56,17 @@ public final class UtilitiesResource {
    * a single-attempt call so a slow/down API doesn't burn the full retry budget before the
    * constructor returns.
    */
-  CompletableFuture<User> userAsync(RetryPolicy policy) {
-    RequestSpec spec = RequestSpec.get("user").build();
-    return transport.executeAsync(spec, policy).thenApply(env -> parser.parse(env, User.class));
+  CompletableFuture<Response<User>> userAsync(RetryPolicy policy) {
+    return executeAndWrap(RequestSpec.get("user").build(), policy, User.class);
   }
 
   /** Sync wrapper for {@link #userAsync()}. */
-  public User user() {
+  public Response<User> user() {
     return HttpTransport.joinSync(userAsync());
   }
 
   /** Sync wrapper for {@link #userAsync(RetryPolicy)}; package-private. */
-  User user(RetryPolicy policy) {
+  Response<User> user(RetryPolicy policy) {
     return HttpTransport.joinSync(userAsync(policy));
   }
 
@@ -73,13 +75,28 @@ public final class UtilitiesResource {
    * the API root) and public — works without a token. The server refreshes the snapshot every five
    * minutes; polling more often than that is wasted work.
    */
-  public CompletableFuture<ApiStatus> statusAsync() {
+  public CompletableFuture<Response<ApiStatus>> statusAsync() {
     RequestSpec spec = RequestSpec.get("status").unversioned().build();
-    return transport.executeAsync(spec).thenApply(env -> parser.parse(env, ApiStatus.class));
+    return executeAndWrap(spec, ApiStatus.class);
   }
 
   /** Sync wrapper for {@link #statusAsync()}. */
-  public ApiStatus status() {
+  public Response<ApiStatus> status() {
     return HttpTransport.joinSync(statusAsync());
+  }
+
+  // ---------- internal helpers ----------
+
+  private <T> CompletableFuture<Response<T>> executeAndWrap(RequestSpec spec, Class<T> type) {
+    return transport
+        .executeAsync(spec)
+        .thenApply(env -> Response.wrap(parser.parse(env, type), env, spec.format()));
+  }
+
+  private <T> CompletableFuture<Response<T>> executeAndWrap(
+      RequestSpec spec, RetryPolicy policy, Class<T> type) {
+    return transport
+        .executeAsync(spec, policy)
+        .thenApply(env -> Response.wrap(parser.parse(env, type), env, spec.format()));
   }
 }

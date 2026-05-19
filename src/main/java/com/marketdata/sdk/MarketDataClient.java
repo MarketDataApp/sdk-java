@@ -72,7 +72,9 @@ public final class MarketDataClient implements AutoCloseable {
             cacheRef::get);
     JsonResponseParser parser = new JsonResponseParser();
     this.utilities = new UtilitiesResource(transport, parser);
-    cacheRef.set(new StatusCache(utilities::statusAsync, Clock.systemUTC()));
+    cacheRef.set(
+        new StatusCache(
+            () -> utilities.statusAsync().thenApply(Response::data), Clock.systemUTC()));
 
     if (validateOnStartup) {
       runStartupValidation();
