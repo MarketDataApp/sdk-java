@@ -34,7 +34,8 @@ class HttpTransportTest {
         "test/0.0",
         "secret-token",
         new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
-        new RetryExecutor(NO_RETRY));
+        new RetryExecutor(NO_RETRY),
+        () -> null);
   }
 
   // ---------- URL & header composition ----------
@@ -84,7 +85,8 @@ class HttpTransportTest {
             "test/0.0",
             null,
             new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
-            new RetryExecutor(NO_RETRY));
+            new RetryExecutor(NO_RETRY),
+            () -> null);
 
     transport.executeAsync(RequestSpec.get("markets/status").build()).join();
 

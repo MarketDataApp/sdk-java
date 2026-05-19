@@ -67,7 +67,7 @@ public final class MarketDataClient implements AutoCloseable {
     // which returns null until the cache is constructed (just below this transport instance).
     AtomicReference<StatusCache> cacheRef = new AtomicReference<>();
     this.transport =
-        new HttpTransport(
+        HttpTransport.withDefaults(
             config.baseUrl(),
             config.apiVersion(),
             "marketdata-sdk-java/" + Version.sdkVersion(),

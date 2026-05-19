@@ -64,44 +64,16 @@ final class HttpTransport implements AutoCloseable {
   private final String userAgent;
   private final @Nullable String token;
 
-  HttpTransport(String baseUrl, String apiVersion, String userAgent, @Nullable String token) {
-    this(baseUrl, apiVersion, userAgent, token, () -> null);
-  }
-
-  // Default-infra ctor with a status-cache supplier. MarketDataClient uses this so the §9.5
-  // gate is wired without each caller having to assemble the dispatcher + retry executor.
-  HttpTransport(
-      String baseUrl,
-      String apiVersion,
-      String userAgent,
-      @Nullable String token,
-      Supplier<@Nullable StatusCache> statusCacheSupplier) {
-    this(
-        baseUrl,
-        apiVersion,
-        userAgent,
-        token,
-        new HttpDispatcher(defaultHttpClient(), CONCURRENCY_LIMIT),
-        new RetryExecutor(RetryPolicy.defaults()),
-        statusCacheSupplier);
-  }
-
-  // Package-private constructor for tests: inject a stubbed dispatcher and/or a fast retry
-  // policy. The status cache is omitted on this path (no §9.5 gate) so existing tests don't
-  // need to thread one through; tests that exercise the gate use the 7-arg overload.
-  HttpTransport(
-      String baseUrl,
-      String apiVersion,
-      String userAgent,
-      @Nullable String token,
-      HttpDispatcher dispatcher,
-      RetryExecutor retryExecutor) {
-    this(baseUrl, apiVersion, userAgent, token, dispatcher, retryExecutor, () -> null);
-  }
-
-  // Full ctor with status-cache supplier. The supplier is consulted on every executeAsync call
-  // so MarketDataClient can construct the cache AFTER the transport (the cache's fetcher uses
-  // the transport via UtilitiesResource — chicken-and-egg resolved by a deferred reference).
+  /**
+   * Canonical constructor — all dependencies explicit. Production code uses {@link
+   * #withDefaults(String, String, String, String, Supplier)} which assembles real defaults; tests
+   * call this directly with stubs.
+   *
+   * <p>The {@code statusCacheSupplier} is consulted on every {@link #executeAsync} call so {@link
+   * MarketDataClient} can construct the cache <em>after</em> the transport (the cache's fetcher
+   * uses the transport via {@link UtilitiesResource} — the chicken-and-egg is resolved by a
+   * deferred reference). Pass {@code () -> null} when no §9.5 gate is desired (e.g. tests).
+   */
   HttpTransport(
       String baseUrl,
       String apiVersion,
@@ -117,6 +89,27 @@ final class HttpTransport implements AutoCloseable {
     this.dispatcher = dispatcher;
     this.retryExecutor = retryExecutor;
     this.statusCacheSupplier = statusCacheSupplier;
+  }
+
+  /**
+   * Production factory: assembles a real {@link HttpDispatcher} (50-permit pool + JDK {@link
+   * HttpClient}) and a default {@link RetryExecutor} (4 attempts, exponential 1s→30s). Used by
+   * {@link MarketDataClient}.
+   */
+  static HttpTransport withDefaults(
+      String baseUrl,
+      String apiVersion,
+      String userAgent,
+      @Nullable String token,
+      Supplier<@Nullable StatusCache> statusCacheSupplier) {
+    return new HttpTransport(
+        baseUrl,
+        apiVersion,
+        userAgent,
+        token,
+        new HttpDispatcher(defaultHttpClient(), CONCURRENCY_LIMIT),
+        new RetryExecutor(RetryPolicy.defaults()),
+        statusCacheSupplier);
   }
 
   private static HttpClient defaultHttpClient() {

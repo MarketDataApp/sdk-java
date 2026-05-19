@@ -33,7 +33,8 @@ class UtilitiesResourceTest {
             "test/0.0",
             "secret-token",
             new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
-            new RetryExecutor(NO_RETRY));
+            new RetryExecutor(NO_RETRY),
+            () -> null);
     return new UtilitiesResource(transport, new JsonResponseParser());
   }
 
