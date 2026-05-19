@@ -1,7 +1,10 @@
 package com.marketdata.sdk;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.marketdata.sdk.exception.MarketDataException;
+import java.net.ServerSocket;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -118,6 +121,35 @@ class MarketDataClientTest {
 
     client.close();
     client.close();
+  }
+
+  @Test
+  @Timeout(value = 5, unit = TimeUnit.SECONDS)
+  void run_startup_validation_fails_fast_when_api_unreachable(@TempDir Path tmp) throws Exception {
+    // §5 + retry policy: startup validation must use a single-attempt policy so a slow/down API
+    // doesn't burn the full retry budget (~6.75 min worst case with defaults) before the
+    // constructor returns. Drive a real connection-refused (closed local port) and assert the
+    // failure surfaces well below even one default-policy retry would.
+    int closedPort;
+    try (ServerSocket s = new ServerSocket(0)) {
+      closedPort = s.getLocalPort();
+    }
+    String unreachable = "http://127.0.0.1:" + closedPort;
+
+    try (MarketDataClient client =
+        new MarketDataClient(
+            "any-token", unreachable, null, false, NO_ENV, noDotEnv(tmp), NO_VALIDATION)) {
+      long start = System.nanoTime();
+      assertThatThrownBy(client::runStartupValidation).isInstanceOf(MarketDataException.class);
+      long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+
+      // With the default retry policy this would have taken ~7 s minimum (1 s + 2 s + 4 s
+      // backoffs between four attempts). A single-attempt run is bounded by connect-refused
+      // latency, well under 2 s on any reasonable runner.
+      assertThat(elapsedMs)
+          .as("startup validation should not burn the retry budget")
+          .isLessThan(2000);
+    }
   }
 
   @Test

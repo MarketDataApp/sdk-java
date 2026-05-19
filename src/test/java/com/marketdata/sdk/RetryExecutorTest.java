@@ -105,6 +105,30 @@ class RetryExecutorTest {
     assertThat(calls).hasValue(4); // 1 initial + 3 retries
   }
 
+  // ---------- noRetry policy: exactly one attempt regardless of cause ----------
+
+  @Test
+  void noRetryPolicyInvokesSupplierExactlyOnceOnFailure() {
+    // RetryPolicy.noRetry() is the policy MarketDataClient#runStartupValidation uses to ensure
+    // a slow/down API can't burn the full retry budget before the constructor returns. Verify
+    // the supplier is invoked exactly once even for the most retriable failure shape.
+    AtomicInteger calls = new AtomicInteger();
+    RetryExecutor exec = new RetryExecutor(RetryPolicy.noRetry());
+
+    CompletableFuture<String> f =
+        exec.execute(
+            () -> {
+              calls.incrementAndGet();
+              return CompletableFuture.failedFuture(retriableNet());
+            });
+
+    assertThatThrownBy(f::join)
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(NetworkError.class);
+
+    assertThat(calls).hasValue(1);
+  }
+
   // ---------- non-retriable surfaces immediately ----------
 
   @Test

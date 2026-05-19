@@ -60,12 +60,37 @@ public final class UtilitiesResource {
   }
 
   /**
+   * Like {@link #userAsync()}, but driven by a caller-supplied {@link RetryPolicy}. Package-private
+   * because the only consumer today is {@link MarketDataClient#runStartupValidation()}, which wants
+   * a single-attempt call so a slow/down API doesn't burn the full retry budget before the
+   * constructor returns.
+   */
+  CompletableFuture<User> userAsync(RetryPolicy policy) {
+    RequestSpec spec = RequestSpec.get("user").build();
+    return transport.executeAsync(spec, policy).thenApply(env -> parser.parse(env, User.class));
+  }
+
+  /**
    * Sync wrapper for {@link #userAsync()}; same {@link CompletionException}-unwrapping semantics as
    * {@link #headers()}.
    */
   public User user() {
     try {
       return userAsync().join();
+    } catch (CompletionException e) {
+      throw HttpTransport.asRuntime(e.getCause());
+    } catch (CancellationException e) {
+      throw HttpTransport.asRuntime(e);
+    }
+  }
+
+  /**
+   * Sync wrapper for {@link #userAsync(RetryPolicy)}; package-private. Same companion as {@link
+   * #user()} for callers that need a custom retry policy.
+   */
+  User user(RetryPolicy policy) {
+    try {
+      return userAsync(policy).join();
     } catch (CompletionException e) {
       throw HttpTransport.asRuntime(e.getCause());
     } catch (CancellationException e) {

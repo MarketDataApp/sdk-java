@@ -48,6 +48,16 @@ final class RetryPolicy {
   }
 
   /**
+   * Single-attempt policy: {@code shouldRetry} always returns {@code false}. Useful for calls where
+   * retrying does more harm than failing fast — e.g. the startup validation in {@link
+   * MarketDataClient}, where a slow/down API should surface to the constructor within seconds
+   * rather than burning the full ~6.75 min default retry budget before throwing.
+   */
+  static RetryPolicy noRetry() {
+    return new RetryPolicy(1, Duration.ZERO, Duration.ZERO);
+  }
+
+  /**
    * Whether the SDK should retry after {@code cause}, given that {@code attempt} attempts have
    * already been spent (zero-indexed: {@code attempt == 0} means the original call just failed and
    * we're considering the first retry).

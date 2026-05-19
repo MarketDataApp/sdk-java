@@ -107,8 +107,10 @@ public final class MarketDataClient implements AutoCloseable {
       LOGGER.info(() -> "validateOnStartup skipped: demo mode is active (no token configured).");
       return;
     }
+    // Single-attempt: see RetryPolicy#noRetry for why startup doesn't use the default budget
+    // (the consumer would otherwise wait up to ~6.75 min if the API is unreachable).
     try {
-      utilities.user();
+      utilities.user(RetryPolicy.noRetry());
     } catch (Throwable t) {
       try {
         close();

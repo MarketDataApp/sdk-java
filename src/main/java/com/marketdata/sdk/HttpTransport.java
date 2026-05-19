@@ -141,10 +141,25 @@ final class HttpTransport implements AutoCloseable {
    * subtype via {@link HttpStatusMapper}, possibly after retries.
    */
   CompletableFuture<HttpResponseEnvelope> executeAsync(RequestSpec spec) {
+    return executeAsync(spec, retryExecutor);
+  }
+
+  /**
+   * Like {@link #executeAsync(RequestSpec)}, but uses the caller's {@link RetryPolicy} instead of
+   * the transport's default. Used by callers that need a different retry budget for one specific
+   * call — e.g. {@link MarketDataClient}'s startup validation, which uses {@link
+   * RetryPolicy#noRetry()} so a slow/down API surfaces immediately to the constructor.
+   */
+  CompletableFuture<HttpResponseEnvelope> executeAsync(RequestSpec spec, RetryPolicy policy) {
+    return executeAsync(spec, new RetryExecutor(policy));
+  }
+
+  private CompletableFuture<HttpResponseEnvelope> executeAsync(
+      RequestSpec spec, RetryExecutor executor) {
     URI uri = buildUri(spec);
     HttpRequest request = buildHttpRequest(uri, spec.format());
-    RetryPolicy policy = retryExecutor.policy();
-    return retryExecutor.execute(
+    RetryPolicy policy = executor.policy();
+    return executor.execute(
         () -> {
           // §10.3: pre-flight gate — if our latest snapshot says credits are exhausted, fail
           // fast without hitting the wire. RateLimitError is non-retriable per §11.2, so the

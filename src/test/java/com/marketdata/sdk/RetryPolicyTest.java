@@ -213,4 +213,21 @@ class RetryPolicyTest {
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("maxAttempts");
   }
+
+  // ---------- noRetry factory ----------
+
+  @Test
+  void noRetryFactoryNeverAllowsRetry() {
+    // The factory caters to callers (startup validation today) that need a single-attempt call.
+    // shouldRetry must return false for any retriable cause from attempt 0 onward — otherwise
+    // the caller's deadline assumption is wrong.
+    RetryPolicy single = RetryPolicy.noRetry();
+
+    NetworkError retriable =
+        new NetworkError("net", ctxNoResponse(), new java.io.IOException("transport down"));
+    ServerError retriable5xx = new ServerError("503", ctxWithStatus(503));
+
+    assertThat(single.shouldRetry(retriable, 0)).isFalse();
+    assertThat(single.shouldRetry(retriable5xx, 0)).isFalse();
+  }
 }
