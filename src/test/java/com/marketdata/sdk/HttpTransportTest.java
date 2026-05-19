@@ -270,7 +270,10 @@ class HttpTransportTest {
   void rateLimitSnapshotNotClearedByResponseWithoutHeaders() {
     // First call sets a snapshot; second call returns no headers; snapshot must remain
     // populated (vs flickering to null).
-    HttpHeaders withRl = TestHttpClients.headersOf(Map.of("x-api-ratelimit-limit", "500"));
+    // Real data has remaining > 0 — otherwise the §10.3 pre-flight would block the second call.
+    HttpHeaders withRl =
+        TestHttpClients.headersOf(
+            Map.of("x-api-ratelimit-limit", "500", "x-api-ratelimit-remaining", "100"));
     HttpHeaders empty = HttpHeaders.of(Map.of(), (a, b) -> true);
     CapturingClient client = new CapturingClient(200, "ok".getBytes(), withRl);
     HttpTransport transport = newTransport(client);
@@ -306,6 +309,73 @@ class HttpTransportTest {
 
     assertThatThrownBy(() -> transport.executeSync(RequestSpec.get("markets/status").build()))
         .isInstanceOf(ServerError.class); // not CompletionException, not wrapped
+  }
+
+  // ---------- §10.3 pre-flight rate-limit check ----------
+
+  private static HttpHeaders rateLimitHeaders(int remaining) {
+    return TestHttpClients.headersOf(
+        Map.of(
+            "x-api-ratelimit-limit", "1000",
+            "x-api-ratelimit-remaining", String.valueOf(remaining),
+            "x-api-ratelimit-reset", "1734036832",
+            "x-api-ratelimit-consumed", "1"));
+  }
+
+  /**
+   * After a response that exhausts credits, the next call must fail fast with {@link
+   * RateLimitError} and never reach the HttpClient. Without §10.3 we'd waste a real request to
+   * discover the same answer the snapshot already gave us.
+   */
+  @Test
+  void preflightRejectsWhenSnapshotShowsZeroRemaining() {
+    CapturingClient client =
+        new CapturingClient(200, "ok".getBytes(), rateLimitHeaders(/* remaining */ 0));
+    HttpTransport transport = newTransport(client);
+
+    // First call populates the snapshot (remaining=0) and succeeds normally.
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+    assertThat(client.captured).hasSize(1);
+
+    // Second call should be vetoed by the pre-flight; HttpClient must not see it.
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(com.marketdata.sdk.exception.RateLimitError.class);
+
+    assertThat(client.captured).hasSize(1);
+  }
+
+  @Test
+  void preflightAllowsWhenSnapshotShowsCreditsRemaining() {
+    CapturingClient client =
+        new CapturingClient(200, "ok".getBytes(), rateLimitHeaders(/* remaining */ 42));
+    HttpTransport transport = newTransport(client);
+
+    // First call populates the snapshot.
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+    // Second call should proceed — credits still available.
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+
+    assertThat(client.captured).hasSize(2);
+  }
+
+  /**
+   * Before any rate-limit-bearing response has arrived, the snapshot is {@code null} — the first
+   * request must NOT be blocked despite there being "zero" remaining in the EMPTY sentinel. The
+   * pre-flight gate has to distinguish "no data yet" from "actually exhausted".
+   */
+  @Test
+  void preflightAllowsTheFirstRequestWhenNoSnapshotExistsYet() {
+    CapturingClient client =
+        new CapturingClient(200, "ok".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    // No prior response → no snapshot → request proceeds.
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+
+    assertThat(client.captured).hasSize(1);
+    assertThat(transport.getLatestRateLimits()).isNull();
   }
 
   // ---------- §9.4 Retry-After header ----------

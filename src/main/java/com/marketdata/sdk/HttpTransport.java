@@ -3,6 +3,7 @@ package com.marketdata.sdk;
 import com.marketdata.sdk.exception.ErrorContext;
 import com.marketdata.sdk.exception.MarketDataException;
 import com.marketdata.sdk.exception.NetworkError;
+import com.marketdata.sdk.exception.RateLimitError;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -141,11 +142,41 @@ final class HttpTransport implements AutoCloseable {
     HttpRequest request = buildHttpRequest(uri, spec.format());
     RetryPolicy policy = retryExecutor.policy();
     return retryExecutor.execute(
-        () -> dispatcher.dispatch(request).thenApply(response -> routeAndEnvelope(response, uri)),
+        () -> {
+          // §10.3: pre-flight gate — if our latest snapshot says credits are exhausted, fail
+          // fast without hitting the wire. RateLimitError is non-retriable per §11.2, so the
+          // retry executor will surface it directly.
+          RateLimitError preflight = checkRateLimitPreflight(uri);
+          if (preflight != null) {
+            return CompletableFuture.failedFuture(preflight);
+          }
+          return dispatcher
+              .dispatch(request)
+              .thenApply(response -> routeAndEnvelope(response, uri));
+        },
         // §9.5: gate retries on retryable server errors through the /status/ cache. Even if the
         // policy says yes, an "offline" cache entry for this URI's service blocks the retry so
         // the caller fails fast instead of hammering a known-down service.
         (cause, attempt) -> policy.shouldRetry(cause, attempt) && cacheAllowsRetry(uri));
+  }
+
+  /**
+   * Returns a {@link RateLimitError} when the last-known snapshot reports zero remaining credits;
+   * {@code null} when the request is allowed (either credits are available or no snapshot has been
+   * taken yet — the first request must reach the server to populate one).
+   *
+   * <p>Treats {@code remaining == 0} as exhausted regardless of whether {@code reset} has passed.
+   * The snapshot only refreshes on response headers, so we have no fresh data to justify letting
+   * the request through; the server will fail us anyway if quotas haven't actually reset.
+   */
+  private @Nullable RateLimitError checkRateLimitPreflight(URI uri) {
+    RateLimitSnapshot snap = latestRateLimits.get();
+    if (snap == null || snap.remaining() > 0) {
+      return null;
+    }
+    ErrorContext context = ErrorContext.forNoResponse(uri.toString(), Instant.now());
+    return new RateLimitError(
+        "Rate limit exhausted: 0 requests remaining (resets at " + snap.reset() + ")", context);
   }
 
   private boolean cacheAllowsRetry(URI uri) {
