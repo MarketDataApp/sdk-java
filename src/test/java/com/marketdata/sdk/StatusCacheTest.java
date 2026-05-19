@@ -47,7 +47,13 @@ class StatusCacheTest {
   private static ApiStatus snapshot(String service, String status) {
     return new ApiStatus(
         List.of(
-            new ServiceStatus(service, status, "online".equals(status), 1.0, 1.0, Instant.EPOCH)));
+            new ServiceStatus(
+                service,
+                status,
+                "online".equals(status),
+                1.0,
+                1.0,
+                Instant.EPOCH.atZone(MarketDataDates.MARKET_ZONE))));
   }
 
   // ---------- empty cache ----------
@@ -235,9 +241,20 @@ class StatusCacheTest {
                 CompletableFuture.completedFuture(
                     new ApiStatus(
                         List.of(
-                            new ServiceStatus("/v1/", "online", true, 1.0, 1.0, Instant.EPOCH),
                             new ServiceStatus(
-                                "/v1/stocks/quotes/", "offline", false, 0.5, 0.6, Instant.EPOCH)))),
+                                "/v1/",
+                                "online",
+                                true,
+                                1.0,
+                                1.0,
+                                Instant.EPOCH.atZone(MarketDataDates.MARKET_ZONE)),
+                            new ServiceStatus(
+                                "/v1/stocks/quotes/",
+                                "offline",
+                                false,
+                                0.5,
+                                0.6,
+                                Instant.EPOCH.atZone(MarketDataDates.MARKET_ZONE))))),
             clock);
     cache.triggerRefresh();
 

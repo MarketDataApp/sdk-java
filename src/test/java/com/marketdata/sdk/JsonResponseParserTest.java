@@ -10,7 +10,6 @@ import com.marketdata.sdk.utilities.ServiceStatus;
 import com.marketdata.sdk.utilities.User;
 import java.net.URI;
 import java.net.http.HttpHeaders;
-import java.time.Instant;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -130,7 +129,7 @@ class JsonResponseParserTest {
     assertThat(first.online()).isTrue();
     assertThat(first.uptimePct30d()).isEqualTo(1.0);
     assertThat(first.uptimePct90d()).isEqualTo(0.99828);
-    assertThat(first.updated()).isEqualTo(Instant.ofEpochSecond(1734036832L));
+    assertThat(first.updated()).isEqualTo(MarketDataDates.marketTimeFromEpochSecond(1734036832L));
 
     ServiceStatus second = status.services().get(1);
     assertThat(second.service()).isEqualTo("/v1/options/chain/");

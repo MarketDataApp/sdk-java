@@ -1,6 +1,6 @@
 package com.marketdata.sdk.utilities;
 
-import java.time.Instant;
+import java.time.ZonedDateTime;
 
 /**
  * Health of a single API service, as reported by {@code GET /status/}.
@@ -15,7 +15,8 @@ import java.time.Instant;
  * @param online convenience boolean parallel to {@link #status} — server-supplied, not derived.
  * @param uptimePct30d uptime fraction in the last 30 days, in the range {@code [0.0, 1.0]}.
  * @param uptimePct90d uptime fraction in the last 90 days, in the range {@code [0.0, 1.0]}.
- * @param updated when this entry was last refreshed server-side.
+ * @param updated when this entry was last refreshed server-side, in {@code America/New_York} (the
+ *     SDK's canonical market-data zone per §13.4 — see {@code MarketDataDates}).
  */
 public record ServiceStatus(
     String service,
@@ -23,4 +24,4 @@ public record ServiceStatus(
     boolean online,
     double uptimePct30d,
     double uptimePct90d,
-    Instant updated) {}
+    ZonedDateTime updated) {}

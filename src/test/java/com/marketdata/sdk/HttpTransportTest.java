@@ -432,7 +432,12 @@ class HttpTransportTest {
         new com.marketdata.sdk.utilities.ApiStatus(
             java.util.List.of(
                 new com.marketdata.sdk.utilities.ServiceStatus(
-                    "/v1/markets/status/", "offline", false, 0.5, 0.5, java.time.Instant.EPOCH)));
+                    "/v1/markets/status/",
+                    "offline",
+                    false,
+                    0.5,
+                    0.5,
+                    java.time.Instant.EPOCH.atZone(MarketDataDates.MARKET_ZONE))));
     StatusCache cache =
         new StatusCache(
             () -> CompletableFuture.completedFuture(offlineForService),
@@ -472,7 +477,12 @@ class HttpTransportTest {
         new com.marketdata.sdk.utilities.ApiStatus(
             java.util.List.of(
                 new com.marketdata.sdk.utilities.ServiceStatus(
-                    "/v1/markets/status/", "online", true, 1.0, 1.0, java.time.Instant.EPOCH)));
+                    "/v1/markets/status/",
+                    "online",
+                    true,
+                    1.0,
+                    1.0,
+                    java.time.Instant.EPOCH.atZone(MarketDataDates.MARKET_ZONE))));
     StatusCache cache =
         new StatusCache(
             () -> CompletableFuture.completedFuture(online), java.time.Clock.systemUTC());

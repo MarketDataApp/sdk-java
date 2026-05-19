@@ -1,6 +1,5 @@
 package com.marketdata.sdk;
 
-import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.logging.Formatter;
 import java.util.logging.Level;
@@ -27,13 +26,12 @@ import java.util.logging.LogRecord;
  */
 final class CanonicalLogFormatter extends Formatter {
 
-  static final ZoneId ZONE = ZoneId.of("America/New_York");
   private static final DateTimeFormatter TS_FORMAT =
       DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSxxx");
 
   @Override
   public String format(LogRecord record) {
-    String timestamp = TS_FORMAT.format(record.getInstant().atZone(ZONE));
+    String timestamp = TS_FORMAT.format(record.getInstant().atZone(MarketDataDates.MARKET_ZONE));
     return timestamp
         + " - "
         + record.getLoggerName()

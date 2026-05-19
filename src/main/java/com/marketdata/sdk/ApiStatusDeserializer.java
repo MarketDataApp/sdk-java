@@ -8,7 +8,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.marketdata.sdk.utilities.ApiStatus;
 import com.marketdata.sdk.utilities.ServiceStatus;
 import java.io.IOException;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -81,7 +80,7 @@ final class ApiStatusDeserializer extends JsonDeserializer<ApiStatus> {
               onlines.get(i).asBoolean(false),
               up30.get(i).asDouble(0.0),
               up90.get(i).asDouble(0.0),
-              Instant.ofEpochSecond(updated.get(i).asLong(0L))));
+              MarketDataDates.marketTimeFromEpochSecond(updated.get(i).asLong(0L))));
     }
     return new ApiStatus(rows);
   }
