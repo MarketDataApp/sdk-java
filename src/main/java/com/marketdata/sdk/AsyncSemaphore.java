@@ -1,7 +1,10 @@
 package com.marketdata.sdk;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
+import java.util.List;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -29,6 +32,7 @@ final class AsyncSemaphore {
   private final Object lock = new Object();
   private final Deque<CompletableFuture<Void>> waiters = new ArrayDeque<>();
   private int available;
+  private boolean closed;
 
   AsyncSemaphore(int permits) {
     if (permits < 0) {
@@ -43,9 +47,15 @@ final class AsyncSemaphore {
    * <p>Fast path: a permit is available, returns an already-completed future. Slow path: pool is
    * exhausted, returns a pending future enqueued FIFO; it completes when some in-flight caller
    * calls {@link #release()}. Either way, the caller's thread is never parked.
+   *
+   * <p>After {@link #close()} every acquire fails immediately with {@link CancellationException};
+   * waiters queued before the close were already drained with the same exception.
    */
   CompletableFuture<Void> acquire() {
     synchronized (lock) {
+      if (closed) {
+        return CompletableFuture.failedFuture(closedException());
+      }
       if (available > 0) {
         available--;
         return CompletableFuture.completedFuture(null);
@@ -98,5 +108,39 @@ final class AsyncSemaphore {
     synchronized (lock) {
       return waiters.size();
     }
+  }
+
+  /**
+   * Drain the waiter queue and reject future {@link #acquire()} calls. All currently-queued waiters
+   * are completed exceptionally with {@link CancellationException} so the {@code thenCompose} chain
+   * downstream of the dispatcher fails cleanly instead of leaving futures pending forever when the
+   * owning client is closed mid-flight.
+   *
+   * <p>Idempotent: subsequent calls are no-ops. Permits already held by in-flight callers can still
+   * be {@link #release()}d (the counter accepts it harmlessly) — this matters because cancellation
+   * of a dispatched future cancels its permit, and that cancel-then-release path must continue to
+   * work even after close.
+   *
+   * <p>Completion of drained waiters runs <em>outside</em> the lock for the same reason {@link
+   * #release()} does it that way: completing a future runs callbacks synchronously, and we never
+   * want those running with our lock held.
+   */
+  void close() {
+    List<CompletableFuture<Void>> drained;
+    synchronized (lock) {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      drained = new ArrayList<>(waiters);
+      waiters.clear();
+    }
+    for (CompletableFuture<Void> w : drained) {
+      w.completeExceptionally(closedException());
+    }
+  }
+
+  private static CancellationException closedException() {
+    return new CancellationException("AsyncSemaphore is closed");
   }
 }

@@ -11,6 +11,7 @@ import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import org.junit.jupiter.api.Test;
@@ -150,5 +151,70 @@ class HttpDispatcherTest {
     // than being silently lost.
     assertThat(dispatcher.queueLength()).isZero();
     assertThat(dispatcher.availablePermits()).isOne();
+  }
+
+  // ---------- close drains queued waiters ----------
+
+  /**
+   * Without {@code close()} drain, a queued waiter sits in the semaphore forever when the owning
+   * client is shut down — the {@code thenCompose} chain hanging off it never resolves and the
+   * caller's future is leaked. After close, every queued future must fail with {@link
+   * CancellationException} so the consumer's await unblocks cleanly.
+   */
+  @Test
+  void closeDrainsQueuedDispatchesWithCancellation() {
+    TestHttpClients.Controllable client = new TestHttpClients.Controllable();
+    // Concurrency = 1 so the second dispatch is guaranteed to queue.
+    HttpDispatcher dispatcher = new HttpDispatcher(client, 1);
+
+    CompletableFuture<HttpResponse<byte[]>> inflight = dispatcher.dispatch(req());
+    CompletableFuture<HttpResponse<byte[]>> queued = dispatcher.dispatch(req());
+
+    assertThat(dispatcher.queueLength()).isOne();
+
+    dispatcher.close();
+
+    // The queued waiter was sitting in the semaphore, downstream of a thenCompose. Closing the
+    // semaphore completes it with CancellationException; the queued future surfaces it as a
+    // CompletionException -> CancellationException, matching how a cancelled future propagates
+    // through the rest of the pipeline.
+    assertThat(queued).isCompletedExceptionally();
+    // The semaphore-level future failed with CancellationException directly, but the dispatcher
+    // chains it through thenCompose: that propagation wraps in CompletionException (per
+    // CompletionStage contract — only the original cancel propagates "bare").
+    assertThatThrownBy(queued::join)
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(CancellationException.class);
+
+    // The in-flight send remains running (HttpClient.close() is JDK 21+). We let it complete so
+    // the test doesn't leave an orphan future.
+    HttpResponse<byte[]> ok =
+        TestHttpClients.response(
+            200,
+            "ok".getBytes(),
+            HttpHeaders.of(Map.of(), (a, b) -> true),
+            URI.create("http://localhost/ping"));
+    client.completeAll(ok);
+    assertThat(inflight).isCompleted();
+  }
+
+  @Test
+  void dispatchAfterCloseFailsImmediately() {
+    HttpDispatcher dispatcher = new HttpDispatcher(new TestHttpClients.Controllable(), 4);
+    dispatcher.close();
+
+    CompletableFuture<HttpResponse<byte[]>> failed = dispatcher.dispatch(req());
+
+    assertThat(failed).isCompletedExceptionally();
+    assertThatThrownBy(failed::join)
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(CancellationException.class);
+  }
+
+  @Test
+  void closeIsIdempotent() {
+    HttpDispatcher dispatcher = new HttpDispatcher(new TestHttpClients.Controllable(), 4);
+    dispatcher.close();
+    dispatcher.close(); // must be safe
   }
 }

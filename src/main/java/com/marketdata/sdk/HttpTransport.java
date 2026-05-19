@@ -221,8 +221,10 @@ final class HttpTransport implements AutoCloseable {
 
   @Override
   public void close() {
-    // java.net.http.HttpClient gained explicit close() in JDK 21; until the SDK's minimum
-    // bumps to 21+ this is a no-op (ADR-002).
+    // Drains the dispatcher's semaphore so pending waiters surface CancellationException instead
+    // of hanging forever. java.net.http.HttpClient gained explicit close() in JDK 21; until the
+    // SDK's minimum bumps to 21+ in-flight HTTP sends still run to completion (ADR-002).
+    dispatcher.close();
   }
 
   // ---------- private helpers ----------

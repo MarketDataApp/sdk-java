@@ -26,7 +26,7 @@ import java.util.logging.Logger;
  * Status-code interpretation lives in {@link HttpTransport}, not here — this class is below the
  * "what does HTTP 4xx mean" abstraction.
  */
-final class HttpDispatcher {
+final class HttpDispatcher implements AutoCloseable {
 
   private static final Logger LOGGER = Logger.getLogger(HttpDispatcher.class.getName());
 
@@ -130,6 +130,22 @@ final class HttpDispatcher {
   /** Number of pending waiters on the semaphore's slow path. */
   int queueLength() {
     return permits.queueLength();
+  }
+
+  /**
+   * Drains the semaphore's waiter queue and rejects subsequent {@link #dispatch} calls; waiters
+   * fail with {@link java.util.concurrent.CancellationException} so the chained future of every
+   * pending caller resolves cleanly instead of leaking forever.
+   *
+   * <p>Does <em>not</em> cancel in-flight HTTP sends: those run inside {@code HttpClient}, which
+   * has no {@code close()} until JDK 21 (ADR-002). When the SDK bumps to JDK 21+ this method should
+   * also close the {@code HttpClient}.
+   *
+   * <p>Idempotent.
+   */
+  @Override
+  public void close() {
+    permits.close();
   }
 
   private static Throwable unwrap(Throwable t) {
