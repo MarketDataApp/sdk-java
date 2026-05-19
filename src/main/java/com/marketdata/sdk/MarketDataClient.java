@@ -94,8 +94,19 @@ public final class MarketDataClient implements AutoCloseable {
    * we close the transport before re-throwing so a partially-constructed client doesn't leak its
    * HttpClient — the caller's try-with-resources is never triggered if the constructor itself
    * fails.
+   *
+   * <p>Skipped in demo mode: there is no token to validate, and {@code /v1/user/} would
+   * deterministically return 401, breaking construction for any consumer who instantiates the SDK
+   * without a token configured (the "I want to kick the tires" path).
+   *
+   * <p>Package-private so the demo-mode skip can be tested hermetically (i.e. without depending on
+   * whether {@code MARKETDATA_TOKEN} is set in the runner's environment).
    */
-  private void runStartupValidation() {
+  void runStartupValidation() {
+    if (DemoMode.isDemo(config)) {
+      LOGGER.info(() -> "validateOnStartup skipped: demo mode is active (no token configured).");
+      return;
+    }
     try {
       utilities.user();
     } catch (Throwable t) {
