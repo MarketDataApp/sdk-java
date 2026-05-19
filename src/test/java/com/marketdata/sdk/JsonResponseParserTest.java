@@ -224,6 +224,46 @@ class JsonResponseParserTest {
   }
 
   @Test
+  void apiStatusNullCellInOnlineArrayBecomesParseError() {
+    // Real-world regression scenario: the backend ships a build where `online` is sometimes
+    // null instead of a boolean. Before the strict-cell validation, this silently became
+    // online=false for every row → StatusCache marks services as offline → SDK blocks retries
+    // across the board. The strict accessor must surface the malformed cell as ParseError.
+    String body =
+        "{\"s\":\"ok\","
+            + "\"service\":[\"a\",\"b\"],"
+            + "\"status\":[\"online\",\"online\"],"
+            + "\"online\":[true,null],"
+            + "\"uptimePct30d\":[1.0,1.0],"
+            + "\"uptimePct90d\":[1.0,1.0],"
+            + "\"updated\":[0,0]}";
+
+    assertThatThrownBy(() -> new JsonResponseParser().parse(env(body), ApiStatus.class))
+        .isInstanceOf(ParseError.class)
+        .hasMessageContaining("null cell")
+        .hasMessageContaining("online");
+  }
+
+  @Test
+  void apiStatusWrongTypeInUptimeArrayBecomesParseError() {
+    // The backend swaps a number for a string (e.g. "1.0" instead of 1.0). Strict mode rejects
+    // it rather than relying on Jackson's lax string→number coercion.
+    String body =
+        "{\"s\":\"ok\","
+            + "\"service\":[\"a\"],"
+            + "\"status\":[\"online\"],"
+            + "\"online\":[true],"
+            + "\"uptimePct30d\":[\"1.0\"]," // string instead of number
+            + "\"uptimePct90d\":[1.0],"
+            + "\"updated\":[0]}";
+
+    assertThatThrownBy(() -> new JsonResponseParser().parse(env(body), ApiStatus.class))
+        .isInstanceOf(ParseError.class)
+        .hasMessageContaining("expected number")
+        .hasMessageContaining("uptimePct30d");
+  }
+
+  @Test
   void malformedJsonRaisesParseErrorCarryingResponseContext() {
     JsonResponseParser parser = new JsonResponseParser();
 

@@ -1,0 +1,284 @@
+package com.marketdata.sdk;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+
+class ParallelArraysTest {
+
+  private static final ObjectMapper MAPPER = new ObjectMapper();
+
+  private static JsonNode parse(String json) throws IOException {
+    return MAPPER.readTree(json);
+  }
+
+  // ---------- happy path: zip + typed accessors ----------
+
+  @Test
+  void zipsParallelArraysIntoRowsViaTypedAccessors() throws IOException {
+    JsonNode root =
+        parse(
+            "{\"s\":\"ok\","
+                + "\"symbol\":[\"AAPL\",\"MSFT\"],"
+                + "\"price\":[150.0,400.0],"
+                + "\"active\":[true,false],"
+                + "\"updated\":[1700000000,1700000001]}");
+
+    List<Record> rows =
+        ParallelArrays.zip(
+            null,
+            root,
+            List.of("symbol", "price", "active", "updated"),
+            row ->
+                new Record(
+                    row.text("symbol"), row.dbl("price"), row.bool("active"), row.lng("updated")));
+
+    assertThat(rows).hasSize(2);
+    assertThat(rows.get(0)).isEqualTo(new Record("AAPL", 150.0, true, 1700000000L));
+    assertThat(rows.get(1)).isEqualTo(new Record("MSFT", 400.0, false, 1700000001L));
+  }
+
+  @Test
+  void emptyArraysProduceEmptyListWithoutInvokingBuilder() throws IOException {
+    JsonNode root = parse("{\"s\":\"ok\",\"a\":[],\"b\":[]}");
+
+    List<String> rows =
+        ParallelArrays.zip(
+            null,
+            root,
+            List.of("a", "b"),
+            row -> {
+              throw new AssertionError("builder must not be invoked when arrays are empty");
+            });
+
+    assertThat(rows).isEmpty();
+  }
+
+  // ---------- envelope-error short-circuit ----------
+
+  @Test
+  void serverSideErrorEnvelopeShortCircuitsBeforeFieldValidation() {
+    // s=error means the body intentionally omits the data arrays. The helper must surface the
+    // errmsg instead of complaining about missing fields downstream.
+    assertThatThrownBy(
+            () ->
+                ParallelArrays.zip(
+                    null,
+                    parse("{\"s\":\"error\",\"errmsg\":\"database connection refused\"}"),
+                    List.of("symbol"),
+                    row -> null))
+        .isInstanceOf(JsonMappingException.class)
+        .hasMessageContaining("database connection refused");
+  }
+
+  @Test
+  void errorEnvelopeWithoutErrmsgYieldsPlaceholderText() {
+    assertThatThrownBy(
+            () ->
+                ParallelArrays.zip(
+                    null, parse("{\"s\":\"error\"}"), List.of("symbol"), row -> null))
+        .isInstanceOf(JsonMappingException.class)
+        .hasMessageContaining("no errmsg field");
+  }
+
+  // ---------- presence and length validation ----------
+
+  @Test
+  void missingFieldFailsWithFieldName() {
+    assertThatThrownBy(
+            () ->
+                ParallelArrays.zip(
+                    null,
+                    parse("{\"s\":\"ok\",\"symbol\":[\"AAPL\"]}"),
+                    List.of("symbol", "price"),
+                    row -> null))
+        .isInstanceOf(JsonMappingException.class)
+        .hasMessageContaining("missing or non-array")
+        .hasMessageContaining("price");
+  }
+
+  @Test
+  void nonArrayFieldFailsWithFieldName() {
+    assertThatThrownBy(
+            () ->
+                ParallelArrays.zip(
+                    null,
+                    parse("{\"s\":\"ok\",\"symbol\":\"AAPL\",\"price\":[150.0]}"),
+                    List.of("symbol", "price"),
+                    row -> null))
+        .isInstanceOf(JsonMappingException.class)
+        .hasMessageContaining("missing or non-array")
+        .hasMessageContaining("symbol");
+  }
+
+  @Test
+  void mismatchedLengthsFailWithDetail() {
+    assertThatThrownBy(
+            () ->
+                ParallelArrays.zip(
+                    null,
+                    parse(
+                        "{\"s\":\"ok\","
+                            + "\"symbol\":[\"AAPL\",\"MSFT\"],"
+                            + "\"price\":[150.0]}"),
+                    List.of("symbol", "price"),
+                    row -> null))
+        .isInstanceOf(JsonMappingException.class)
+        .hasMessageContaining("mismatched lengths")
+        .hasMessageContaining("price=1")
+        .hasMessageContaining("expected=2");
+  }
+
+  // ---------- Row.node() for custom conversions ----------
+
+  @Test
+  void rowNodeExposesRawJsonNodeForCustomConversion() throws IOException {
+    // node() lets the builder do conversions the typed helpers don't cover — here we parse
+    // an array element directly so the test exercises that escape hatch.
+    JsonNode root = parse("{\"s\":\"ok\",\"nested\":[{\"k\":\"v1\"},{\"k\":\"v2\"}]}");
+
+    List<String> rows =
+        ParallelArrays.zip(
+            null, root, List.of("nested"), row -> row.node("nested").get("k").asText());
+
+    assertThat(rows).containsExactly("v1", "v2");
+  }
+
+  // ---------- Row programming errors ----------
+
+  @Test
+  void rowAccessorRejectsUndeclaredField() throws IOException {
+    // Asking for a field that wasn't in the declared `fields` list is a programming bug in the
+    // builder lambda — surface it loudly rather than NPEing on a null array.
+    JsonNode root = parse("{\"s\":\"ok\",\"a\":[\"x\"]}");
+
+    assertThatThrownBy(
+            () ->
+                ParallelArrays.zip(
+                    null,
+                    root,
+                    List.of("a"),
+                    row -> row.text("nonexistent"))) // builder asks for an undeclared column
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("nonexistent")
+        .hasMessageContaining("[a]");
+  }
+
+  // ---------- strict cell validation ----------
+
+  @Test
+  void textFailsWhenCellIsJsonNull() throws IOException {
+    JsonNode root = parse("{\"s\":\"ok\",\"symbol\":[\"AAPL\",null]}");
+
+    assertThatThrownBy(
+            () -> ParallelArrays.zip(null, root, List.of("symbol"), row -> row.text("symbol")))
+        .isInstanceOf(JsonMappingException.class)
+        .hasMessageContaining("null cell")
+        .hasMessageContaining("symbol")
+        .hasMessageContaining("row 1");
+  }
+
+  @Test
+  void textFailsWhenCellIsNotAString() throws IOException {
+    // The server suddenly sending a number where a symbol is expected is the kind of regression
+    // we want to surface immediately, not silently coerce to "123" via Jackson's lax asText.
+    JsonNode root = parse("{\"s\":\"ok\",\"symbol\":[123]}");
+
+    assertThatThrownBy(
+            () -> ParallelArrays.zip(null, root, List.of("symbol"), row -> row.text("symbol")))
+        .isInstanceOf(JsonMappingException.class)
+        .hasMessageContaining("expected string")
+        .hasMessageContaining("symbol");
+  }
+
+  @Test
+  void boolFailsWhenCellIsJsonNull() throws IOException {
+    // The exact regression flagged in the review: a missing `online` cell silently becoming
+    // `false` would mass-block retries via StatusCache. Strict mode rejects it.
+    JsonNode root = parse("{\"s\":\"ok\",\"online\":[true,null]}");
+
+    assertThatThrownBy(
+            () -> ParallelArrays.zip(null, root, List.of("online"), row -> row.bool("online")))
+        .isInstanceOf(JsonMappingException.class)
+        .hasMessageContaining("null cell")
+        .hasMessageContaining("online");
+  }
+
+  @Test
+  void boolFailsWhenCellIsNotABoolean() throws IOException {
+    // "true" as a string is not the same as boolean true — Jackson's lax asBoolean would coerce.
+    JsonNode root = parse("{\"s\":\"ok\",\"online\":[\"true\"]}");
+
+    assertThatThrownBy(
+            () -> ParallelArrays.zip(null, root, List.of("online"), row -> row.bool("online")))
+        .isInstanceOf(JsonMappingException.class)
+        .hasMessageContaining("expected boolean")
+        .hasMessageContaining("online");
+  }
+
+  @Test
+  void dblFailsWhenCellIsJsonNull() throws IOException {
+    JsonNode root = parse("{\"s\":\"ok\",\"price\":[null]}");
+
+    assertThatThrownBy(
+            () -> ParallelArrays.zip(null, root, List.of("price"), row -> row.dbl("price")))
+        .isInstanceOf(JsonMappingException.class)
+        .hasMessageContaining("null cell")
+        .hasMessageContaining("price");
+  }
+
+  @Test
+  void dblFailsWhenCellIsNotANumber() throws IOException {
+    JsonNode root = parse("{\"s\":\"ok\",\"price\":[\"150.0\"]}");
+
+    assertThatThrownBy(
+            () -> ParallelArrays.zip(null, root, List.of("price"), row -> row.dbl("price")))
+        .isInstanceOf(JsonMappingException.class)
+        .hasMessageContaining("expected number")
+        .hasMessageContaining("price");
+  }
+
+  @Test
+  void lngFailsWhenCellIsJsonNull() throws IOException {
+    JsonNode root = parse("{\"s\":\"ok\",\"updated\":[null]}");
+
+    assertThatThrownBy(
+            () -> ParallelArrays.zip(null, root, List.of("updated"), row -> row.lng("updated")))
+        .isInstanceOf(JsonMappingException.class)
+        .hasMessageContaining("null cell")
+        .hasMessageContaining("updated");
+  }
+
+  @Test
+  void lngFailsWhenCellIsNotANumber() throws IOException {
+    JsonNode root = parse("{\"s\":\"ok\",\"updated\":[true]}");
+
+    assertThatThrownBy(
+            () -> ParallelArrays.zip(null, root, List.of("updated"), row -> row.lng("updated")))
+        .isInstanceOf(JsonMappingException.class)
+        .hasMessageContaining("expected number")
+        .hasMessageContaining("updated");
+  }
+
+  @Test
+  void nodeAccessorReturnsNullJsonNodeVerbatimForCustomHandling() throws IOException {
+    // Strict accessors fail on null; the raw `node()` escape hatch must NOT — callers that opt
+    // into raw access are responsible for handling null themselves (e.g. nested object fields).
+    JsonNode root = parse("{\"s\":\"ok\",\"raw\":[null]}");
+
+    List<Boolean> rows =
+        ParallelArrays.zip(null, root, List.of("raw"), row -> row.node("raw").isNull());
+
+    assertThat(rows).containsExactly(true);
+  }
+
+  // ---------- helper record ----------
+
+  private record Record(String symbol, double price, boolean active, long updated) {}
+}
