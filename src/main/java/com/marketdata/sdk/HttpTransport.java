@@ -18,6 +18,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -38,6 +39,8 @@ import org.jspecify.annotations.Nullable;
  * directly.
  */
 final class HttpTransport implements AutoCloseable {
+
+  private static final Logger LOGGER = Logger.getLogger(HttpTransport.class.getName());
 
   /** SDK requirements §10: fixed 99-second per-request timeout. */
   static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(99);
@@ -242,6 +245,8 @@ final class HttpTransport implements AutoCloseable {
             .orElse(null);
     MarketDataException ex = HttpStatusMapper.map(status, context, retryAfter);
     if (ex != null) {
+      LOGGER.warning(
+          () -> "Request to " + uri + " returned HTTP " + status + ": " + ex.getMessage());
       throw ex;
     }
     // Mapper only returns null for 2xx, which the branch above already handled. Belt &

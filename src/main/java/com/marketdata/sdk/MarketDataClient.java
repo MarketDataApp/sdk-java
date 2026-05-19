@@ -4,9 +4,12 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
 public final class MarketDataClient implements AutoCloseable {
+
+  private static final Logger LOGGER = Logger.getLogger(MarketDataClient.class.getName());
 
   private final Configuration config;
   private final HttpTransport transport;
@@ -46,6 +49,17 @@ public final class MarketDataClient implements AutoCloseable {
       Path dotEnvPath,
       Runnable startupValidator) {
     this.config = Configuration.resolve(apiKey, baseUrl, apiVersion, env, dotEnvPath);
+    MarketDataLogging.configure(config.loggingLevel());
+    LOGGER.info(
+        () ->
+            "MarketDataClient initialized: baseUrl="
+                + config.baseUrl()
+                + ", apiVersion="
+                + config.apiVersion()
+                + ", token="
+                + Tokens.redact(config.apiKey())
+                + ", demoMode="
+                + DemoMode.isDemo(config));
 
     // §9.5: the status cache pre-checks /status/ before retrying 5xx. The cache's fetcher uses
     // `utilities.statusAsync()`, which goes through this transport — a chicken-and-egg. We

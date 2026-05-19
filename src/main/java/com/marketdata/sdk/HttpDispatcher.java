@@ -6,10 +6,12 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.logging.Logger;
 
 /**
  * Single-shot HTTP dispatch with global concurrency limiting.
@@ -25,6 +27,8 @@ import java.util.concurrent.CompletionException;
  * "what does HTTP 4xx mean" abstraction.
  */
 final class HttpDispatcher {
+
+  private static final Logger LOGGER = Logger.getLogger(HttpDispatcher.class.getName());
 
   private final HttpClient httpClient;
   private final AsyncSemaphore permits;
@@ -61,6 +65,9 @@ final class HttpDispatcher {
   }
 
   private CompletableFuture<HttpResponse<byte[]>> send(HttpRequest request) {
+    LOGGER.fine(() -> "GET " + request.uri());
+    Instant start = Instant.now();
+
     CompletableFuture<HttpResponse<byte[]>> sendFuture;
     try {
       sendFuture = httpClient.sendAsync(request, BodyHandlers.ofByteArray());
@@ -69,6 +76,8 @@ final class HttpDispatcher {
       // never formed, so the whenComplete below would never fire — release the permit here
       // to prevent a permanent leak that would degrade the pool to deadlock.
       permits.release();
+      LOGGER.warning(
+          () -> "Request to " + request.uri() + " failed before dispatch: " + t.getMessage());
       if (t instanceof Error err) {
         throw err;
       }
@@ -83,14 +92,32 @@ final class HttpDispatcher {
         .whenComplete((r, t) -> permits.release())
         .handle(
             (response, error) -> {
+              long elapsedMs = Duration.between(start, Instant.now()).toMillis();
               if (error != null) {
                 Throwable root = unwrap(error);
+                LOGGER.warning(
+                    () ->
+                        "Request to "
+                            + request.uri()
+                            + " failed after "
+                            + elapsedMs
+                            + "ms: "
+                            + root.getMessage());
                 throw new CompletionException(
                     new NetworkError(
                         "Request to " + request.uri() + " failed: " + root.getMessage(),
                         ErrorContext.forNoResponse(request.uri().toString(), Instant.now()),
                         root));
               }
+              LOGGER.fine(
+                  () ->
+                      "Response "
+                          + response.statusCode()
+                          + " from "
+                          + request.uri()
+                          + " in "
+                          + elapsedMs
+                          + "ms");
               return response;
             });
   }
