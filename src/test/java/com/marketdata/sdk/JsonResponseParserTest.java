@@ -353,6 +353,38 @@ class JsonResponseParserTest {
             });
   }
 
+  /**
+   * Issue #16: {@code getMessage()} is consumer-accessible — anything embedded in it ends up in
+   * logs the moment a consumer does the obvious {@code log.error(ex.getMessage())}. Query strings
+   * carry tokens, account ids, and queried symbols; §16 requires that they not leak through this
+   * surface. The full URI remains on {@link ParseError#getRequestUrl()} for callers that need it.
+   */
+  @Test
+  void parseErrorMessageRedactsQueryString() {
+    JsonResponseParser parser = parserWithUtilitiesModule();
+    HttpResponseEnvelope envWithQuery =
+        new HttpResponseEnvelope(
+            "{not-json".getBytes(),
+            200,
+            "test-request-id",
+            HttpHeaders.of(Map.of(), (a, b) -> true),
+            URI.create("http://localhost/stocks/quotes/?token=secret-xyz&symbol=AAPL"));
+
+    assertThatThrownBy(() -> parser.parse(envWithQuery, RequestHeaders.class))
+        .isInstanceOf(ParseError.class)
+        .satisfies(
+            t -> {
+              ParseError err = (ParseError) t;
+              // Message redacts the query.
+              assertThat(err.getMessage()).doesNotContain("secret-xyz").doesNotContain("AAPL");
+              assertThat(err.getMessage()).contains("?…");
+              // getRequestUrl() also redacts (pre-existing policy on MarketDataException).
+              assertThat(err.getRequestUrl()).doesNotContain("secret-xyz");
+              // The raw context retains the full URI for diagnostic use that won't be persisted.
+              assertThat(err.getContext().requestUrl()).contains("token=secret-xyz");
+            });
+  }
+
   // ---------- §9 / ADR-007: parser is resource-agnostic ----------
 
   /**

@@ -25,9 +25,25 @@ class TokensTest {
     assertThat(Tokens.redact("abc")).isEqualTo(REDACTED);
   }
 
+  /**
+   * Issue #24: tokens of length ≤ 8 are fully redacted — emitting the last 4 chars would expose
+   * 50%–100% of the value. Sandbox/demo keys are exactly this short, and the SDK promises (§16)
+   * never to log a token verbatim. Above 8 chars the trailing 4 give consumers enough material to
+   * disambiguate which key is loaded without revealing it.
+   */
   @Test
-  void redact_appends_full_token_when_exactly_four_chars() {
-    assertThat(Tokens.redact("abcd")).isEqualTo(REDACTED + "abcd");
+  void redact_returns_marker_only_for_tokens_eight_or_shorter() {
+    assertThat(Tokens.redact("abcd")).isEqualTo(REDACTED); // len=4: would have been 100% leak
+    assertThat(Tokens.redact("abcde")).isEqualTo(REDACTED); // 80% leak
+    assertThat(Tokens.redact("abcdef")).isEqualTo(REDACTED); // 67%
+    assertThat(Tokens.redact("abcdefg")).isEqualTo(REDACTED); // 57%
+    assertThat(Tokens.redact("abcdefgh")).isEqualTo(REDACTED); // 50%
+  }
+
+  @Test
+  void redact_appends_last_four_only_above_length_eight() {
+    // Boundary: length 9 is the first that gets the trailing-4 form.
+    assertThat(Tokens.redact("abcdefghi")).isEqualTo(REDACTED + "fghi");
   }
 
   @Test

@@ -326,7 +326,10 @@ final class HttpTransport implements AutoCloseable {
     }
     // Mapper only returns null for 2xx, which the branch above already handled. Belt &
     // suspenders for the impossible case so a future mapper edit can't silently swallow.
-    throw new ServerError("Unmapped status " + status + " from " + uri, context);
+    // §16: route the URI through safeUri so getMessage() — accessible to any consumer that
+    // logs the exception — never carries query strings (token, account_id, symbols, …).
+    throw new ServerError(
+        "Unmapped status " + status + " from " + HttpDispatcher.safeUri(uri), context);
   }
 
   private URI buildUri(RequestSpec spec) {

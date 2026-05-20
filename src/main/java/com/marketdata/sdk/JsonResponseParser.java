@@ -59,8 +59,16 @@ final class JsonResponseParser {
       ErrorContext context =
           ErrorContext.forResponse(
               env.url().toString(), env.statusCode(), env.requestId(), clock.instant());
+      // §16: getMessage() is consumer-accessible and routinely logged. Strip query strings so
+      // tokens/account_ids/symbols never persist through this surface. The full URI remains
+      // available on the ErrorContext for callers with the right discretion.
       throw new ParseError(
-          "Failed to decode response from " + env.url() + ": " + e.getMessage(), context, e);
+          "Failed to decode response from "
+              + HttpDispatcher.safeUri(env.url())
+              + ": "
+              + e.getMessage(),
+          context,
+          e);
     }
   }
 }

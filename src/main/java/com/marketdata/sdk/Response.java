@@ -118,6 +118,13 @@ public final class Response<T> {
     }
   }
 
+  /**
+   * Log-safe representation: status, format, byte count, and the request URL with the query string
+   * redacted (§16 — token, account_id, symbol queries must not persist through {@code toString}).
+   * {@code data} is intentionally omitted: consumers that need the payload have {@link #data()};
+   * embedding it here would let a routine {@code log.info(response)} leak a {@code RequestHeaders}
+   * map (Authorization, client IP) or whatever else the future resource models carry.
+   */
   @Override
   public String toString() {
     return "Response[status="
@@ -127,9 +134,7 @@ public final class Response<T> {
         + ", bytes="
         + rawBody.length
         + ", url="
-        + requestUrl
-        + ", data="
-        + data
+        + HttpDispatcher.safeUri(requestUrl)
         + "]";
   }
 }

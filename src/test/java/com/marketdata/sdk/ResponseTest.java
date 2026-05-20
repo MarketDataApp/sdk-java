@@ -129,17 +129,52 @@ class ResponseTest {
   // ---------- toString ----------
 
   @Test
-  void toStringIncludesStatusFormatAndUrl() {
+  void toStringIncludesStatusFormatBytesAndUrl() {
     Response<String> r =
         Response.wrap("payload", env("body".getBytes(), 200, "http://x/y"), Format.JSON);
 
     String repr = r.toString();
 
+    // safeUri emits the path only (its contract): host/scheme are uninteresting in a log line and
+    // omitting them mirrors what HttpDispatcher already does for ambient request logs.
     assertThat(repr)
         .contains("status=200")
         .contains("format=json")
         .contains("bytes=4")
-        .contains("http://x/y")
-        .contains("payload");
+        .contains("url=/y");
+  }
+
+  /**
+   * Issue #38: {@code toString} is a routine logging surface. The typed payload may carry sensitive
+   * content (e.g. a {@code RequestHeaders} map with {@code authorization} or client IPs), so it
+   * must not be embedded. Consumers that want the payload have {@link Response#data()}.
+   */
+  @Test
+  void toStringDoesNotIncludeDataPayload() {
+    Response<String> r =
+        Response.wrap(
+            "sensitive-payload-do-not-leak",
+            env("body".getBytes(), 200, "http://x/y"),
+            Format.JSON);
+
+    assertThat(r.toString()).doesNotContain("sensitive-payload-do-not-leak");
+  }
+
+  /**
+   * Issue #38 + §16: query strings (tokens, account_ids, symbols) must not survive through {@code
+   * toString}. The full URI is still available via {@link Response#requestUrl()}.
+   */
+  @Test
+  void toStringRedactsQueryStringInUrl() {
+    Response<String> r =
+        Response.wrap(
+            "data",
+            env("body".getBytes(), 200, "http://x/quotes/?token=secret&symbol=AAPL"),
+            Format.JSON);
+
+    String repr = r.toString();
+
+    assertThat(repr).doesNotContain("secret").doesNotContain("AAPL");
+    assertThat(repr).contains("?…");
   }
 }
