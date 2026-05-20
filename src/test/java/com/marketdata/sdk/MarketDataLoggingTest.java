@@ -123,6 +123,29 @@ class MarketDataLoggingTest {
   }
 
   @Test
+  void configureRetriesInstallAfterConsumerReleasesControl() {
+    // Bug from review #8: previously `configured` latched on the consumer-pre-config skip path,
+    // so the SDK was frozen out for the lifetime of the process even after the consumer
+    // cleared their handler/level. The fix latches `configured` only on actual install. This
+    // test pins the new behavior — no resetForTests() called between attempts.
+    sdkLogger().setLevel(Level.FINE); // simulate consumer state
+    MarketDataLogging.configure("INFO");
+    // First call backed off: no handler, consumer's level intact.
+    assertThat(sdkLogger().getHandlers()).isEmpty();
+    assertThat(sdkLogger().getLevel()).isEqualTo(Level.FINE);
+
+    // Consumer releases control (e.g. their bootstrap completed and they cleared the override).
+    sdkLogger().setLevel(null);
+
+    MarketDataLogging.configure("WARNING");
+
+    // SDK now installs because consumer-pre-config disappeared — the prior skip did not latch
+    // the flag.
+    assertThat(sdkLogger().getHandlers()).hasSize(1);
+    assertThat(sdkLogger().getLevel()).isEqualTo(Level.WARNING);
+  }
+
+  @Test
   void configureRunsAgainAfterResetClearsConsumerState() {
     // Defensive: resetForTests() wipes both the idempotency flag and the logger state, so a
     // subsequent configure() must see a fresh slate and install the SDK defaults.

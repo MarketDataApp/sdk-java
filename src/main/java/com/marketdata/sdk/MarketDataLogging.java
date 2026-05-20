@@ -38,15 +38,23 @@ final class MarketDataLogging {
   static final String SDK_LOGGER_NAME = "com.marketdata.sdk";
   static final Level DEFAULT_LEVEL = Level.INFO;
 
+  /**
+   * Latched to {@code true} only when {@link #configure(String)} successfully installs the SDK
+   * handler. Calls that return because the consumer had pre-configured the logger do <em>not</em>
+   * latch — if the consumer later releases control (clears their handler / level), a subsequent
+   * {@code configure(...)} can still install the SDK defaults. "First call wins" applies to the
+   * install, not to the skip.
+   */
   private static final AtomicBoolean configured = new AtomicBoolean(false);
 
   private MarketDataLogging() {}
 
   /**
-   * Install the SDK's handler + formatter on the SDK root logger. Idempotent — first call wins;
-   * subsequent calls are no-ops. Also backs off entirely when the SDK logger already carries a
-   * handler or an explicit level (see class docs): the consumer has taken control, the SDK respects
-   * it.
+   * Install the SDK's handler + formatter on the SDK root logger. Idempotent — first successful
+   * install wins; subsequent calls are no-ops. Also backs off entirely when the SDK logger already
+   * carries a handler or an explicit level (see class docs): the consumer has taken control, the
+   * SDK respects it; that path does <em>not</em> latch the idempotency flag, so the SDK can still
+   * install later if the consumer's control is released.
    *
    * @param levelSpec a level string from {@code MARKETDATA_LOGGING_LEVEL} ({@code DEBUG}, {@code
    *     INFO}, {@code WARNING}, {@code ERROR}, case-insensitive), or {@code null} for the default
@@ -54,11 +62,10 @@ final class MarketDataLogging {
    */
   static void configure(@Nullable String levelSpec) {
     Level requested = parseLevel(levelSpec);
-    if (!configured.compareAndSet(false, true)) {
-      // Already configured. If the caller is asking for a different level than the first call
-      // installed, the result is "their level is silently ignored" — flag it at DEBUG so a
-      // test that sees stale logging knows where to look, without spamming production where
-      // re-creating the client is normal.
+    if (configured.get()) {
+      // SDK already installed by an earlier call. Subsequent calls don't replace the handler
+      // (first-install-wins) but may diagnose level mismatches at DEBUG so a stale-logging
+      // surprise has a breadcrumb.
       Level installed = Logger.getLogger(SDK_LOGGER_NAME).getLevel();
       if (installed != null && !installed.equals(requested)) {
         LOG.fine(
@@ -67,16 +74,24 @@ final class MarketDataLogging {
                     + requested.getName()
                     + " but logger is already configured at "
                     + installed.getName()
-                    + "; ignoring (first-call-wins).");
+                    + "; ignoring (first-install-wins).");
       }
       return;
     }
     Logger sdkLogger = Logger.getLogger(SDK_LOGGER_NAME);
     if (sdkLogger.getHandlers().length > 0 || sdkLogger.getLevel() != null) {
-      // Consumer (or another library) already configured the SDK logger. Respect that
-      // entirely: don't add our ConsoleHandler (would double-emit), don't flip
-      // useParentHandlers (would break their parent-handler routing), don't overwrite the
-      // level they explicitly chose.
+      // Consumer (or another library) already configured the SDK logger. Respect that entirely:
+      // don't add our ConsoleHandler (would double-emit), don't flip useParentHandlers (would
+      // break their parent-handler routing), don't overwrite the level they explicitly chose.
+      // Crucially, do NOT latch `configured` here — the consumer can release control later
+      // (remove their handler, clear their level), and a subsequent configure() call should be
+      // allowed to install the SDK defaults at that point. Latching would freeze the SDK out
+      // for the lifetime of the process even after the consumer-pre-config disappeared.
+      return;
+    }
+    // Claim the install slot. Losing the race with another concurrent configure() means another
+    // thread is already installing — treat as idempotent skip.
+    if (!configured.compareAndSet(false, true)) {
       return;
     }
     Handler handler = new ConsoleHandler();
