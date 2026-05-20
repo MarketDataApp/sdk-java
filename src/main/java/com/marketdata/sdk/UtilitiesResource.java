@@ -1,5 +1,6 @@
 package com.marketdata.sdk;
 
+import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.marketdata.sdk.utilities.ApiStatus;
 import com.marketdata.sdk.utilities.RequestHeaders;
 import com.marketdata.sdk.utilities.User;
@@ -24,6 +25,25 @@ public final class UtilitiesResource {
   UtilitiesResource(HttpTransport transport, JsonResponseParser parser) {
     this.transport = transport;
     this.parser = parser;
+    // §9 / ADR-007: resources own their wire-format deserializer registration. Registering here
+    // (in the resource that ships the response models) keeps the parser resource-agnostic and
+    // lets future resources (stocks, options, funds, markets) add their wire formats without
+    // editing a central file.
+    parser.registerModule(wireFormatModule());
+  }
+
+  /**
+   * Build the Jackson module that maps this resource's response records ({@link RequestHeaders},
+   * {@link User}, {@link ApiStatus}) to their custom deserializers. Each call returns a fresh
+   * {@link SimpleModule}; tests that need the same wiring without constructing a full resource can
+   * register this directly on a bare parser.
+   */
+  static SimpleModule wireFormatModule() {
+    SimpleModule m = new SimpleModule("marketdata-utilities");
+    m.addDeserializer(RequestHeaders.class, new RequestHeadersDeserializer());
+    m.addDeserializer(User.class, new UserDeserializer());
+    m.addDeserializer(ApiStatus.class, new ApiStatusDeserializer());
+    return m;
   }
 
   /**

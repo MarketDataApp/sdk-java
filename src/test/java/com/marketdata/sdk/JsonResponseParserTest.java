@@ -15,6 +15,18 @@ import org.junit.jupiter.api.Test;
 
 class JsonResponseParserTest {
 
+  /**
+   * Build a parser pre-loaded with the utilities resource's wire-format module. The parser itself
+   * is resource-agnostic (issue #9 fix); these tests exercise the deserializers shipped by {@link
+   * UtilitiesResource}, so the registration that the production constructor performs is replicated
+   * here.
+   */
+  private static JsonResponseParser parserWithUtilitiesModule() {
+    JsonResponseParser p = new JsonResponseParser();
+    p.registerModule(UtilitiesResource.wireFormatModule());
+    return p;
+  }
+
   private static HttpResponseEnvelope env(String body) {
     return new HttpResponseEnvelope(
         body.getBytes(),
@@ -26,7 +38,7 @@ class JsonResponseParserTest {
 
   @Test
   void parsesRequestHeadersFromFlatJsonObject() {
-    JsonResponseParser parser = new JsonResponseParser();
+    JsonResponseParser parser = parserWithUtilitiesModule();
 
     RequestHeaders rh =
         parser.parse(
@@ -41,14 +53,14 @@ class JsonResponseParserTest {
 
   @Test
   void emptyJsonObjectProducesEmptyHeaders() {
-    JsonResponseParser parser = new JsonResponseParser();
+    JsonResponseParser parser = parserWithUtilitiesModule();
     RequestHeaders rh = parser.parse(env("{}"), RequestHeaders.class);
     assertThat(rh.headers()).isEmpty();
   }
 
   @Test
   void requestHeadersMapIsImmutable() {
-    JsonResponseParser parser = new JsonResponseParser();
+    JsonResponseParser parser = parserWithUtilitiesModule();
     RequestHeaders rh = parser.parse(env("{\"a\":\"1\"}"), RequestHeaders.class);
 
     assertThatThrownBy(() -> rh.headers().put("hacked", "value"))
@@ -59,7 +71,7 @@ class JsonResponseParserTest {
 
   @Test
   void parsesUserMappingHyphenatedKeysToCamelCase() {
-    JsonResponseParser parser = new JsonResponseParser();
+    JsonResponseParser parser = parserWithUtilitiesModule();
 
     User u =
         parser.parse(
@@ -78,7 +90,7 @@ class JsonResponseParserTest {
   void parsesUserWithEmptyOptionsPermissionsAsRealTimeMarker() {
     // Empty string is the server's convention for "real-time access"; the SDK preserves it
     // verbatim so consumers can detect realTime via `permissions.isEmpty()`.
-    JsonResponseParser parser = new JsonResponseParser();
+    JsonResponseParser parser = parserWithUtilitiesModule();
 
     User u =
         parser.parse(
@@ -95,7 +107,7 @@ class JsonResponseParserTest {
   void missingUserNumericFieldRaisesParseError() {
     // Strict: a silent zero would mask backend regressions and surface later as a confusing
     // "quota apparently exhausted". Same policy as ParallelArrays.
-    JsonResponseParser parser = new JsonResponseParser();
+    JsonResponseParser parser = parserWithUtilitiesModule();
 
     assertThatThrownBy(() -> parser.parse(env("{\"x-ratelimit-requests-limit\":500}"), User.class))
         .isInstanceOf(ParseError.class)
@@ -106,7 +118,7 @@ class JsonResponseParserTest {
   @Test
   void userNumericFieldOfWrongTypeRaisesParseError() {
     // String "500" instead of integer 500 — strict rejection rather than Jackson's lax coercion.
-    JsonResponseParser parser = new JsonResponseParser();
+    JsonResponseParser parser = parserWithUtilitiesModule();
 
     assertThatThrownBy(
             () ->
@@ -125,7 +137,7 @@ class JsonResponseParserTest {
   void userMissingOptionsPermsRaisesParseError() {
     // The empty string is the legitimate "real-time access" marker — but the field must be
     // present as a JSON string. Absence is treated as a backend regression, not a default.
-    JsonResponseParser parser = new JsonResponseParser();
+    JsonResponseParser parser = parserWithUtilitiesModule();
 
     assertThatThrownBy(
             () ->
@@ -155,7 +167,7 @@ class JsonResponseParserTest {
             + "\"updated\":[1734036832,1734036833]"
             + "}";
 
-    ApiStatus status = new JsonResponseParser().parse(env(body), ApiStatus.class);
+    ApiStatus status = parserWithUtilitiesModule().parse(env(body), ApiStatus.class);
 
     assertThat(status.services()).hasSize(2);
     ServiceStatus first = status.services().get(0);
@@ -178,7 +190,7 @@ class JsonResponseParserTest {
         "{\"s\":\"ok\",\"service\":[],\"status\":[],\"online\":[],"
             + "\"uptimePct30d\":[],\"uptimePct90d\":[],\"updated\":[]}";
 
-    ApiStatus status = new JsonResponseParser().parse(env(body), ApiStatus.class);
+    ApiStatus status = parserWithUtilitiesModule().parse(env(body), ApiStatus.class);
 
     assertThat(status.services()).isEmpty();
   }
@@ -188,7 +200,7 @@ class JsonResponseParserTest {
     String body =
         "{\"s\":\"ok\",\"service\":[\"a\"],\"status\":[\"online\"],\"online\":[true],"
             + "\"uptimePct30d\":[1.0],\"uptimePct90d\":[1.0],\"updated\":[0]}";
-    ApiStatus status = new JsonResponseParser().parse(env(body), ApiStatus.class);
+    ApiStatus status = parserWithUtilitiesModule().parse(env(body), ApiStatus.class);
 
     assertThatThrownBy(() -> status.services().add(null))
         .isInstanceOf(UnsupportedOperationException.class);
@@ -202,7 +214,7 @@ class JsonResponseParserTest {
     // .data().services().
     String body = "{\"s\":\"no_data\"}";
 
-    ApiStatus status = new JsonResponseParser().parse(env(body), ApiStatus.class);
+    ApiStatus status = parserWithUtilitiesModule().parse(env(body), ApiStatus.class);
 
     assertThat(status.services()).isEmpty();
   }
@@ -216,7 +228,7 @@ class JsonResponseParserTest {
             + "\"nextTime\":null,\"prevTime\":null,"
             + "\"errmsg\":\"Market closed on this date.\"}";
 
-    ApiStatus status = new JsonResponseParser().parse(env(body), ApiStatus.class);
+    ApiStatus status = parserWithUtilitiesModule().parse(env(body), ApiStatus.class);
 
     assertThat(status.services()).isEmpty();
   }
@@ -227,7 +239,7 @@ class JsonResponseParserTest {
     // the usable arrays. Surface as ParseError so it doesn't masquerade as an empty success.
     String body = "{\"s\":\"error\",\"errmsg\":\"database connection refused\"}";
 
-    assertThatThrownBy(() -> new JsonResponseParser().parse(env(body), ApiStatus.class))
+    assertThatThrownBy(() -> parserWithUtilitiesModule().parse(env(body), ApiStatus.class))
         .isInstanceOf(ParseError.class)
         .hasMessageContaining("database connection refused");
   }
@@ -243,7 +255,7 @@ class JsonResponseParserTest {
             + "\"uptimePct90d\":[1.0,1.0],"
             + "\"updated\":[0,0]}";
 
-    assertThatThrownBy(() -> new JsonResponseParser().parse(env(body), ApiStatus.class))
+    assertThatThrownBy(() -> parserWithUtilitiesModule().parse(env(body), ApiStatus.class))
         .isInstanceOf(ParseError.class)
         .hasMessageContaining("mismatched lengths");
   }
@@ -261,7 +273,7 @@ class JsonResponseParserTest {
             + "\"uptimePct90d\":[1.0],"
             + "\"updated\":[0]}";
 
-    assertThatThrownBy(() -> new JsonResponseParser().parse(env(body), ApiStatus.class))
+    assertThatThrownBy(() -> parserWithUtilitiesModule().parse(env(body), ApiStatus.class))
         .isInstanceOf(ParseError.class)
         .hasMessageContaining("missing or non-array")
         .hasMessageContaining("service");
@@ -279,7 +291,7 @@ class JsonResponseParserTest {
             + "\"uptimePct90d\":[1.0],"
             + "\"updated\":[0]}";
 
-    assertThatThrownBy(() -> new JsonResponseParser().parse(env(body), ApiStatus.class))
+    assertThatThrownBy(() -> parserWithUtilitiesModule().parse(env(body), ApiStatus.class))
         .isInstanceOf(ParseError.class)
         .hasMessageContaining("missing or non-array")
         .hasMessageContaining("online");
@@ -300,7 +312,7 @@ class JsonResponseParserTest {
             + "\"uptimePct90d\":[1.0,1.0],"
             + "\"updated\":[0,0]}";
 
-    assertThatThrownBy(() -> new JsonResponseParser().parse(env(body), ApiStatus.class))
+    assertThatThrownBy(() -> parserWithUtilitiesModule().parse(env(body), ApiStatus.class))
         .isInstanceOf(ParseError.class)
         .hasMessageContaining("null cell")
         .hasMessageContaining("online");
@@ -319,7 +331,7 @@ class JsonResponseParserTest {
             + "\"uptimePct90d\":[1.0],"
             + "\"updated\":[0]}";
 
-    assertThatThrownBy(() -> new JsonResponseParser().parse(env(body), ApiStatus.class))
+    assertThatThrownBy(() -> parserWithUtilitiesModule().parse(env(body), ApiStatus.class))
         .isInstanceOf(ParseError.class)
         .hasMessageContaining("expected number")
         .hasMessageContaining("uptimePct30d");
@@ -327,7 +339,7 @@ class JsonResponseParserTest {
 
   @Test
   void malformedJsonRaisesParseErrorCarryingResponseContext() {
-    JsonResponseParser parser = new JsonResponseParser();
+    JsonResponseParser parser = parserWithUtilitiesModule();
 
     assertThatThrownBy(() -> parser.parse(env("{not-json"), RequestHeaders.class))
         .isInstanceOf(ParseError.class)
@@ -339,5 +351,23 @@ class JsonResponseParserTest {
               assertThat(err.getRequestId()).isEqualTo("test-request-id");
               assertThat(err.getCause()).isNotNull();
             });
+  }
+
+  // ---------- §9 / ADR-007: parser is resource-agnostic ----------
+
+  /**
+   * Regression guard: a bare {@link JsonResponseParser} (no modules registered) must NOT know how
+   * to deserialize {@link RequestHeaders} or any other resource type. If a future change
+   * reintroduces hardcoded deserializers in the parser's constructor, this test catches it.
+   */
+  @Test
+  void bareParserDoesNotKnowResourceDeserializers() {
+    JsonResponseParser bare = new JsonResponseParser();
+
+    // RequestHeaders requires the custom deserializer; without it Jackson's default record
+    // mapping fails for the wire shape ({"accept":"*/*",...}) because the record has no
+    // matching property names. Surfaces as ParseError per the parser's contract.
+    assertThatThrownBy(() -> bare.parse(env("{\"accept\":\"*/*\"}"), RequestHeaders.class))
+        .isInstanceOf(ParseError.class);
   }
 }

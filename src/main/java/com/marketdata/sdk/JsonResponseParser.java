@@ -1,12 +1,9 @@
 package com.marketdata.sdk;
 
+import com.fasterxml.jackson.databind.Module;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.marketdata.sdk.exception.ErrorContext;
 import com.marketdata.sdk.exception.ParseError;
-import com.marketdata.sdk.utilities.ApiStatus;
-import com.marketdata.sdk.utilities.RequestHeaders;
-import com.marketdata.sdk.utilities.User;
 import java.io.IOException;
 import java.time.Clock;
 
@@ -15,8 +12,13 @@ import java.time.Clock;
  *
  * <p>Owns one {@link ObjectMapper} per {@link MarketDataClient} (Jackson mappers are thread-safe
  * and expensive to construct, so we build and reuse). Per ADR-007, wire-format deserializers are
- * registered programmatically on a package-private {@link SimpleModule} here — response records
- * never carry {@code @JsonDeserialize} annotations.
+ * registered programmatically — response records never carry {@code @JsonDeserialize} annotations.
+ * The parser itself is <strong>resource-agnostic</strong>: it does not know about {@code User},
+ * {@code ApiStatus}, or any other domain type. Each {@code *Resource} self-registers its
+ * deserializers in its constructor via {@link #registerModule(Module)}, so adding a new resource
+ * does not require editing this file. Registration must happen before the first {@link #parse}
+ * call, which is satisfied today because resources are constructed at {@code MarketDataClient}
+ * construction time, before any HTTP traffic.
  *
  * <p>Resources that need raw bytes (CSV, HTML) skip this class entirely and read {@link
  * HttpResponseEnvelope#body()} directly.
@@ -31,14 +33,18 @@ final class JsonResponseParser {
   }
 
   JsonResponseParser(Clock clock) {
-    ObjectMapper m = new ObjectMapper();
-    SimpleModule wireModule = new SimpleModule("marketdata-wire");
-    wireModule.addDeserializer(RequestHeaders.class, new RequestHeadersDeserializer());
-    wireModule.addDeserializer(User.class, new UserDeserializer());
-    wireModule.addDeserializer(ApiStatus.class, new ApiStatusDeserializer());
-    m.registerModule(wireModule);
-    this.mapper = m;
+    this.mapper = new ObjectMapper();
     this.clock = clock;
+  }
+
+  /**
+   * Attach a Jackson {@link Module} (typically a {@code SimpleModule} populated with one resource's
+   * deserializers). Resources call this from their constructor to wire their wire-format mappings
+   * without coupling the parser to their domain types. Idempotent for modules sharing the same
+   * type-id (Jackson skips duplicates).
+   */
+  void registerModule(Module module) {
+    mapper.registerModule(module);
   }
 
   /**
