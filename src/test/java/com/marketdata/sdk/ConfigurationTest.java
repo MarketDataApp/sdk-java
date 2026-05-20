@@ -82,6 +82,29 @@ class ConfigurationTest {
   }
 
   @Test
+  void resolve_ignores_non_marketdata_keys_in_dotenv(@TempDir Path tmp) throws IOException {
+    // The cascade hands DotEnvLoader the EnvVars allowlist; secrets unrelated to the SDK (AWS
+    // creds, GitHub tokens, etc.) must not leak into the SDK's memory just because they share a
+    // .env file with the MARKETDATA_* keys. Spec §16's allowlist principle (defined for
+    // System.getenv via EnvVars.systemLookup) extends to .env reads.
+    Path dotEnv =
+        Files.writeString(
+            tmp.resolve(".env"),
+            """
+                MARKETDATA_TOKEN=marketdata-key
+                AWS_SECRET_ACCESS_KEY=sk-aws-supersecret
+                GITHUB_TOKEN=ghp-leaked
+                """);
+
+    Configuration config = Configuration.resolve(null, null, null, NO_ENV, dotEnv);
+
+    assertThat(config.apiKey()).isEqualTo("marketdata-key");
+    // No accessor exposes non-MARKETDATA values — but verify the cascade did not pluck them
+    // through some accidental future path by snapshotting the record's toString.
+    assertThat(config.toString()).doesNotContain("supersecret").doesNotContain("leaked");
+  }
+
+  @Test
   void resolve_uses_defaults_for_base_url_and_api_version_when_nothing_provided(@TempDir Path tmp) {
     Configuration config = Configuration.resolve(null, null, null, NO_ENV, noDotEnv(tmp));
 

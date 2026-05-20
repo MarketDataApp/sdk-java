@@ -44,7 +44,7 @@ record Configuration(
       Function<String, @Nullable String> env,
       Path dotEnvPath,
       Consumer<DotEnvLoader.Warning> warnings) {
-    Map<String, String> dotEnv = DotEnvLoader.load(dotEnvPath, warnings);
+    Map<String, String> dotEnv = DotEnvLoader.load(dotEnvPath, warnings, EnvVars.ALLOWED_KEYS);
     String apiKey = pickFirst(explicitApiKey, env.apply(EnvVars.TOKEN), dotEnv.get(EnvVars.TOKEN));
     String baseUrl =
         pickFirstOrDefault(

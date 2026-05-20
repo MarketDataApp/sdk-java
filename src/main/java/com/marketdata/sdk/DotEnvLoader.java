@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import org.jspecify.annotations.Nullable;
@@ -28,7 +29,18 @@ final class DotEnvLoader {
   /** Diagnostic emitted by the loader, replayed by {@link MarketDataClient} after logging setup. */
   record Warning(Level level, String message, @Nullable Throwable cause) {}
 
-  static Map<String, String> load(Path path, Consumer<Warning> warnings) {
+  /**
+   * Parse {@code path} into an immutable map of {@code key → value} pairs.
+   *
+   * <p>{@code allowedKeys} is the allowlist: when non-null, keys outside the set are dropped during
+   * parsing and never materialize in the returned map. This mirrors the defensive principle of
+   * {@link EnvVars#systemLookup} — the SDK does not need to retain the consumer's unrelated secrets
+   * ({@code AWS_SECRET_ACCESS_KEY}, {@code GITHUB_TOKEN}, etc.) in memory just because they
+   * happened to share a {@code .env} file with our config. Passing {@code null} disables the
+   * filter; that surface exists for tests that exercise the parser independently of the cascade.
+   */
+  static Map<String, String> load(
+      Path path, Consumer<Warning> warnings, @Nullable Set<String> allowedKeys) {
     if (!Files.exists(path)) {
       return Map.of();
     }
@@ -55,6 +67,9 @@ final class DotEnvLoader {
           continue;
         }
         String key = trimmed.substring(0, eq).trim();
+        if (allowedKeys != null && !allowedKeys.contains(key)) {
+          continue;
+        }
         String value = stripQuotes(trimmed.substring(eq + 1).trim());
         result.put(key, value);
       }

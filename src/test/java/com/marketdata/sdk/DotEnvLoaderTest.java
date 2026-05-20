@@ -9,6 +9,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.logging.Level;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
@@ -17,9 +18,12 @@ import org.junit.jupiter.api.io.TempDir;
 
 class DotEnvLoaderTest {
 
-  /** Convenience wrapper for tests that don't care about warnings. */
+  /**
+   * Convenience wrapper for parser-level tests: no warning sink, no allowlist (the parser is
+   * exercised independently of the cascade's allowlist).
+   */
   private static Map<String, String> load(Path path) {
-    return DotEnvLoader.load(path, w -> {});
+    return DotEnvLoader.load(path, w -> {}, null);
   }
 
   @Test
@@ -38,7 +42,7 @@ class DotEnvLoaderTest {
     Path missing = tmp.resolve("does-not-exist.env");
     List<DotEnvLoader.Warning> warnings = new ArrayList<>();
 
-    DotEnvLoader.load(missing, warnings::add);
+    DotEnvLoader.load(missing, warnings::add, null);
 
     assertThat(warnings).isEmpty();
   }
@@ -53,7 +57,7 @@ class DotEnvLoaderTest {
     Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("---------"));
     try {
       List<DotEnvLoader.Warning> warnings = new ArrayList<>();
-      Map<String, String> result = DotEnvLoader.load(file, warnings::add);
+      Map<String, String> result = DotEnvLoader.load(file, warnings::add, null);
 
       assertThat(result).isEmpty();
       assertThat(warnings)
@@ -78,7 +82,7 @@ class DotEnvLoaderTest {
     Path asDir = Files.createDirectory(tmp.resolve("env-as-dir"));
     List<DotEnvLoader.Warning> warnings = new ArrayList<>();
 
-    Map<String, String> result = DotEnvLoader.load(asDir, warnings::add);
+    Map<String, String> result = DotEnvLoader.load(asDir, warnings::add, null);
 
     assertThat(result).isEmpty();
     assertThat(warnings)
@@ -212,12 +216,60 @@ class DotEnvLoaderTest {
     assertThat(result).isUnmodifiable();
   }
 
+  // ---------- allowlist filter (defense for unrelated secrets) ----------
+
+  @Test
+  void load_with_allowlist_drops_keys_outside_the_set(@TempDir Path tmp) throws IOException {
+    // A consumer's .env can legitimately contain secrets unrelated to the SDK (AWS creds, OAuth
+    // tokens for other services, etc.). The loader must not retain those in memory just because
+    // they happened to share a file — the SDK only needs the MARKETDATA_* keys it declares.
+    Path file =
+        Files.writeString(
+            tmp.resolve(".env"),
+            """
+                MARKETDATA_TOKEN=abc123
+                AWS_SECRET_ACCESS_KEY=sk-aws-supersecret
+                GITHUB_TOKEN=ghp-leaked
+                MARKETDATA_BASE_URL=https://example.com
+                """);
+
+    Map<String, String> result =
+        DotEnvLoader.load(file, w -> {}, Set.of("MARKETDATA_TOKEN", "MARKETDATA_BASE_URL"));
+
+    assertThat(result)
+        .containsOnlyKeys("MARKETDATA_TOKEN", "MARKETDATA_BASE_URL")
+        .containsEntry("MARKETDATA_TOKEN", "abc123")
+        .containsEntry("MARKETDATA_BASE_URL", "https://example.com");
+    // The disallowed values are not retained anywhere reachable from the returned map.
+    assertThat(result.values()).noneMatch(v -> v.contains("supersecret") || v.contains("leaked"));
+  }
+
+  @Test
+  void load_with_empty_allowlist_returns_empty(@TempDir Path tmp) throws IOException {
+    Path file = Files.writeString(tmp.resolve(".env"), "MARKETDATA_TOKEN=abc\n");
+
+    Map<String, String> result = DotEnvLoader.load(file, w -> {}, Set.of());
+
+    assertThat(result).isEmpty();
+  }
+
+  @Test
+  void load_with_null_allowlist_admits_everything(@TempDir Path tmp) throws IOException {
+    // Null allowlist = parser-only mode (test surface). Filtering is the caller's job — for
+    // production the cascade always passes EnvVars.ALLOWED_KEYS.
+    Path file = Files.writeString(tmp.resolve(".env"), "FOO=bar\nMARKETDATA_TOKEN=abc\n");
+
+    Map<String, String> result = DotEnvLoader.load(file, w -> {}, null);
+
+    assertThat(result).containsEntry("FOO", "bar").containsEntry("MARKETDATA_TOKEN", "abc");
+  }
+
   @Test
   void load_successful_read_does_not_warn(@TempDir Path tmp) throws IOException {
     Path file = Files.writeString(tmp.resolve(".env"), "TOKEN=abc\n");
     List<DotEnvLoader.Warning> warnings = new ArrayList<>();
 
-    DotEnvLoader.load(file, warnings::add);
+    DotEnvLoader.load(file, warnings::add, null);
 
     assertThat(warnings).isEmpty();
   }
