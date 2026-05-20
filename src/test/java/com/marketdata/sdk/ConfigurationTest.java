@@ -423,4 +423,87 @@ class ConfigurationTest {
         .isThrownBy(() -> Configuration.resolve(null, null, null, NO_ENV, dotEnv))
         .withMessageContaining("scheme http or https");
   }
+
+  // ---------- §16 / issue #23: apiKey character validation ----------
+
+  /**
+   * A token loaded from a .env file with a stray CRLF must be rejected at construction. Without
+   * this gate, the failure surfaces only at the first request as a cryptic IAE from {@code
+   * HttpRequest.Builder#header}, miles away from the actual source of the bad input.
+   */
+  @Test
+  void resolve_rejects_apiKey_with_carriage_return(@TempDir Path tmp) {
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () -> Configuration.resolve("good-prefix\rbad", null, null, NO_ENV, noDotEnv(tmp)))
+        .withMessageContaining("invalid character")
+        .withMessageContaining("offset 11");
+  }
+
+  @Test
+  void resolve_rejects_apiKey_with_newline(@TempDir Path tmp) {
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> Configuration.resolve("token\nmore", null, null, NO_ENV, noDotEnv(tmp)))
+        .withMessageContaining("invalid character");
+  }
+
+  @Test
+  void resolve_rejects_apiKey_with_tab(@TempDir Path tmp) {
+    // Tab (0x09) is below 0x20 — also rejected. Real tokens never contain tabs; if one appears
+    // it's a copy-paste artifact from a spreadsheet cell or formatted document.
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> Configuration.resolve("token\tmore", null, null, NO_ENV, noDotEnv(tmp)))
+        .withMessageContaining("invalid character");
+  }
+
+  @Test
+  void resolve_rejects_apiKey_with_high_bit_byte(@TempDir Path tmp) {
+    // Non-ASCII (e.g. UTF-8 multi-byte) — almost always means the .env was decoded with the wrong
+    // charset and the original token is unusable anyway. Failing fast with a clear message beats
+    // a stream of authentication failures from the server.
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> Configuration.resolve("tokén-ABCD", null, null, NO_ENV, noDotEnv(tmp)))
+        .withMessageContaining("invalid character");
+  }
+
+  @Test
+  void resolve_rejects_apiKey_with_nul_byte(@TempDir Path tmp) {
+    // A literal NUL (0x00) - far below the 0x20 floor; canonical "this token is corrupt". Built
+    // at runtime so the test source file does not carry an embedded NUL byte itself.
+    String tokenWithNul = "token" + (char) 0x00 + "more";
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> Configuration.resolve(tokenWithNul, null, null, NO_ENV, noDotEnv(tmp)))
+        .withMessageContaining("invalid character");
+  }
+
+  @Test
+  void resolve_accepts_apiKey_with_printable_ascii(@TempDir Path tmp) {
+    // Regression guard: tokens that legitimately use the full printable ASCII range
+    // (letters, digits, `.-_+/=` and friends) must not be rejected.
+    Configuration cfg =
+        Configuration.resolve("ABCdef-123_token.with+slashes/=", null, null, NO_ENV, noDotEnv(tmp));
+    assertThat(cfg.apiKey()).isEqualTo("ABCdef-123_token.with+slashes/=");
+  }
+
+  @Test
+  void resolve_does_not_validate_null_apiKey(@TempDir Path tmp) {
+    // Demo mode: no token at all is a supported cascade outcome; validation must not flag it.
+    Configuration cfg = Configuration.resolve(null, null, null, NO_ENV, noDotEnv(tmp));
+    assertThat(cfg.apiKey()).isNull();
+  }
+
+  /**
+   * The error message must NOT echo the token. The token's offset and the offending code point are
+   * enough for diagnostics; the token itself never appears in {@code getMessage()} (§16).
+   */
+  @Test
+  void apiKey_validation_error_does_not_leak_token(@TempDir Path tmp) {
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                Configuration.resolve(
+                    "supersecret-prefix\rsuffix-leak", null, null, NO_ENV, noDotEnv(tmp)))
+        .withMessageNotContaining("supersecret-prefix")
+        .withMessageNotContaining("suffix-leak");
+  }
 }

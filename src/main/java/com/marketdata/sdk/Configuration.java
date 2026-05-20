@@ -65,6 +65,7 @@ record Configuration(
     String normalizedApiVersion = normalizeApiVersion(apiVersion);
     validateBaseUrl(normalizedBaseUrl);
     validateApiVersion(normalizedApiVersion);
+    validateApiKey(apiKey);
     return new Configuration(
         apiKey, normalizedBaseUrl, normalizedApiVersion, loggingLevel, dateFormat);
   }
@@ -172,6 +173,37 @@ record Configuration(
    * to send and the server will reject it; the regex's job is just to keep us from emitting
    * malformed URLs).
    */
+  /**
+   * Issue #23: reject API keys with characters that would later be rejected by {@link
+   * java.net.http.HttpRequest.Builder#header} ({@code IllegalArgumentException} on CR/LF) or carry
+   * the smell of a copy-paste mishap (embedded NUL, control chars, high-bit bytes). Failing here
+   * gives the caller a clear message at construct time; without the check, a token loaded from a
+   * {@code .env} with stray {@code \r\n} surfaces as a generic {@code IllegalArgumentException}
+   * from {@code HttpClient} on the very first request — far from the actual configuration source.
+   *
+   * <p>Rule: every character must be printable ASCII ({@code [0x20, 0x7E]}). That covers every
+   * legitimate token shape ({@code letters/digits/.-_+=/}) while ruling out CR/LF/NUL, DEL, and any
+   * accidentally pasted high-bit byte from a non-UTF-8 file. Demo mode (apiKey == null) is
+   * preserved untouched.
+   */
+  static void validateApiKey(@Nullable String apiKey) {
+    if (apiKey == null) {
+      return; // demo mode — no token to validate
+    }
+    for (int i = 0; i < apiKey.length(); i++) {
+      char c = apiKey.charAt(i);
+      if (c < 0x20 || c > 0x7E) {
+        throw new IllegalArgumentException(
+            "apiKey contains an invalid character at offset "
+                + i
+                + " (code point 0x"
+                + Integer.toHexString(c)
+                + "). Tokens must be printable ASCII; check for stray CR/LF or non-UTF-8 bytes in"
+                + " the source (env var, .env file, or constructor argument).");
+      }
+    }
+  }
+
   static void validateApiVersion(String apiVersion) {
     if (apiVersion.isEmpty()) {
       throw new IllegalArgumentException(

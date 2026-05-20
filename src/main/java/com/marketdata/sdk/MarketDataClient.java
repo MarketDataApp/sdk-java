@@ -56,8 +56,18 @@ public final class MarketDataClient implements AutoCloseable {
     // — emitting WARNINGs there would land on an unconfigured JUL logger (wrong format,
     // possibly invisible), undermining the breadcrumb the WARNING exists to provide.
     List<DotEnvLoader.Warning> pendingWarnings = new ArrayList<>();
-    this.config =
-        Configuration.resolve(apiKey, baseUrl, apiVersion, env, dotEnvPath, pendingWarnings::add);
+    try {
+      this.config =
+          Configuration.resolve(apiKey, baseUrl, apiVersion, env, dotEnvPath, pendingWarnings::add);
+    } catch (RuntimeException e) {
+      // Issue #25: if resolve fails (typically IAE — invalid baseUrl/apiVersion/apiKey from the
+      // cascade), the consumer would otherwise lose any .env warnings collected so far. That
+      // hides the real story: e.g. "your .env was unreadable, so the missing baseUrl fell
+      // through to a default that conflicts with your explicit apiVersion". Attach each warning
+      // as a suppressed exception so the diagnostic trail surfaces in the same stack trace.
+      attachWarningsAsSuppressed(e, pendingWarnings);
+      throw e;
+    }
     MarketDataLogging.configure(config.loggingLevel());
     for (DotEnvLoader.Warning w : pendingWarnings) {
       LOGGER.log(w.level(), w.message(), w.cause());
@@ -93,6 +103,21 @@ public final class MarketDataClient implements AutoCloseable {
 
     if (validateOnStartup) {
       runStartupValidation();
+    }
+  }
+
+  /**
+   * Attach each pending {@code .env} warning to {@code primary} as a suppressed exception so the
+   * diagnostic trail survives a configuration-resolve failure. {@link Throwable#getCause()} would
+   * conflict with the actual cause of the IAE; suppressed is the right surface for "additional
+   * context the consumer should see alongside the primary failure".
+   */
+  private static void attachWarningsAsSuppressed(
+      RuntimeException primary, List<DotEnvLoader.Warning> warnings) {
+    for (DotEnvLoader.Warning w : warnings) {
+      Throwable wrapper =
+          new RuntimeException("[.env " + w.level() + "] " + w.message(), w.cause());
+      primary.addSuppressed(wrapper);
     }
   }
 

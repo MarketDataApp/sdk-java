@@ -2,10 +2,14 @@ package com.marketdata.sdk;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 import com.marketdata.sdk.exception.MarketDataException;
+import java.io.IOException;
 import java.net.ServerSocket;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -186,5 +190,48 @@ class MarketDataClientTest {
         assertThat(client.toString()).contains("baseUrl=" + Configuration.DEFAULT_BASE_URL);
       }
     }
+  }
+
+  // ---------- issue #25: .env warnings survive resolve failure ----------
+
+  /**
+   * If {@link Configuration#resolve} throws (e.g. invalid baseUrl), any {@code .env} warnings
+   * collected before the throw used to be dropped — the constructor's replay loop runs only on the
+   * happy path. The fix attaches each warning as a suppressed exception so the IAE stack trace
+   * carries the breadcrumb (an unreadable {@code .env} could be the very reason the cascade fell
+   * back to a misconfigured default).
+   */
+  @Test
+  void resolve_failure_attaches_pending_dotenv_warnings_as_suppressed(@TempDir Path tmp)
+      throws IOException {
+    // Build an unreadable .env so DotEnvLoader emits a "not readable" warning.
+    Path dotEnv = tmp.resolve(".env");
+    Files.writeString(dotEnv, "MARKETDATA_TOKEN=irrelevant\n");
+    boolean permsSupported = false;
+    try {
+      Files.setPosixFilePermissions(dotEnv, PosixFilePermissions.fromString("---------"));
+      permsSupported = true;
+    } catch (UnsupportedOperationException ignored) {
+      // Non-POSIX filesystem (rare on CI runners but possible on Windows) — skip the test cleanly
+      // by checking permission below.
+    }
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+        permsSupported && !Files.isReadable(dotEnv),
+        "Test requires a filesystem that supports making files unreadable to the current user.");
+
+    // Explicit baseUrl is invalid — resolve will throw IAE — AFTER the .env loader has fired its
+    // warning. Without the #25 fix, the warning vanishes; with the fix it surfaces as a
+    // suppressed exception on the IAE.
+    Throwable thrown =
+        catchThrowable(
+            () -> new MarketDataClient("any-token", "not-a-url", null, false, NO_ENV, dotEnv));
+
+    assertThat(thrown).isInstanceOf(IllegalArgumentException.class);
+    assertThat(thrown.getSuppressed())
+        .as("the .env unreadable warning must be attached as a suppressed exception")
+        .isNotEmpty();
+    assertThat(thrown.getSuppressed()[0])
+        .hasMessageContaining(".env")
+        .hasMessageContaining("not readable");
   }
 }

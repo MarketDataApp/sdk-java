@@ -53,6 +53,21 @@ final class JsonResponseParser {
    * the consumer's diagnostics.
    */
   <T> T parse(HttpResponseEnvelope env, Class<T> type) {
+    // Issue #29: a zero-length body surfaces from Jackson as a generic "No content to map"
+    // MismatchedInputException — diagnostically thin, often confusing in the presence of a
+    // body-stripping proxy. Pre-check so the failure carries a precise, actionable message that
+    // names the actual symptom ("empty response body") instead of looking like a corruption.
+    if (env.body().length == 0) {
+      ErrorContext context =
+          ErrorContext.forResponse(
+              env.url().toString(), env.statusCode(), env.requestId(), clock.instant());
+      throw new ParseError(
+          "Empty response body from "
+              + HttpDispatcher.safeUri(env.url())
+              + " — server returned 0 bytes (a proxy may have stripped the payload, or the"
+              + " endpoint replied without one)",
+          context);
+    }
     try {
       return mapper.readValue(env.body(), type);
     } catch (IOException e) {

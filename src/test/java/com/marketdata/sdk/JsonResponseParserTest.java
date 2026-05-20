@@ -354,6 +354,39 @@ class JsonResponseParserTest {
   }
 
   /**
+   * Issue #29: a zero-length body must surface as a precise, actionable {@link ParseError} — "empty
+   * response body" — rather than Jackson's generic "No content to map" wrap. Proxies that strip
+   * bodies (some misconfigured corporate setups) are the canonical cause; consumers shouldn't have
+   * to read Jackson's stack trace to figure that out.
+   */
+  @Test
+  void emptyBodyRaisesParseErrorWithExplicitMessage() {
+    JsonResponseParser parser = parserWithUtilitiesModule();
+    HttpResponseEnvelope empty =
+        new HttpResponseEnvelope(
+            new byte[0],
+            200,
+            "test-request-id",
+            HttpHeaders.of(Map.of(), (a, b) -> true),
+            URI.create("http://localhost/headers/"));
+
+    assertThatThrownBy(() -> parser.parse(empty, RequestHeaders.class))
+        .isInstanceOf(ParseError.class)
+        .hasMessageContaining("Empty response body")
+        .hasMessageContaining("0 bytes")
+        .satisfies(
+            t -> {
+              ParseError err = (ParseError) t;
+              // Context is still populated — consumers can correlate via requestId, see the
+              // status code, etc.
+              assertThat(err.getStatusCode()).isEqualTo(200);
+              assertThat(err.getRequestId()).isEqualTo("test-request-id");
+              // No Jackson cause when we short-circuit at the empty-body check.
+              assertThat(err.getCause()).isNull();
+            });
+  }
+
+  /**
    * Issue #16: {@code getMessage()} is consumer-accessible — anything embedded in it ends up in
    * logs the moment a consumer does the obvious {@code log.error(ex.getMessage())}. Query strings
    * carry tokens, account ids, and queried symbols; §16 requires that they not leak through this
