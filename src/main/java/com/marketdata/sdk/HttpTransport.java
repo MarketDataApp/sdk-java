@@ -284,13 +284,26 @@ final class HttpTransport implements AutoCloseable {
         if (!first) {
           sb.append('&');
         }
-        sb.append(URLEncoder.encode(e.getKey(), StandardCharsets.UTF_8))
+        sb.append(encodeQueryComponent(e.getKey()))
             .append('=')
-            .append(URLEncoder.encode(e.getValue(), StandardCharsets.UTF_8));
+            .append(encodeQueryComponent(e.getValue()));
         first = false;
       }
     }
     return URI.create(sb.toString());
+  }
+
+  /**
+   * RFC 3986 percent-encoding for a query-string component. {@link URLEncoder} emits {@code
+   * application/x-www-form-urlencoded} bytes — i.e. spaces become {@code +} — which is the wrong
+   * dialect for query strings: strict servers treat {@code ?symbol=BRK A} and {@code
+   * ?symbol=BRK%20A} as equivalent but {@code ?symbol=BRK+A} as a literal {@code +}. Replacing
+   * {@code +} with {@code %20} after encoding is the canonical patch: {@link URLEncoder} only emits
+   * {@code +} for the space character (everything else that needs encoding is already {@code %XX}),
+   * so the substitution is unambiguous.
+   */
+  private static String encodeQueryComponent(String raw) {
+    return URLEncoder.encode(raw, StandardCharsets.UTF_8).replace("+", "%20");
   }
 
   private HttpRequest buildHttpRequest(URI uri, Format format) {

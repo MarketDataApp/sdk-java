@@ -119,6 +119,39 @@ class HttpTransportTest {
         .isEqualTo("http://localhost/v1/markets/status/");
   }
 
+  @Test
+  void queryParamWithSpaceEncodesAsPercent20NotPlus() {
+    // URLEncoder defaults to form-encoding (spaces → "+"), which strict RFC-3986 servers treat
+    // as a literal "+" in the query string. The transport patches this to "%20" so endpoints
+    // taking arbitrary text (e.g. a multi-word symbol or description) round-trip correctly.
+    CapturingClient client =
+        new CapturingClient(200, "ok".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    transport
+        .executeAsync(RequestSpec.get("stocks/quotes").query("symbol", "BRK A").build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/stocks/quotes/?symbol=BRK%20A");
+  }
+
+  @Test
+  void queryParamWithReservedCharactersIsPercentEncoded() {
+    // Reserved characters like &, =, ?, # in a value must be percent-encoded so they aren't
+    // parsed as query-string delimiters. URLEncoder handles these correctly out of the box —
+    // this test just locks in that behavior so a future refactor of encodeQueryComponent
+    // doesn't accidentally regress it.
+    CapturingClient client =
+        new CapturingClient(200, "ok".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    transport.executeAsync(RequestSpec.get("stocks/quotes").query("q", "a&b=c?d#e").build()).join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/stocks/quotes/?q=a%26b%3Dc%3Fd%23e");
+  }
+
   // ---------- response envelope ----------
 
   @Test

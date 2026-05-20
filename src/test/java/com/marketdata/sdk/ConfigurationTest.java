@@ -1,6 +1,7 @@
 package com.marketdata.sdk;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -198,5 +199,205 @@ class ConfigurationTest {
 
     assertThat(config.apiKey()).isNull();
     assertThat(config.baseUrl()).isEqualTo(Configuration.DEFAULT_BASE_URL);
+  }
+
+  // ---------- normalization ----------
+
+  @Test
+  void resolve_strips_trailing_slashes_from_baseUrl(@TempDir Path tmp) {
+    // Single trailing slash from the user is the common copy-paste mistake; multiple slashes
+    // (e.g. "https://x///") are pathological but cheap to handle and avoid surprises.
+    Configuration single =
+        Configuration.resolve(null, "https://api.example.com/", null, NO_ENV, noDotEnv(tmp));
+    Configuration many =
+        Configuration.resolve(null, "https://api.example.com///", null, NO_ENV, noDotEnv(tmp));
+    Configuration whitespaced =
+        Configuration.resolve(null, "  https://api.example.com/  ", null, NO_ENV, noDotEnv(tmp));
+
+    assertThat(single.baseUrl()).isEqualTo("https://api.example.com");
+    assertThat(many.baseUrl()).isEqualTo("https://api.example.com");
+    assertThat(whitespaced.baseUrl()).isEqualTo("https://api.example.com");
+  }
+
+  @Test
+  void resolve_strips_leading_and_trailing_slashes_from_apiVersion(@TempDir Path tmp) {
+    // "v1", "/v1", "v1/", and "/v1/" should all collapse to the same canonical form so URI
+    // composition is independent of the user's spelling.
+    Configuration leading = Configuration.resolve(null, null, "/v1", NO_ENV, noDotEnv(tmp));
+    Configuration trailing = Configuration.resolve(null, null, "v1/", NO_ENV, noDotEnv(tmp));
+    Configuration both = Configuration.resolve(null, null, "/v1/", NO_ENV, noDotEnv(tmp));
+    Configuration whitespaced =
+        Configuration.resolve(null, null, "  /v1/  ", NO_ENV, noDotEnv(tmp));
+
+    assertThat(leading.apiVersion()).isEqualTo("v1");
+    assertThat(trailing.apiVersion()).isEqualTo("v1");
+    assertThat(both.apiVersion()).isEqualTo("v1");
+    assertThat(whitespaced.apiVersion()).isEqualTo("v1");
+  }
+
+  @Test
+  void resolve_default_baseUrl_already_has_no_trailing_slash(@TempDir Path tmp) {
+    Configuration config = Configuration.resolve(null, null, null, NO_ENV, noDotEnv(tmp));
+
+    assertThat(config.baseUrl()).doesNotEndWith("/");
+  }
+
+  // ---------- validation: baseUrl ----------
+
+  @Test
+  void resolve_rejects_baseUrl_without_scheme(@TempDir Path tmp) {
+    // The classic "I forgot https://" mistake — URI.create accepts it as a relative path, but
+    // HttpClient.send then surfaces a cryptic "URI is not absolute". Fail at construction.
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () -> Configuration.resolve(null, "api.marketdata.app", null, NO_ENV, noDotEnv(tmp)))
+        .withMessageContaining("scheme http or https");
+  }
+
+  @Test
+  void resolve_rejects_baseUrl_with_disallowed_scheme(@TempDir Path tmp) {
+    // file://, ftp://, javascript: — schemes the SDK has no business opening.
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () -> Configuration.resolve(null, "file:///etc/passwd", null, NO_ENV, noDotEnv(tmp)))
+        .withMessageContaining("scheme http or https");
+  }
+
+  @Test
+  void resolve_accepts_http_and_https(@TempDir Path tmp) {
+    Configuration https =
+        Configuration.resolve(null, "https://api.example.com", null, NO_ENV, noDotEnv(tmp));
+    Configuration http =
+        Configuration.resolve(null, "http://localhost:9000", null, NO_ENV, noDotEnv(tmp));
+
+    assertThat(https.baseUrl()).isEqualTo("https://api.example.com");
+    assertThat(http.baseUrl()).isEqualTo("http://localhost:9000");
+  }
+
+  @Test
+  void resolve_accepts_baseUrl_with_path_prefix(@TempDir Path tmp) {
+    // Self-hosted / reverse-proxy setups: the API lives under /marketdata-proxy on a corp host.
+    Configuration config =
+        Configuration.resolve(
+            null, "https://corp.example.com/marketdata-proxy", null, NO_ENV, noDotEnv(tmp));
+
+    assertThat(config.baseUrl()).isEqualTo("https://corp.example.com/marketdata-proxy");
+  }
+
+  @Test
+  void resolve_rejects_baseUrl_missing_host(@TempDir Path tmp) {
+    // Opaque URIs ({@code scheme:opaque}, no {@code //authority}) parse fine but expose a null
+    // host — those are the inputs the "missing a host" guard exists to catch.
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> Configuration.resolve(null, "https:opaque", null, NO_ENV, noDotEnv(tmp)))
+        .withMessageContaining("missing a host");
+  }
+
+  @Test
+  void resolve_rejects_baseUrl_with_invalid_syntax(@TempDir Path tmp) {
+    // "https://" normalizes to "https:" which fails URI.parse outright — the test verifies the
+    // "is not a valid URI" branch fires with a clear message rather than letting the syntax
+    // exception bubble up unwrapped.
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> Configuration.resolve(null, "https://", null, NO_ENV, noDotEnv(tmp)))
+        .withMessageContaining("is not a valid URI");
+  }
+
+  @Test
+  void resolve_rejects_baseUrl_with_query_string(@TempDir Path tmp) {
+    // Query belongs on requests, not the origin. Letting it through would corrupt every URL the
+    // transport composes (`?token=abc/v1/markets/status/`).
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                Configuration.resolve(
+                    null, "https://api.example.com?token=x", null, NO_ENV, noDotEnv(tmp)))
+        .withMessageContaining("query string");
+  }
+
+  @Test
+  void resolve_rejects_baseUrl_with_fragment(@TempDir Path tmp) {
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                Configuration.resolve(
+                    null, "https://api.example.com#frag", null, NO_ENV, noDotEnv(tmp)))
+        .withMessageContaining("fragment");
+  }
+
+  @Test
+  void resolve_rejects_baseUrl_with_user_info(@TempDir Path tmp) {
+    // user:pass@host has Basic-auth semantics the SDK does not support — and would leak
+    // credentials into log lines that include the URL.
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                Configuration.resolve(
+                    null, "https://user:pass@api.example.com", null, NO_ENV, noDotEnv(tmp)))
+        .withMessageContaining("user-info");
+  }
+
+  @Test
+  void resolve_rejects_baseUrl_that_normalizes_to_empty(@TempDir Path tmp) {
+    // "////" passes pickFirstOrDefault (not blank), normalizes to "", then validation must
+    // reject the empty result rather than silently falling through.
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> Configuration.resolve(null, "////", null, NO_ENV, noDotEnv(tmp)))
+        .withMessageContaining("must not be empty");
+  }
+
+  // ---------- validation: apiVersion ----------
+
+  @Test
+  void resolve_accepts_valid_apiVersion_shapes(@TempDir Path tmp) {
+    // Permissive enough for the realistic variants — semver-ish, branch-tagged, etc.
+    for (String version : new String[] {"v1", "v2", "v1.0", "v2.1.0", "beta-1", "alpha_2"}) {
+      Configuration config = Configuration.resolve(null, null, version, NO_ENV, noDotEnv(tmp));
+      assertThat(config.apiVersion()).isEqualTo(version);
+    }
+  }
+
+  @Test
+  void resolve_rejects_apiVersion_with_embedded_slash(@TempDir Path tmp) {
+    // Mid-string slashes survive the leading/trailing strip, but they'd inject extra path
+    // segments — "v1/extra" → /v1/extra/markets/status/ which the server treats as a different
+    // resource.
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> Configuration.resolve(null, null, "v1/extra", NO_ENV, noDotEnv(tmp)))
+        .withMessageContaining("[A-Za-z0-9._-]+");
+  }
+
+  @Test
+  void resolve_rejects_apiVersion_with_spaces(@TempDir Path tmp) {
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> Configuration.resolve(null, null, "v 1", NO_ENV, noDotEnv(tmp)))
+        .withMessageContaining("[A-Za-z0-9._-]+");
+  }
+
+  @Test
+  void resolve_rejects_apiVersion_already_percent_encoded(@TempDir Path tmp) {
+    // Double-encoding territory — "%2F" would become "%252F" on the wire and the server would
+    // see the literal text, not a slash.
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> Configuration.resolve(null, null, "%2Fv1", NO_ENV, noDotEnv(tmp)))
+        .withMessageContaining("[A-Za-z0-9._-]+");
+  }
+
+  @Test
+  void resolve_rejects_apiVersion_that_normalizes_to_empty(@TempDir Path tmp) {
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> Configuration.resolve(null, null, "////", NO_ENV, noDotEnv(tmp)))
+        .withMessageContaining("must not be empty");
+  }
+
+  @Test
+  void resolve_validates_values_from_dotenv_too(@TempDir Path tmp) throws IOException {
+    // The validator runs after the cascade picks a value — bad input from env vars or .env files
+    // must surface the same IAE, not slip through because the cascade source was non-explicit.
+    Path dotEnv = Files.writeString(tmp.resolve(".env"), "MARKETDATA_BASE_URL=not-a-url\n");
+
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> Configuration.resolve(null, null, null, NO_ENV, dotEnv))
+        .withMessageContaining("scheme http or https");
   }
 }
