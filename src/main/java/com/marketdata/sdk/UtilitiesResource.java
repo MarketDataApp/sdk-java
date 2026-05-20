@@ -3,7 +3,9 @@ package com.marketdata.sdk;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.marketdata.sdk.utilities.ApiStatus;
 import com.marketdata.sdk.utilities.RequestHeaders;
+import com.marketdata.sdk.utilities.ServiceStatus;
 import com.marketdata.sdk.utilities.User;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -42,7 +44,23 @@ public final class UtilitiesResource {
     SimpleModule m = new SimpleModule("marketdata-utilities");
     m.addDeserializer(RequestHeaders.class, new RequestHeadersDeserializer());
     m.addDeserializer(User.class, new UserDeserializer());
-    m.addDeserializer(ApiStatus.class, new ApiStatusDeserializer());
+    // §11 parallel-arrays decoding via the declarative factory (issue #10): no hand-written
+    // JsonDeserializer subclass — just the column list, row builder, and container wrapper. The
+    // pattern scales to every future parallel-arrays endpoint (stocks/candles, options/chain, …)
+    // without copy-pasting the ~30-line deserializer skeleton.
+    m.addDeserializer(
+        ApiStatus.class,
+        ParallelArrays.listDeserializer(
+            List.of("service", "status", "online", "uptimePct30d", "uptimePct90d", "updated"),
+            row ->
+                new ServiceStatus(
+                    row.text("service"),
+                    row.text("status"),
+                    row.bool("online"),
+                    row.dbl("uptimePct30d"),
+                    row.dbl("uptimePct90d"),
+                    MarketDataDates.marketTimeFromEpochSecond(row.lng("updated"))),
+            ApiStatus::new));
     return m;
   }
 

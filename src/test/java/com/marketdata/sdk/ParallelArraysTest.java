@@ -317,7 +317,69 @@ class ParallelArraysTest {
     assertThat(rows).containsExactly(true);
   }
 
+  // ---------- listDeserializer factory (issue #10) ----------
+
+  @Test
+  void listDeserializerProducesJacksonDeserializerWiringTheZipPipeline() throws IOException {
+    // The factory replaces hand-written JsonDeserializer subclasses for parallel-arrays endpoints
+    // (issue #10). Each new endpoint declares only its fields, row builder, and wrapper — the
+    // zip + tree-read + wrap plumbing is shared.
+    com.fasterxml.jackson.databind.JsonDeserializer<Container> deser =
+        ParallelArrays.listDeserializer(
+            List.of("symbol", "price"),
+            row -> new Record(row.text("symbol"), row.dbl("price"), false, 0),
+            Container::new);
+
+    // Register on a fresh ObjectMapper and round-trip a wire-shaped payload.
+    com.fasterxml.jackson.databind.ObjectMapper m =
+        new com.fasterxml.jackson.databind.ObjectMapper();
+    com.fasterxml.jackson.databind.module.SimpleModule module =
+        new com.fasterxml.jackson.databind.module.SimpleModule("test");
+    module.addDeserializer(Container.class, deser);
+    m.registerModule(module);
+
+    Container c =
+        m.readValue(
+            "{\"s\":\"ok\",\"symbol\":[\"AAPL\",\"MSFT\"],\"price\":[150.0,400.0]}",
+            Container.class);
+
+    assertThat(c.rows()).hasSize(2);
+    assertThat(c.rows().get(0).symbol()).isEqualTo("AAPL");
+    assertThat(c.rows().get(1).price()).isEqualTo(400.0);
+  }
+
+  @Test
+  void listDeserializerHonorsEnvelopeShortCircuits() throws IOException {
+    // The factory delegates structural validation to zip(): envelope errors and no_data
+    // short-circuit consistently regardless of which factory call instantiated the deserializer.
+    com.fasterxml.jackson.databind.JsonDeserializer<Container> deser =
+        ParallelArrays.listDeserializer(
+            List.of("symbol"), row -> new Record(row.text("symbol"), 0, false, 0), Container::new);
+
+    com.fasterxml.jackson.databind.ObjectMapper m =
+        new com.fasterxml.jackson.databind.ObjectMapper();
+    com.fasterxml.jackson.databind.module.SimpleModule module =
+        new com.fasterxml.jackson.databind.module.SimpleModule("test");
+    module.addDeserializer(Container.class, deser);
+    m.registerModule(module);
+
+    // no_data → empty list, wrapped in Container.
+    Container empty = m.readValue("{\"s\":\"no_data\"}", Container.class);
+    assertThat(empty.rows()).isEmpty();
+
+    // error envelope → JsonMappingException bubbles up through Jackson.
+    assertThatThrownBy(() -> m.readValue("{\"s\":\"error\",\"errmsg\":\"boom\"}", Container.class))
+        .isInstanceOf(com.fasterxml.jackson.databind.JsonMappingException.class)
+        .hasMessageContaining("boom");
+  }
+
   // ---------- helper record ----------
 
   private record Record(String symbol, double price, boolean active, long updated) {}
+
+  /**
+   * Container wrapper for the {@link
+   * #listDeserializerProducesJacksonDeserializerWiringTheZipPipeline} test.
+   */
+  private record Container(List<Record> rows) {}
 }

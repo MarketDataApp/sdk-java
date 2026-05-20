@@ -1,6 +1,8 @@
 package com.marketdata.sdk;
 
 import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.DeserializationContext;
+import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.io.IOException;
@@ -8,6 +10,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 /**
  * Helper for deserializing the API's parallel-arrays wire format. Almost every endpoint that
@@ -116,6 +119,37 @@ final class ParallelArrays {
   @FunctionalInterface
   interface RowBuilder<T> {
     T build(Row row) throws IOException;
+  }
+
+  /**
+   * Build a {@link JsonDeserializer} for a parallel-arrays response: parses the tree, zips the
+   * columns into rows, then wraps the resulting list in the container record. Lets each
+   * response-shape declaration be a single call instead of a hand-written deserializer class — the
+   * ~30-line boilerplate (extend {@code JsonDeserializer}, read tree, call {@code zip}, build
+   * record) collapses to the three pieces that actually differ per endpoint: column names, per-row
+   * constructor, container wrapper.
+   *
+   * <p>{@code wrapper} is typically the record constructor reference (e.g. {@code ApiStatus::new}).
+   * Receives an immutable list — the record's compact constructor can {@code List.copyOf} for
+   * defensive copy without surprises about mutability.
+   *
+   * @param fields names of the parallel arrays expected under the response root, in the order the
+   *     {@link RowBuilder} will reference them
+   * @param rowBuilder how to materialize one element of the resulting list from a {@link Row}
+   * @param wrapper how to wrap the resulting list of rows in the container response record
+   * @param <ROW> per-row element type produced by {@code rowBuilder}
+   * @param <T> container response type
+   */
+  static <ROW, T> JsonDeserializer<T> listDeserializer(
+      List<String> fields, RowBuilder<ROW> rowBuilder, Function<List<ROW>, T> wrapper) {
+    return new JsonDeserializer<T>() {
+      @Override
+      public T deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
+        JsonNode root = p.readValueAsTree();
+        List<ROW> rows = zip(p, root, fields, rowBuilder);
+        return wrapper.apply(rows);
+      }
+    };
   }
 
   /**
