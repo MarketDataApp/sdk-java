@@ -88,4 +88,64 @@ class MarketDataLoggingTest {
     MarketDataLogging.configure(null);
     assertThat(sdkLogger().getLevel()).isEqualTo(Level.INFO);
   }
+
+  // ---------- consumer-config detection ----------
+
+  @Test
+  void configureSkipsWhenConsumerAlreadyAttachedAHandler() {
+    // Consumer pre-attached their own handler (e.g. SLF4J bridge, Logback appender). The SDK
+    // must not add its ConsoleHandler on top — that would emit each log line twice.
+    Handler consumerHandler = new TestHandler();
+    sdkLogger().addHandler(consumerHandler);
+
+    MarketDataLogging.configure("DEBUG");
+
+    assertThat(sdkLogger().getHandlers()).containsExactly(consumerHandler);
+    // useParentHandlers must remain at its default (true) — flipping it would break the
+    // consumer's parent-handler routing.
+    assertThat(sdkLogger().getUseParentHandlers()).isTrue();
+    // Level was not set by the SDK; remains null (inherits from parent).
+    assertThat(sdkLogger().getLevel()).isNull();
+  }
+
+  @Test
+  void configureSkipsWhenConsumerAlreadySetALevel() {
+    // Consumer explicitly chose a level (e.g. FINE for local debugging). The SDK's default
+    // INFO must not silently override it.
+    sdkLogger().setLevel(Level.FINE);
+
+    MarketDataLogging.configure("INFO");
+
+    assertThat(sdkLogger().getLevel()).isEqualTo(Level.FINE);
+    // No handler added either — having any opinion at all on the logger counts as "consumer
+    // has taken control".
+    assertThat(sdkLogger().getHandlers()).isEmpty();
+  }
+
+  @Test
+  void configureRunsAgainAfterResetClearsConsumerState() {
+    // Defensive: resetForTests() wipes both the idempotency flag and the logger state, so a
+    // subsequent configure() must see a fresh slate and install the SDK defaults.
+    sdkLogger().setLevel(Level.FINE); // simulate consumer state
+    MarketDataLogging.configure("INFO");
+    assertThat(sdkLogger().getHandlers()).isEmpty(); // skipped
+
+    MarketDataLogging.resetForTests();
+    MarketDataLogging.configure("INFO");
+
+    assertThat(sdkLogger().getHandlers()).hasSize(1);
+    assertThat(sdkLogger().getLevel()).isEqualTo(Level.INFO);
+  }
+
+  /** Minimal Handler stub used to simulate a consumer-attached handler. */
+  private static final class TestHandler extends Handler {
+    @Override
+    public void publish(java.util.logging.LogRecord record) {}
+
+    @Override
+    public void flush() {}
+
+    @Override
+    public void close() {}
+  }
 }

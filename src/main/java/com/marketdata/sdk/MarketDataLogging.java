@@ -25,6 +25,13 @@ import org.jspecify.annotations.Nullable;
  * <p>The first {@link #configure(String)} call wins; subsequent calls are no-ops. This avoids
  * doubling handlers when multiple {@code MarketDataClient} instances are created in the same
  * process and avoids surprising config-flips when the second client passes a different level.
+ *
+ * <p><strong>Consumer-config detection</strong>: the SDK logger lives in a JVM-wide registry, so a
+ * consumer (or another lib) may have already attached a handler or set a level on it before any
+ * {@link MarketDataClient} is constructed. {@link #configure(String)} detects that and backs off
+ * entirely — no handler added, no {@code useParentHandlers} flipped, no level overridden. This
+ * makes the constructor's logging side-effect conditional: install the spec-default behavior only
+ * when no other code has expressed an opinion.
  */
 final class MarketDataLogging {
 
@@ -37,7 +44,9 @@ final class MarketDataLogging {
 
   /**
    * Install the SDK's handler + formatter on the SDK root logger. Idempotent — first call wins;
-   * subsequent calls are no-ops.
+   * subsequent calls are no-ops. Also backs off entirely when the SDK logger already carries a
+   * handler or an explicit level (see class docs): the consumer has taken control, the SDK respects
+   * it.
    *
    * @param levelSpec a level string from {@code MARKETDATA_LOGGING_LEVEL} ({@code DEBUG}, {@code
    *     INFO}, {@code WARNING}, {@code ERROR}, case-insensitive), or {@code null} for the default
@@ -48,6 +57,13 @@ final class MarketDataLogging {
       return;
     }
     Logger sdkLogger = Logger.getLogger(SDK_LOGGER_NAME);
+    if (sdkLogger.getHandlers().length > 0 || sdkLogger.getLevel() != null) {
+      // Consumer (or another library) already configured the SDK logger. Respect that
+      // entirely: don't add our ConsoleHandler (would double-emit), don't flip
+      // useParentHandlers (would break their parent-handler routing), don't overwrite the
+      // level they explicitly chose.
+      return;
+    }
     Handler handler = new ConsoleHandler();
     handler.setFormatter(new CanonicalLogFormatter());
     // ConsoleHandler defaults its own filter to INFO; lower it so the logger's level is the
