@@ -11,7 +11,12 @@ package com.marketdata.sdk;
  */
 enum Format {
   JSON("json", "application/json"),
-  CSV("csv", "text/csv");
+  CSV("csv", "text/csv"),
+  // §13.5: the API can return HTML for endpoints like the marketing/error pages a misrouted
+  // request lands on; the spec requires `Response.isHtml()` to identify those responses without
+  // exposing the format enum itself. No resource façade ships HTML as a first-class output today,
+  // but the wire-level wiring (Accept header + ?format=html) is in place for when one does.
+  HTML("html", "text/html");
 
   private final String wireValue;
   private final String mediaType;

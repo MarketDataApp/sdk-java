@@ -54,12 +54,20 @@ class ResponseTest {
     // The Format enum itself is package-private; consumers only see the booleans.
     Response<String> json = Response.wrap("a", env("a".getBytes(), 200, "http://x"), Format.JSON);
     Response<String> csv = Response.wrap("a", env("a".getBytes(), 200, "http://x"), Format.CSV);
+    Response<String> html = Response.wrap("a", env("a".getBytes(), 200, "http://x"), Format.HTML);
 
     assertThat(json.isJson()).isTrue();
     assertThat(json.isCsv()).isFalse();
+    assertThat(json.isHtml()).isFalse();
 
     assertThat(csv.isCsv()).isTrue();
     assertThat(csv.isJson()).isFalse();
+    assertThat(csv.isHtml()).isFalse();
+
+    // §13.5: HTML detection — typically a misrouted request that landed on the web-server tier.
+    assertThat(html.isHtml()).isTrue();
+    assertThat(html.isJson()).isFalse();
+    assertThat(html.isCsv()).isFalse();
   }
 
   // ---------- no-data ----------

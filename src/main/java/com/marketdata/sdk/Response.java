@@ -10,13 +10,14 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * Carrier for an API response: typed model + raw body + metadata. Per SDK requirements §13.5,
- * exposes format-detection accessors ({@link #isJson()}, {@link #isCsv()}), no-data detection
- * ({@link #isNoData()}, matching the API's 404-with-{@code "s":"no_data"} envelope convention), and
- * {@link #saveToFile(Path)} for writing the raw body verbatim.
+ * exposes format-detection accessors ({@link #isJson()}, {@link #isCsv()}, {@link #isHtml()}),
+ * no-data detection ({@link #isNoData()}, matching the API's 404-with-{@code "s":"no_data"}
+ * envelope convention), and {@link #saveToFile(Path)} for writing the raw body verbatim.
  *
- * <p>The {@link Format} enum is intentionally not exposed publicly (it has private values like
- * {@code HTML} that consumers shouldn't depend on). Consumers query format via the boolean
- * accessors.
+ * <p>The {@link Format} enum is package-private — consumers query format via the boolean accessors
+ * rather than importing the enum. That keeps {@code Format} free to grow new values without
+ * breaking compiled consumer code (a {@code switch (response.format())} would otherwise be a
+ * source-compatibility hazard).
  *
  * <p>Immutable. {@link #rawBody()} returns a defensive copy on every call.
  *
@@ -93,6 +94,15 @@ public final class Response<T> {
 
   public boolean isCsv() {
     return format == Format.CSV;
+  }
+
+  /**
+   * Whether the response body is HTML — typically a misrouted request that landed on the API's
+   * web-server tier (a marketing or error page) rather than the API tier. Consumers can use this to
+   * short-circuit JSON-shaped parsing and log the {@link #rawBody()} for diagnosis.
+   */
+  public boolean isHtml() {
+    return format == Format.HTML;
   }
 
   /**
