@@ -55,71 +55,93 @@ class RateLimitHeadersTest {
   // ---------- partial headers ----------
 
   @Test
-  void onlyLimitPresentZerosTheOthers() {
-    HttpHeaders headers = headersOf(Map.of("x-api-ratelimit-limit", "500"));
+  void anyMissingHeaderReturnsNull() {
+    // §8.2: the four x-api-ratelimit-* headers travel together on every successful response. A
+    // partial response is a server-side bug — surfacing it as a snapshot with phantom zeros
+    // would flip the preflight gate into a false "exhausted" state and feed consumers a
+    // snapshot indistinguishable from a real one. Returning null instead lets the caller keep
+    // the last-known-good snapshot.
+    HttpHeaders missingRemaining =
+        headersOf(
+            Map.of(
+                "x-api-ratelimit-limit", "1000",
+                "x-api-ratelimit-reset", "1714867200",
+                "x-api-ratelimit-consumed", "13"));
+    HttpHeaders missingLimit =
+        headersOf(
+            Map.of(
+                "x-api-ratelimit-remaining", "987",
+                "x-api-ratelimit-reset", "1714867200",
+                "x-api-ratelimit-consumed", "13"));
+    HttpHeaders missingReset =
+        headersOf(
+            Map.of(
+                "x-api-ratelimit-limit", "1000",
+                "x-api-ratelimit-remaining", "987",
+                "x-api-ratelimit-consumed", "13"));
+    HttpHeaders missingConsumed =
+        headersOf(
+            Map.of(
+                "x-api-ratelimit-limit", "1000",
+                "x-api-ratelimit-remaining", "987",
+                "x-api-ratelimit-reset", "1714867200"));
 
-    RateLimitSnapshot rl = RateLimitHeaders.parse(headers);
-
-    assertThat(rl).isNotNull();
-    assertThat(rl.limit()).isEqualTo(500);
-    assertThat(rl.remaining()).isZero();
-    assertThat(rl.reset()).isEqualTo(Instant.ofEpochSecond(0L));
-    assertThat(rl.consumed()).isZero();
+    assertThat(RateLimitHeaders.parse(missingRemaining)).isNull();
+    assertThat(RateLimitHeaders.parse(missingLimit)).isNull();
+    assertThat(RateLimitHeaders.parse(missingReset)).isNull();
+    assertThat(RateLimitHeaders.parse(missingConsumed)).isNull();
   }
 
   @Test
-  void onlyConsumedPresentZerosTheOthers() {
-    HttpHeaders headers = headersOf(Map.of("x-api-ratelimit-consumed", "42"));
+  void onlyOneHeaderPresentReturnsNull() {
+    // The complementary check — a single header doesn't carry enough information to be useful,
+    // so the all-or-nothing rule returns null whether 0 or 1 (or 2 or 3) headers are present.
+    HttpHeaders onlyLimit = headersOf(Map.of("x-api-ratelimit-limit", "500"));
 
-    RateLimitSnapshot rl = RateLimitHeaders.parse(headers);
-
-    assertThat(rl).isNotNull();
-    assertThat(rl.consumed()).isEqualTo(42);
-    assertThat(rl.limit()).isZero();
-  }
-
-  @Test
-  void onlyRemainingPresent() {
-    HttpHeaders headers = headersOf(Map.of("x-api-ratelimit-remaining", "1234"));
-
-    RateLimitSnapshot rl = RateLimitHeaders.parse(headers);
-
-    assertThat(rl).isNotNull();
-    assertThat(rl.remaining()).isEqualTo(1234);
-    assertThat(rl.limit()).isZero();
-  }
-
-  @Test
-  void onlyResetPresent() {
-    HttpHeaders headers = headersOf(Map.of("x-api-ratelimit-reset", "1735689600"));
-
-    RateLimitSnapshot rl = RateLimitHeaders.parse(headers);
-
-    assertThat(rl).isNotNull();
-    assertThat(rl.reset()).isEqualTo(Instant.ofEpochSecond(1735689600L));
-    assertThat(rl.limit()).isZero();
-    assertThat(rl.remaining()).isZero();
-    assertThat(rl.consumed()).isZero();
+    assertThat(RateLimitHeaders.parse(onlyLimit)).isNull();
   }
 
   // ---------- malformed values ----------
 
   @Test
-  void malformedNumberIsTreatedAsAbsent() {
-    // readLong's catch(NumberFormatException) returns null; the header is then treated as
-    // missing. With every header malformed the result must be null, same as none-present.
+  void anyMalformedValueReturnsNull() {
+    // A malformed value is treated as absent by readLong; with the all-or-nothing rule that
+    // makes the whole snapshot unreliable — same outcome as the header being missing entirely.
+    HttpHeaders headers =
+        headersOf(
+            Map.of(
+                "x-api-ratelimit-limit", "1000",
+                "x-api-ratelimit-remaining", "987",
+                "x-api-ratelimit-reset", "not-a-number",
+                "x-api-ratelimit-consumed", "13"));
+
+    assertThat(RateLimitHeaders.parse(headers)).isNull();
+  }
+
+  @Test
+  void allMalformedValuesReturnNull() {
     HttpHeaders headers =
         headersOf(
             Map.of(
                 "x-api-ratelimit-limit", "not-a-number",
-                "x-api-ratelimit-remaining", "also-broken"));
+                "x-api-ratelimit-remaining", "also-broken",
+                "x-api-ratelimit-reset", "still-broken",
+                "x-api-ratelimit-consumed", "broken-too"));
 
     assertThat(RateLimitHeaders.parse(headers)).isNull();
   }
 
   @Test
   void valuesAreTrimmedBeforeParsing() {
-    HttpHeaders headers = headersOf(Map.of("x-api-ratelimit-limit", "  1000  "));
+    // The complete-headers happy path; the trim guard applies to every value, exercised through
+    // the limit header here.
+    HttpHeaders headers =
+        headersOf(
+            Map.of(
+                "x-api-ratelimit-limit", "  1000  ",
+                "x-api-ratelimit-remaining", "987",
+                "x-api-ratelimit-reset", "1714867200",
+                "x-api-ratelimit-consumed", "13"));
 
     RateLimitSnapshot rl = RateLimitHeaders.parse(headers);
 
@@ -129,12 +151,17 @@ class RateLimitHeadersTest {
 
   @Test
   void parseIgnoresNonRateLimitHeaders() {
+    // The four required headers are still present alongside unrelated ones — unrelated headers
+    // must not affect parsing.
     HttpHeaders headers =
         headersOf(
             Map.of(
                 "cf-ray", "abc",
                 "content-type", "application/json",
-                "x-api-ratelimit-limit", "100"));
+                "x-api-ratelimit-limit", "100",
+                "x-api-ratelimit-remaining", "99",
+                "x-api-ratelimit-reset", "1714867200",
+                "x-api-ratelimit-consumed", "1"));
 
     RateLimitSnapshot rl = RateLimitHeaders.parse(headers);
 

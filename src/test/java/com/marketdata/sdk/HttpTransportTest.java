@@ -308,7 +308,11 @@ class HttpTransportTest {
     // Real data has remaining > 0 — otherwise the §10.3 pre-flight would block the second call.
     HttpHeaders withRl =
         TestHttpClients.headersOf(
-            Map.of("x-api-ratelimit-limit", "500", "x-api-ratelimit-remaining", "100"));
+            Map.of(
+                "x-api-ratelimit-limit", "500",
+                "x-api-ratelimit-remaining", "100",
+                "x-api-ratelimit-reset", "1714867200",
+                "x-api-ratelimit-consumed", "400"));
     HttpHeaders empty = HttpHeaders.of(Map.of(), (a, b) -> true);
     CapturingClient client = new CapturingClient(200, "ok".getBytes(), withRl);
     HttpTransport transport = newTransport(client);
@@ -318,6 +322,36 @@ class HttpTransportTest {
     assertThat(before).isNotNull();
 
     client.nextHeaders = empty;
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+
+    assertThat(transport.getLatestRateLimits()).isSameAs(before);
+  }
+
+  @Test
+  void rateLimitSnapshotNotClobberedByPartialHeaders() {
+    // §8.2: the four x-api-ratelimit-* headers travel together. A response that only carries a
+    // subset is treated as "no rate-limit info" — we keep the last-known-good snapshot instead
+    // of stomping it with phantom zeros that would trip the §10.3 preflight.
+    HttpHeaders complete =
+        TestHttpClients.headersOf(
+            Map.of(
+                "x-api-ratelimit-limit", "500",
+                "x-api-ratelimit-remaining", "100",
+                "x-api-ratelimit-reset", "1714867200",
+                "x-api-ratelimit-consumed", "400"));
+    HttpHeaders partial =
+        TestHttpClients.headersOf(
+            Map.of(
+                "x-api-ratelimit-limit", "500",
+                "x-api-ratelimit-remaining", "99")); // missing reset + consumed
+    CapturingClient client = new CapturingClient(200, "ok".getBytes(), complete);
+    HttpTransport transport = newTransport(client);
+
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+    RateLimitSnapshot before = transport.getLatestRateLimits();
+    assertThat(before).isNotNull();
+
+    client.nextHeaders = partial;
     transport.executeAsync(RequestSpec.get("markets/status").build()).join();
 
     assertThat(transport.getLatestRateLimits()).isSameAs(before);

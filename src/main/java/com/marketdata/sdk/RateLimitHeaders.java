@@ -8,9 +8,14 @@ import org.jspecify.annotations.Nullable;
  * Parses the {@code x-api-ratelimit-*} response headers that the API sets on every successful
  * request (SDK requirements §8.2) into a {@link RateLimitSnapshot}.
  *
- * <p>Returns {@code null} when none of the relevant headers are present, which happens during a
- * rate-limit-tracking outage on the server side (the API silently swallows the error and keeps
- * serving the request).
+ * <p>Returns {@code null} when the four headers do not arrive together (all absent, partial, or any
+ * value unparseable). The §8.2 contract is that the four headers ship as a set; a partial delivery
+ * is a server-side rate-limit-tracking outage, not legitimate data. Returning {@code null} on
+ * partial responses preserves the caller's last-known-good snapshot in {@link
+ * HttpTransport#latestRateLimits} instead of clobbering it with phantom zeros — those would
+ * otherwise trip {@link HttpTransport#checkRateLimitPreflight} into blocking subsequent requests
+ * with a fake {@code remaining=0}, and would surface in {@code client.getRateLimits()} as a
+ * snapshot the consumer can't tell apart from a real one.
  */
 final class RateLimitHeaders {
 
@@ -26,14 +31,11 @@ final class RateLimitHeaders {
     Long remaining = readLong(headers, REMAINING);
     Long reset = readLong(headers, RESET);
     Long consumed = readLong(headers, CONSUMED);
-    if (limit == null && remaining == null && reset == null && consumed == null) {
+    if (limit == null || remaining == null || reset == null || consumed == null) {
       return null;
     }
     return new RateLimitSnapshot(
-        limit != null ? limit.intValue() : 0,
-        remaining != null ? remaining.intValue() : 0,
-        Instant.ofEpochSecond(reset != null ? reset : 0L),
-        consumed != null ? consumed.intValue() : 0);
+        limit.intValue(), remaining.intValue(), Instant.ofEpochSecond(reset), consumed.intValue());
   }
 
   private static @Nullable Long readLong(HttpHeaders headers, String name) {
