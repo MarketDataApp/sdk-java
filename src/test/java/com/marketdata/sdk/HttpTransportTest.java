@@ -530,6 +530,92 @@ class HttpTransportTest {
     assertThat(client.captured).hasSize(2);
   }
 
+  /**
+   * §9.4 vs §10.3 conflict: a 5xx response can carry both rate-limit headers (which exhaust the
+   * snapshot) AND an explicit {@code Retry-After} (which schedules the retry). The retry must honor
+   * the server's directive — bypassing the local preflight gate — otherwise the SDK would sabotage
+   * the server-orchestrated backoff. Two attempts must reach the wire.
+   */
+  @Test
+  void retryWithServerHintedRetryAfterBypassesPreflight() {
+    HttpHeaders exhaustedWithHint =
+        TestHttpClients.headersOf(
+            Map.of(
+                "x-api-ratelimit-limit",
+                "1000",
+                "x-api-ratelimit-remaining",
+                "0",
+                "x-api-ratelimit-reset",
+                String.valueOf(Instant.now().plus(Duration.ofHours(1)).getEpochSecond()),
+                "x-api-ratelimit-consumed",
+                "1000",
+                "Retry-After",
+                "0"));
+    CapturingClient client = new CapturingClient(503, new byte[0], exhaustedWithHint);
+    RetryPolicy twoAttempts = new RetryPolicy(2, Duration.ofMillis(1), Duration.ofMillis(1));
+    HttpTransport transport =
+        new HttpTransport(
+            "http://localhost",
+            "v1",
+            "test/0.0",
+            "secret-token",
+            new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
+            new RetryExecutor(twoAttempts),
+            () -> null,
+            Clock.systemUTC());
+
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(ServerError.class);
+
+    // Both attempts reached the wire: the snapshot would have BLOCKed the retry, but the
+    // server's Retry-After said "come back" and the SDK honored it. Without the bypass this
+    // would be 1 (and the final cause would be RateLimitError).
+    assertThat(client.captured).hasSize(2);
+  }
+
+  /**
+   * Regression guard for the bypass scope: when the retry is NOT server-hinted (no {@code
+   * Retry-After}), the snapshot's exhaustion verdict still vetoes the retry. Otherwise we'd be
+   * leaking the bypass to every retry and defeating §10.3 entirely.
+   */
+  @Test
+  void retryWithoutServerHintStillTriggersPreflightBlock() {
+    HttpHeaders exhaustedNoHint =
+        TestHttpClients.headersOf(
+            Map.of(
+                "x-api-ratelimit-limit",
+                "1000",
+                "x-api-ratelimit-remaining",
+                "0",
+                "x-api-ratelimit-reset",
+                String.valueOf(Instant.now().plus(Duration.ofHours(1)).getEpochSecond()),
+                "x-api-ratelimit-consumed",
+                "1000"));
+    CapturingClient client = new CapturingClient(503, new byte[0], exhaustedNoHint);
+    RetryPolicy twoAttempts = new RetryPolicy(2, Duration.ofMillis(1), Duration.ofMillis(1));
+    HttpTransport transport =
+        new HttpTransport(
+            "http://localhost",
+            "v1",
+            "test/0.0",
+            "secret-token",
+            new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
+            new RetryExecutor(twoAttempts),
+            () -> null,
+            Clock.systemUTC());
+
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(RateLimitError.class);
+
+    // Only the first attempt reached the wire; the retry was vetoed by the preflight because
+    // the previous cause had no server-side Retry-After to authorize the bypass.
+    assertThat(client.captured).hasSize(1);
+  }
+
   @Test
   void preflightStillBlocksWhenResetIsInTheFuture() {
     // reset is in the future → the snapshot's "exhausted" verdict is still current; the
@@ -596,6 +682,45 @@ class HttpTransportTest {
             t -> {
               ServerError se = (ServerError) t.getCause();
               assertThat(se.getRetryAfter()).isEmpty();
+            });
+  }
+
+  /**
+   * RFC 6585 defines {@code Retry-After} for 429. The SDK does not retry 429 itself, but the
+   * consumer can read the directive to schedule its own backoff. The parsed duration must travel
+   * with the {@link RateLimitError}.
+   */
+  @Test
+  void rateLimitErrorCarriesParsedRetryAfterDuration() {
+    HttpHeaders headers = TestHttpClients.headersOf(Map.of("Retry-After", "30"));
+    CapturingClient client = new CapturingClient(429, new byte[0], headers);
+    HttpTransport transport = newTransport(client);
+
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(RateLimitError.class)
+        .satisfies(
+            t -> {
+              RateLimitError rle = (RateLimitError) t.getCause();
+              assertThat(rle.getRetryAfter()).contains(Duration.ofSeconds(30));
+            });
+  }
+
+  @Test
+  void rateLimitErrorRetryAfterIsEmptyWhenHeaderAbsent() {
+    CapturingClient client =
+        new CapturingClient(429, new byte[0], HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(RateLimitError.class)
+        .satisfies(
+            t -> {
+              RateLimitError rle = (RateLimitError) t.getCause();
+              assertThat(rle.getRetryAfter()).isEmpty();
             });
   }
 

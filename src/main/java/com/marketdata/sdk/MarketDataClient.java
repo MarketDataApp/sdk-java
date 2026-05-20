@@ -53,8 +53,7 @@ public final class MarketDataClient implements AutoCloseable {
     // possibly invisible), undermining the breadcrumb the WARNING exists to provide.
     List<DotEnvLoader.Warning> pendingWarnings = new ArrayList<>();
     this.config =
-        Configuration.resolve(
-            apiKey, baseUrl, apiVersion, env, dotEnvPath, pendingWarnings::add);
+        Configuration.resolve(apiKey, baseUrl, apiVersion, env, dotEnvPath, pendingWarnings::add);
     MarketDataLogging.configure(config.loggingLevel());
     for (DotEnvLoader.Warning w : pendingWarnings) {
       LOGGER.log(w.level(), w.message(), w.cause());

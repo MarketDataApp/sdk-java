@@ -10,6 +10,7 @@ import com.marketdata.sdk.exception.MarketDataException;
 import com.marketdata.sdk.exception.NotFoundError;
 import com.marketdata.sdk.exception.RateLimitError;
 import com.marketdata.sdk.exception.ServerError;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
@@ -67,9 +68,9 @@ class HttpStatusMapperTest {
   @ParameterizedTest
   @ValueSource(ints = {402, 403, 405, 418})
   void unhandled_four_xx_message_includes_the_status_code(int statusCode) {
-    // Previously the default branch produced a generic "Unexpected status code: 403" which read
-    // like an SDK bug rather than a server response. The message now identifies the bucket
-    // ("Client error") and the actual status, making it obvious what came back.
+    // The mapper differentiates the failure mode within the message (e.g. "Client error: HTTP
+    // 403") so consumers can branch on getMessage() / getStatusCode() even though the type is the
+    // shared BadRequestError bucket dictated by ADR-002's canonical 7-permit hierarchy.
     @Nullable MarketDataException exception = HttpStatusMapper.map(statusCode, context(statusCode));
 
     assertThat(exception).isNotNull();
@@ -135,6 +136,28 @@ class HttpStatusMapperTest {
 
     assertThat(exception).isExactlyInstanceOf(ServerError.class);
     assertThat(exception.getMessage()).contains(String.valueOf(statusCode));
+  }
+
+  // ---------- §9.4 Retry-After on 429 (RFC 6585) ----------
+
+  @Test
+  void rate_limit_error_carries_retry_after_when_present() {
+    Duration retryAfter = Duration.ofSeconds(45);
+
+    @Nullable MarketDataException exception = HttpStatusMapper.map(429, context(429), retryAfter);
+
+    assertThat(exception).isExactlyInstanceOf(RateLimitError.class);
+    RateLimitError rle = (RateLimitError) exception;
+    assertThat(rle.getRetryAfter()).contains(retryAfter);
+  }
+
+  @Test
+  void rate_limit_error_retry_after_is_empty_when_absent() {
+    @Nullable MarketDataException exception = HttpStatusMapper.map(429, context(429), null);
+
+    assertThat(exception).isExactlyInstanceOf(RateLimitError.class);
+    RateLimitError rle = (RateLimitError) exception;
+    assertThat(rle.getRetryAfter()).isEmpty();
   }
 
   @Test

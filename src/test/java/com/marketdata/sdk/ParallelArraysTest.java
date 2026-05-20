@@ -87,6 +87,45 @@ class ParallelArraysTest {
         .hasMessageContaining("no errmsg field");
   }
 
+  // ---------- no_data envelope (paired with HTTP 404) ----------
+
+  @Test
+  void noDataEnvelopeShortCircuitsToEmptyListWithoutFieldValidation() throws IOException {
+    // The backend returns {"s":"no_data"} (HTTP 404) when a query has no results — the data
+    // arrays are deliberately absent. The helper must return an empty list so the deserializer
+    // wraps it in its container type instead of complaining about "missing field".
+    List<String> rows =
+        ParallelArrays.zip(
+            null,
+            parse("{\"s\":\"no_data\"}"),
+            List.of("symbol", "price"),
+            row -> {
+              throw new AssertionError("builder must not be invoked for no_data envelope");
+            });
+
+    assertThat(rows).isEmpty();
+  }
+
+  @Test
+  void noDataEnvelopeIgnoresAdjacentMetadataFields() throws IOException {
+    // Some backend handlers attach metadata to the no_data envelope (e.g. nextTime, prevTime,
+    // errmsg). Those fields are not the parallel-array columns and must not affect the result.
+    List<String> rows =
+        ParallelArrays.zip(
+            null,
+            parse(
+                "{\"s\":\"no_data\","
+                    + "\"nextTime\":null,"
+                    + "\"prevTime\":null,"
+                    + "\"errmsg\":\"Market closed on this date.\"}"),
+            List.of("symbol", "price"),
+            row -> {
+              throw new AssertionError("builder must not be invoked for no_data envelope");
+            });
+
+    assertThat(rows).isEmpty();
+  }
+
   // ---------- presence and length validation ----------
 
   @Test

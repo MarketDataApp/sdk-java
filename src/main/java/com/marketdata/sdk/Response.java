@@ -11,8 +11,8 @@ import org.jspecify.annotations.Nullable;
 /**
  * Carrier for an API response: typed model + raw body + metadata. Per SDK requirements §13.5,
  * exposes format-detection accessors ({@link #isJson()}, {@link #isCsv()}), no-data detection
- * ({@link #isNoData()}, matching the API's 404-with-{@code "s":"no_data"} envelope convention),
- * and {@link #saveToFile(Path)} for writing the raw body verbatim.
+ * ({@link #isNoData()}, matching the API's 404-with-{@code "s":"no_data"} envelope convention), and
+ * {@link #saveToFile(Path)} for writing the raw body verbatim.
  *
  * <p>The {@link Format} enum is intentionally not exposed publicly (it has private values like
  * {@code HTML} that consumers shouldn't depend on). Consumers query format via the boolean
@@ -79,9 +79,9 @@ public final class Response<T> {
 
   /**
    * Server-provided request id (Cloudflare {@code cf-ray}), or {@code null} when the response did
-   * not carry one — useful when correlating with the support team. Matches the nullability shape
-   * of {@link com.marketdata.sdk.exception.MarketDataException#getRequestId()} so consumers can
-   * branch the same way regardless of which surface carries the id.
+   * not carry one — useful when correlating with the support team. Matches the nullability shape of
+   * {@link com.marketdata.sdk.exception.MarketDataException#getRequestId()} so consumers can branch
+   * the same way regardless of which surface carries the id.
    */
   public @Nullable String requestId() {
     return requestId;

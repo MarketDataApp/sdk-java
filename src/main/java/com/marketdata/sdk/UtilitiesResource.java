@@ -57,11 +57,11 @@ public final class UtilitiesResource {
 
   /**
    * Auth probe used by {@link MarketDataClient}'s startup validation. Hits {@code GET /v1/user/}
-   * with a single-attempt policy so a slow/down API surfaces to the constructor immediately
-   * instead of burning the default retry budget (~6.75 min worst-case). Result is discarded —
-   * only the throw shape matters: 401 → {@link com.marketdata.sdk.exception.AuthenticationError},
-   * other failures propagate as their typed {@link
-   * com.marketdata.sdk.exception.MarketDataException} subtype.
+   * with a single-attempt policy so a slow/down API surfaces to the constructor immediately instead
+   * of burning the default retry budget (~6.75 min worst-case). Result is discarded — only the
+   * throw shape matters: 401 → {@link com.marketdata.sdk.exception.AuthenticationError}, other
+   * failures propagate as their typed {@link com.marketdata.sdk.exception.MarketDataException}
+   * subtype.
    *
    * <p>Package-private and intent-named: not part of the public API and not an "endpoint" in the
    * §1.2 sense, so ADR-006's sync+async parity does not apply.

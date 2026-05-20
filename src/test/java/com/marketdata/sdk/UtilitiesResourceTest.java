@@ -234,6 +234,29 @@ class UtilitiesResourceTest {
     assertThat(r.requestUrl().toString()).isEqualTo("http://localhost/headers/");
   }
 
+  // ---------- §13.5 no_data convention (HTTP 404 + {"s":"no_data"}) ----------
+
+  /**
+   * When the backend returns the no_data envelope with HTTP 404, the consumer must reach {@link
+   * Response#isNoData()} and {@link Response#data()} normally — no {@link
+   * com.marketdata.sdk.exception.ParseError} from the parallel-array field validation. The data
+   * payload is the typed model with an empty collection.
+   */
+  @Test
+  void statusEndpointSurfaces404NoDataAsEmptyResponseInsteadOfParseError() {
+    String body = "{\"s\":\"no_data\"}";
+    CapturingClient client =
+        new CapturingClient(404, body.getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    Response<ApiStatus> r = utilities.status();
+
+    assertThat(r.statusCode()).isEqualTo(404);
+    assertThat(r.isNoData()).isTrue();
+    assertThat(r.data().services()).isEmpty();
+    assertThat(new String(r.rawBody())).isEqualTo(body);
+  }
+
   // ---------- error surfacing through sync ----------
 
   /**

@@ -97,8 +97,7 @@ class JsonResponseParserTest {
     // "quota apparently exhausted". Same policy as ParallelArrays.
     JsonResponseParser parser = new JsonResponseParser();
 
-    assertThatThrownBy(
-            () -> parser.parse(env("{\"x-ratelimit-requests-limit\":500}"), User.class))
+    assertThatThrownBy(() -> parser.parse(env("{\"x-ratelimit-requests-limit\":500}"), User.class))
         .isInstanceOf(ParseError.class)
         .hasMessageContaining("missing or non-integer")
         .hasMessageContaining("x-ratelimit-requests-remaining");
@@ -193,6 +192,33 @@ class JsonResponseParserTest {
 
     assertThatThrownBy(() -> status.services().add(null))
         .isInstanceOf(UnsupportedOperationException.class);
+  }
+
+  @Test
+  void apiStatusNoDataEnvelopeProducesEmptyApiStatus() {
+    // The backend returns {"s":"no_data"} (with HTTP 404) when a query has no matches. The
+    // parser must not explode on the absent arrays — the response wrapper relies on the typed
+    // model being constructable so consumers can branch on isNoData() while still calling
+    // .data().services().
+    String body = "{\"s\":\"no_data\"}";
+
+    ApiStatus status = new JsonResponseParser().parse(env(body), ApiStatus.class);
+
+    assertThat(status.services()).isEmpty();
+  }
+
+  @Test
+  void apiStatusNoDataEnvelopeWithMetadataFieldsStillEmpty() {
+    // Some backend handlers attach hints to the no_data envelope (nextTime, prevTime, errmsg);
+    // those siblings must not perturb the empty result.
+    String body =
+        "{\"s\":\"no_data\","
+            + "\"nextTime\":null,\"prevTime\":null,"
+            + "\"errmsg\":\"Market closed on this date.\"}";
+
+    ApiStatus status = new JsonResponseParser().parse(env(body), ApiStatus.class);
+
+    assertThat(status.services()).isEmpty();
   }
 
   @Test

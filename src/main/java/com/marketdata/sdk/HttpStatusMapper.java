@@ -18,16 +18,19 @@ final class HttpStatusMapper {
 
   /**
    * Maps an HTTP status to its typed exception. When {@code retryAfter} is non-null, it is attached
-   * to the resulting {@link ServerError} so the retry policy can honor §9.4. The other subtypes
-   * ignore it — only server errors retry, and only retries care about Retry-After.
+   * to the resulting {@link ServerError} (so the retry policy can honor §9.4) and to the resulting
+   * {@link RateLimitError} (so consumers receiving a 429 can read the server's directive even
+   * though the SDK does not retry 429 itself, per RFC 6585).
    *
-   * <p>Unmapped status codes are split by range rather than lumped into a single bucket:
+   * <p>The sealed hierarchy is fixed at the 7 permits documented in ADR-002. Status codes outside
+   * the canonical buckets (403, 422, 3xx, 1xx, out-of-range) fall back to {@link BadRequestError}
+   * with a message that identifies the actual failure mode so consumers can branch on the message
+   * if needed:
    *
    * <ul>
    *   <li><strong>5xx</strong> → {@link ServerError} (retryable).
    *   <li><strong>4xx</strong> (other than 401/404/429) → {@link BadRequestError} with the status
-   *       code in the message — the request itself was malformed for some endpoint-specific reason
-   *       (403 forbidden, 422 unprocessable entity, etc.).
+   *       code in the message — covers 403 (permission), 422 (validation), 405, 418, 451, etc.
    *   <li><strong>3xx</strong> → {@link BadRequestError} with a "redirect" message. The transport's
    *       {@code HttpClient} follows redirects per {@code NORMAL} policy, so a 3xx escaping that
    *       means the redirect could not be followed (e.g., cross-protocol, max redirects). Surfaces
@@ -46,7 +49,7 @@ final class HttpStatusMapper {
       case 400 -> new BadRequestError("Bad request", context);
       case 401 -> new AuthenticationError("Authentication failed", context);
       case 404 -> new NotFoundError("Not found", context);
-      case 429 -> new RateLimitError("Rate limit exceeded", context);
+      case 429 -> new RateLimitError("Rate limit exceeded", context, null, retryAfter);
       default -> mapByRange(statusCode, context, retryAfter);
     };
   }

@@ -37,11 +37,28 @@ final class ParallelArrays {
 
   private static final String ENVELOPE_STATUS = "s";
   private static final String ENVELOPE_ERRMSG = "errmsg";
+  private static final String ENVELOPE_NO_DATA = "no_data";
+  private static final String ENVELOPE_ERROR = "error";
 
   private ParallelArrays() {}
 
   /**
    * Zip the parallel arrays under {@code root} into a list of rows via {@code rowBuilder}.
+   *
+   * <p>Envelope handling:
+   *
+   * <ul>
+   *   <li>{@code "s":"error"} → {@link JsonMappingException} carrying the server-side {@code
+   *       errmsg}. The parent parser turns it into a {@link
+   *       com.marketdata.sdk.exception.ParseError}.
+   *   <li>{@code "s":"no_data"} → empty list. The backend uses this envelope (paired with HTTP 404,
+   *       see {@code HttpTransport.routeAndEnvelope}) for "the query has no results"; the data
+   *       arrays are deliberately omitted in that case. Returning an empty list lets the resource
+   *       wrap it in its container type ({@code new ApiStatus(emptyList)}, etc.) so the consumer
+   *       reaches {@link Response#isNoData()} and {@link Response#data()} normally instead of
+   *       hitting a spurious {@code "missing field"} error from the field-validation loop.
+   *   <li>Any other status (typically {@code "ok"}) → normal field validation.
+   * </ul>
    *
    * @throws JsonMappingException if the envelope reports {@code "s":"error"}, a required field is
    *     absent or not an array, or arrays have mismatched lengths.
@@ -50,9 +67,12 @@ final class ParallelArrays {
       throws IOException {
 
     String envelopeStatus = root.path(ENVELOPE_STATUS).asText("");
-    if ("error".equals(envelopeStatus)) {
+    if (ENVELOPE_ERROR.equals(envelopeStatus)) {
       String errmsg = root.path(ENVELOPE_ERRMSG).asText("(no errmsg field)");
       throw new JsonMappingException(p, "API responded with error: " + errmsg);
+    }
+    if (ENVELOPE_NO_DATA.equals(envelopeStatus)) {
+      return List.of();
     }
 
     Map<String, JsonNode> arrays = new LinkedHashMap<>();

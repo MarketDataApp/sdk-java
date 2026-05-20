@@ -243,6 +243,35 @@ class RetryExecutorTest {
     assertThat(seenAttempts).containsExactly(0, 1, 2);
   }
 
+  // ---------- context-aware supplier threading previousCause ----------
+
+  @Test
+  void attemptSupplierReceivesAttemptIndexAndPreviousCause() {
+    // The AttemptSupplier variant exposes the previous attempt's (unwrapped) cause so callers
+    // can branch — e.g. HttpTransport bypasses preflight when previousCause carries an explicit
+    // server-side Retry-After. This test pins that the threading is correct across attempts.
+    java.util.List<Integer> seenAttempts = new java.util.ArrayList<>();
+    java.util.List<Throwable> seenCauses = new java.util.ArrayList<>();
+    RetryExecutor exec = new RetryExecutor(FAST_RETRY);
+    NetworkError netError = retriableNet();
+
+    exec.execute(
+            (attemptIdx, previousCause) -> {
+              seenAttempts.add(attemptIdx);
+              seenCauses.add(previousCause);
+              return CompletableFuture.failedFuture(netError);
+            },
+            (cause, attempt) -> attempt < 2)
+        .exceptionally(e -> null)
+        .join();
+
+    assertThat(seenAttempts).containsExactly(0, 1, 2);
+    // First attempt has no previous cause; subsequent attempts see the unwrapped NetworkError.
+    assertThat(seenCauses.get(0)).isNull();
+    assertThat(seenCauses.get(1)).isSameAs(netError);
+    assertThat(seenCauses.get(2)).isSameAs(netError);
+  }
+
   @Test
   void resultFutureCarriesCancellationException() {
     RetryExecutor exec = new RetryExecutor(NO_RETRY);

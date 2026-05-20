@@ -8,6 +8,9 @@ class SealedHierarchyTest {
 
   @Test
   void permits_exactly_the_seven_canonical_subtypes() {
+    // ADR-002 fixes the canonical list at exactly these 7 permits. Expanding requires an ADR
+    // amendment — adding a permit silently would break consumers compiling against the documented
+    // shape on JDK 21+ (pattern matching for switch). This snapshot is the regression guard.
     Class<?>[] permitted = MarketDataException.class.getPermittedSubclasses();
 
     assertThat(permitted)

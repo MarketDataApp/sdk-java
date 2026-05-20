@@ -36,10 +36,10 @@ public abstract sealed class MarketDataException extends RuntimeException
   /**
    * The request URL with any query string redacted (replaced by {@code ?…}). Mirrors the SDK's
    * ambient-log policy — query strings can carry PII (account IDs), competitive signal (queried
-   * symbols), or hypothetical future credentials, none of which should land in consumer logs
-   * just because someone called {@code logger.error("Request failed: " + ex.getRequestUrl())}.
-   * The full URI (with query) is preserved internally; use {@link #getContext()} when raw access
-   * is genuinely needed for diagnostics that won't be persisted.
+   * symbols), or hypothetical future credentials, none of which should land in consumer logs just
+   * because someone called {@code logger.error("Request failed: " + ex.getRequestUrl())}. The full
+   * URI (with query) is preserved internally; use {@link #getContext()} when raw access is
+   * genuinely needed for diagnostics that won't be persisted.
    */
   public String getRequestUrl() {
     return redactQuery(context.requestUrl());

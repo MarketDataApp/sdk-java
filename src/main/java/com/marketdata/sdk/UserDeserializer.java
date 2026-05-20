@@ -16,8 +16,8 @@ import java.io.IOException;
  *
  * <p>Strict by default — same reasoning as {@link ParallelArrays}: a silent default for a missing
  * numeric field would hide server bugs at the worst time (e.g. construction-time
- * validateOnStartup), surfacing later as "quota apparently exhausted" with no breadcrumb. The
- * empty string is the server's legitimate signal for "real-time options access" so {@code
+ * validateOnStartup), surfacing later as "quota apparently exhausted" with no breadcrumb. The empty
+ * string is the server's legitimate signal for "real-time options access" so {@code
  * optionsDataPermissions} only requires that the field be a JSON string, not that it be non-empty.
  */
 final class UserDeserializer extends JsonDeserializer<User> {

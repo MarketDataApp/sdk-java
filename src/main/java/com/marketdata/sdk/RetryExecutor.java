@@ -22,6 +22,11 @@ import org.jspecify.annotations.Nullable;
  * <p>Cancellation of the outer result propagates to the in-flight attempt: if the caller cancels
  * mid-flight or mid-backoff, the next attempt is not scheduled and the current one (if any) is
  * cancelled.
+ *
+ * <p>Two supplier shapes are supported: {@link Supplier} for callers that don't need per-attempt
+ * context, and {@link AttemptSupplier} for callers that need to inspect the previous attempt's
+ * cause — used by {@link HttpTransport} to bypass the §10.3 preflight when retrying on an explicit
+ * server-side {@code Retry-After} directive (§9.4).
  */
 final class RetryExecutor {
 
@@ -34,6 +39,16 @@ final class RetryExecutor {
   /** Visible to callers that need to compose their own retry predicate. */
   RetryPolicy policy() {
     return policy;
+  }
+
+  /**
+   * Builds the future for one attempt. The {@code attemptIdx} starts at 0 for the first attempt;
+   * {@code previousCause} is the (unwrapped) cause that triggered this retry, or {@code null} on
+   * the first attempt.
+   */
+  @FunctionalInterface
+  interface AttemptSupplier<T> {
+    CompletableFuture<T> get(int attemptIdx, @Nullable Throwable previousCause);
   }
 
   /**
@@ -52,6 +67,16 @@ final class RetryExecutor {
    */
   <T> CompletableFuture<T> execute(
       Supplier<CompletableFuture<T>> supplier, BiPredicate<Throwable, Integer> shouldRetry) {
+    return execute((attemptIdx, previousCause) -> supplier.get(), shouldRetry);
+  }
+
+  /**
+   * Like {@link #execute(Supplier, BiPredicate)} but the supplier receives the attempt index and
+   * the previous attempt's cause so it can adjust behavior across retries — e.g. skip preflight
+   * checks when the previous failure carried an explicit server-side {@code Retry-After}.
+   */
+  <T> CompletableFuture<T> execute(
+      AttemptSupplier<T> supplier, BiPredicate<Throwable, Integer> shouldRetry) {
     CompletableFuture<T> result = new CompletableFuture<>();
     // One cancellation handler installed once: whichever attempt is currently in flight is
     // tracked in `currentAttempt`; cancelling `result` cancels that. Previous attempts are
@@ -67,14 +92,15 @@ final class RetryExecutor {
             }
           }
         });
-    attempt(supplier, shouldRetry, 0, result, currentAttempt);
+    attempt(supplier, shouldRetry, 0, null, result, currentAttempt);
     return result;
   }
 
   private <T> void attempt(
-      Supplier<CompletableFuture<T>> supplier,
+      AttemptSupplier<T> supplier,
       BiPredicate<Throwable, Integer> shouldRetry,
       int attemptIdx,
+      @Nullable Throwable previousCause,
       CompletableFuture<T> result,
       AtomicReference<@Nullable CompletableFuture<T>> currentAttempt) {
     if (result.isDone()) {
@@ -83,7 +109,7 @@ final class RetryExecutor {
       // running a fresh attempt after the previous one's whenComplete completed `result`.
       return;
     }
-    CompletableFuture<T> dispatched = supplier.get();
+    CompletableFuture<T> dispatched = supplier.get(attemptIdx, previousCause);
     currentAttempt.set(dispatched);
 
     // Race: `result.cancel(...)` may have fired between the isDone() check above and the
@@ -109,7 +135,9 @@ final class RetryExecutor {
             long delayMs = policy.backoffDelay(cause, attemptIdx).toMillis();
             CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS)
                 .execute(
-                    () -> attempt(supplier, shouldRetry, attemptIdx + 1, result, currentAttempt));
+                    () ->
+                        attempt(
+                            supplier, shouldRetry, attemptIdx + 1, cause, result, currentAttempt));
           } else {
             result.completeExceptionally(cause);
           }

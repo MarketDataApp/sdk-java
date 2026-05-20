@@ -89,8 +89,7 @@ final class StatusCache {
     } catch (Throwable t) {
       // Sync-throw from the fetcher (rare — most failures arrive as a failed future). Log so a
       // permanently-broken fetcher doesn't degrade silently into "stale snapshot forever".
-      LOGGER.log(
-          Level.WARNING, "StatusCache fetcher threw synchronously; snapshot persists.", t);
+      LOGGER.log(Level.WARNING, "StatusCache fetcher threw synchronously; snapshot persists.", t);
       refreshInFlight.set(false);
       return;
     }

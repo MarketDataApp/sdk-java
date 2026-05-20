@@ -66,6 +66,7 @@ final class HttpTransport implements AutoCloseable {
   private final String apiVersion;
   private final String userAgent;
   private final @Nullable String token;
+
   /** URI the StatusCache's own fetcher targets; matched verbatim by cacheAllowsRetry. */
   private final URI statusEndpointUri;
 
@@ -169,13 +170,22 @@ final class HttpTransport implements AutoCloseable {
     HttpRequest request = buildHttpRequest(uri, spec.format());
     RetryPolicy policy = executor.policy();
     return executor.execute(
-        () -> {
+        (attemptIdx, previousCause) -> {
           // §10.3: pre-flight gate — if our latest snapshot says credits are exhausted, fail
           // fast without hitting the wire. RateLimitError is non-retriable per §11.2, so the
           // retry executor will surface it directly.
-          RateLimitError preflight = checkRateLimitPreflight(uri);
-          if (preflight != null) {
-            return CompletableFuture.failedFuture(preflight);
+          //
+          // Exception: when the previous attempt failed with a ServerError carrying an explicit
+          // Retry-After (§9.4), the server has just told us "come back at <now + retryAfter>".
+          // That directive is more authoritative than our snapshot for this specific retry;
+          // honoring it is exactly what §9.4 demands. Without this bypass, a 503 + Retry-After
+          // after a snapshot that reports remaining=0 with a far-future reset would sabotage the
+          // server-orchestrated backoff — the retry would never reach the wire.
+          if (!isServerHintedRetry(previousCause)) {
+            RateLimitError preflight = checkRateLimitPreflight(uri);
+            if (preflight != null) {
+              return CompletableFuture.failedFuture(preflight);
+            }
           }
           return dispatcher
               .dispatch(request)
@@ -185,6 +195,16 @@ final class HttpTransport implements AutoCloseable {
         // policy says yes, an "offline" cache entry for this URI's service blocks the retry so
         // the caller fails fast instead of hammering a known-down service.
         (cause, attempt) -> policy.shouldRetry(cause, attempt) && cacheAllowsRetry(uri));
+  }
+
+  /**
+   * Was the previous attempt's failure a server-side directive to come back at a specific time?
+   * Only 5xx responses carrying a parsed {@code Retry-After} qualify — that's the case where the
+   * server has explicitly scheduled our retry, and our local rate-limit snapshot (whose {@code
+   * reset} may be unrelated and far in the future) must not veto it.
+   */
+  private static boolean isServerHintedRetry(@Nullable Throwable previousCause) {
+    return previousCause instanceof ServerError server && server.getRetryAfter().isPresent();
   }
 
   /**
