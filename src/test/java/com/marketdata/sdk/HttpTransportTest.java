@@ -13,7 +13,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +31,10 @@ class HttpTransportTest {
       new RetryPolicy(1, Duration.ofMillis(1), Duration.ofMillis(1));
 
   private static HttpTransport newTransport(HttpClient client) {
+    return newTransport(client, Clock.systemUTC());
+  }
+
+  private static HttpTransport newTransport(HttpClient client, Clock clock) {
     return new HttpTransport(
         "http://localhost",
         "v1",
@@ -35,7 +42,8 @@ class HttpTransportTest {
         "secret-token",
         new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
         new RetryExecutor(NO_RETRY),
-        () -> null);
+        () -> null,
+        clock);
   }
 
   // ---------- URL & header composition ----------
@@ -86,7 +94,8 @@ class HttpTransportTest {
             null,
             new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
             new RetryExecutor(NO_RETRY),
-            () -> null);
+            () -> null,
+            Clock.systemUTC());
 
     transport.executeAsync(RequestSpec.get("markets/status").build()).join();
 
@@ -383,12 +392,19 @@ class HttpTransportTest {
   // ---------- §10.3 pre-flight rate-limit check ----------
 
   private static HttpHeaders rateLimitHeaders(int remaining) {
+    // Reset always in the future relative to Clock.systemUTC() so the preflight's reset-window
+    // guard treats the snapshot as "still exhausted" rather than "stale — let it through".
+    long resetEpoch = Instant.now().plus(Duration.ofHours(1)).getEpochSecond();
     return TestHttpClients.headersOf(
         Map.of(
-            "x-api-ratelimit-limit", "1000",
-            "x-api-ratelimit-remaining", String.valueOf(remaining),
-            "x-api-ratelimit-reset", "1734036832",
-            "x-api-ratelimit-consumed", "1"));
+            "x-api-ratelimit-limit",
+            "1000",
+            "x-api-ratelimit-remaining",
+            String.valueOf(remaining),
+            "x-api-ratelimit-reset",
+            String.valueOf(resetEpoch),
+            "x-api-ratelimit-consumed",
+            "1"));
   }
 
   /**
@@ -445,6 +461,90 @@ class HttpTransportTest {
 
     assertThat(client.captured).hasSize(1);
     assertThat(transport.getLatestRateLimits()).isNull();
+  }
+
+  /**
+   * The reset-window guard: once {@code reset} has elapsed the preflight must let the request
+   * through even though {@code remaining=0}. Without this guard a single response with {@code
+   * remaining=0} would lock the client out forever — no request reaches the wire, so the snapshot
+   * never refreshes from a fresh response.
+   */
+  @Test
+  void preflightAllowsWhenResetWindowHasElapsed() {
+    // reset = 15:00:00 UTC; the test runs the second call at 15:00:10 — past the reset, so the
+    // preflight must allow the request even though remaining=0.
+    Instant resetTs = Instant.parse("2026-05-20T15:00:00Z");
+    long resetEpoch = resetTs.getEpochSecond();
+    Clock fixedAfterReset = Clock.fixed(resetTs.plus(Duration.ofSeconds(10)), ZoneOffset.UTC);
+
+    HttpHeaders exhausted =
+        TestHttpClients.headersOf(
+            Map.of(
+                "x-api-ratelimit-limit", "1000",
+                "x-api-ratelimit-remaining", "0",
+                "x-api-ratelimit-reset", String.valueOf(resetEpoch),
+                "x-api-ratelimit-consumed", "1000"));
+    CapturingClient client = new CapturingClient(200, "ok".getBytes(), exhausted);
+    HttpTransport transport = newTransport(client, fixedAfterReset);
+
+    // First call lands the exhausted snapshot.
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+    assertThat(client.captured).hasSize(1);
+
+    // Second call: remaining=0, but reset has already passed → preflight must allow.
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+    assertThat(client.captured).hasSize(2);
+  }
+
+  @Test
+  void preflightAllowsAtTheExactResetInstant() {
+    // Boundary check: "now == reset" is treated as window-elapsed (the server has presumably
+    // refreshed by the instant the reset timestamp names).
+    Instant resetTs = Instant.parse("2026-05-20T15:00:00Z");
+    Clock fixedAtReset = Clock.fixed(resetTs, ZoneOffset.UTC);
+
+    HttpHeaders exhausted =
+        TestHttpClients.headersOf(
+            Map.of(
+                "x-api-ratelimit-limit", "1000",
+                "x-api-ratelimit-remaining", "0",
+                "x-api-ratelimit-reset", String.valueOf(resetTs.getEpochSecond()),
+                "x-api-ratelimit-consumed", "1000"));
+    CapturingClient client = new CapturingClient(200, "ok".getBytes(), exhausted);
+    HttpTransport transport = newTransport(client, fixedAtReset);
+
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+
+    assertThat(client.captured).hasSize(2);
+  }
+
+  @Test
+  void preflightStillBlocksWhenResetIsInTheFuture() {
+    // reset is in the future → the snapshot's "exhausted" verdict is still current; the
+    // preflight must veto the second call.
+    Instant resetTs = Instant.parse("2026-05-20T15:30:00Z");
+    Clock fixedBeforeReset = Clock.fixed(resetTs.minus(Duration.ofMinutes(5)), ZoneOffset.UTC);
+
+    HttpHeaders exhausted =
+        TestHttpClients.headersOf(
+            Map.of(
+                "x-api-ratelimit-limit", "1000",
+                "x-api-ratelimit-remaining", "0",
+                "x-api-ratelimit-reset", String.valueOf(resetTs.getEpochSecond()),
+                "x-api-ratelimit-consumed", "1000"));
+    CapturingClient client = new CapturingClient(200, "ok".getBytes(), exhausted);
+    HttpTransport transport = newTransport(client, fixedBeforeReset);
+
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+    assertThat(client.captured).hasSize(1);
+
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(RateLimitError.class);
+
+    assertThat(client.captured).hasSize(1);
   }
 
   // ---------- §9.4 Retry-After header ----------
@@ -528,7 +628,8 @@ class HttpTransportTest {
             "secret-token",
             new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
             new RetryExecutor(fourAttempts),
-            () -> cache);
+            () -> cache,
+            Clock.systemUTC());
 
     assertThatThrownBy(
             () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
@@ -569,7 +670,8 @@ class HttpTransportTest {
             "secret-token",
             new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
             new RetryExecutor(fourAttempts),
-            () -> cache);
+            () -> cache,
+            Clock.systemUTC());
 
     assertThatThrownBy(
             () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())

@@ -10,6 +10,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
@@ -56,6 +57,7 @@ final class HttpTransport implements AutoCloseable {
   private final HttpDispatcher dispatcher;
   private final RetryExecutor retryExecutor;
   private final Supplier<@Nullable StatusCache> statusCacheSupplier;
+  private final Clock clock;
   private final AtomicReference<@Nullable RateLimitSnapshot> latestRateLimits =
       new AtomicReference<>();
 
@@ -73,6 +75,9 @@ final class HttpTransport implements AutoCloseable {
    * MarketDataClient} can construct the cache <em>after</em> the transport (the cache's fetcher
    * uses the transport via {@link UtilitiesResource} — the chicken-and-egg is resolved by a
    * deferred reference). Pass {@code () -> null} when no §9.5 gate is desired (e.g. tests).
+   *
+   * <p>The {@code clock} drives the §10.3 preflight's {@code reset}-window check; tests pass a
+   * fixed clock to assert the time-based gate behavior deterministically.
    */
   HttpTransport(
       String baseUrl,
@@ -81,7 +86,8 @@ final class HttpTransport implements AutoCloseable {
       @Nullable String token,
       HttpDispatcher dispatcher,
       RetryExecutor retryExecutor,
-      Supplier<@Nullable StatusCache> statusCacheSupplier) {
+      Supplier<@Nullable StatusCache> statusCacheSupplier,
+      Clock clock) {
     this.baseUrl = baseUrl;
     this.apiVersion = apiVersion;
     this.userAgent = userAgent;
@@ -89,12 +95,13 @@ final class HttpTransport implements AutoCloseable {
     this.dispatcher = dispatcher;
     this.retryExecutor = retryExecutor;
     this.statusCacheSupplier = statusCacheSupplier;
+    this.clock = clock;
   }
 
   /**
    * Production factory: assembles a real {@link HttpDispatcher} (50-permit pool + JDK {@link
-   * HttpClient}) and a default {@link RetryExecutor} (4 attempts, exponential 1s→30s). Used by
-   * {@link MarketDataClient}.
+   * HttpClient}), a default {@link RetryExecutor} (4 attempts, exponential 1s→30s), and {@link
+   * Clock#systemUTC()} for the preflight reset-window check.
    */
   static HttpTransport withDefaults(
       String baseUrl,
@@ -109,7 +116,8 @@ final class HttpTransport implements AutoCloseable {
         token,
         new HttpDispatcher(defaultHttpClient(), CONCURRENCY_LIMIT),
         new RetryExecutor(RetryPolicy.defaults()),
-        statusCacheSupplier);
+        statusCacheSupplier,
+        Clock.systemUTC());
   }
 
   private static HttpClient defaultHttpClient() {
@@ -172,20 +180,29 @@ final class HttpTransport implements AutoCloseable {
   }
 
   /**
-   * Returns a {@link RateLimitError} when the last-known snapshot reports zero remaining credits;
-   * {@code null} when the request is allowed (either credits are available or no snapshot has been
-   * taken yet — the first request must reach the server to populate one).
+   * Returns a {@link RateLimitError} when the last-known snapshot reports zero remaining credits
+   * <em>and</em> the snapshot's {@code reset} timestamp is still in the future. Returns {@code
+   * null} when the request is allowed (credits available, no snapshot yet, or the reset window has
+   * elapsed — the snapshot is stale and the next response's headers will refresh it).
    *
-   * <p>Treats {@code remaining == 0} as exhausted regardless of whether {@code reset} has passed.
-   * The snapshot only refreshes on response headers, so we have no fresh data to justify letting
-   * the request through; the server will fail us anyway if quotas haven't actually reset.
+   * <p>Without the reset check, a single response carrying {@code remaining=0} would freeze the
+   * client forever: the preflight would short-circuit every subsequent request, no request would
+   * reach the wire, and the snapshot would never refresh — even after the server replenished
+   * credits at the reset time.
    */
   private @Nullable RateLimitError checkRateLimitPreflight(URI uri) {
     RateLimitSnapshot snap = latestRateLimits.get();
     if (snap == null || snap.remaining() > 0) {
       return null;
     }
-    ErrorContext context = ErrorContext.forNoResponse(uri.toString(), Instant.now());
+    Instant now = clock.instant();
+    if (!now.isBefore(snap.reset())) {
+      // now >= reset → window has elapsed; let the request through so the response refreshes
+      // the snapshot. If the server hasn't actually replenished yet it will reject with 429,
+      // which costs one round-trip — strictly less harmful than locking out indefinitely.
+      return null;
+    }
+    ErrorContext context = ErrorContext.forNoResponse(uri.toString(), now);
     return new RateLimitError(
         "Rate limit exhausted: 0 requests remaining (resets at " + snap.reset() + ")", context);
   }

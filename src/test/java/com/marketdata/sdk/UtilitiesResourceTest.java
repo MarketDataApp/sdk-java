@@ -12,6 +12,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -34,7 +35,8 @@ class UtilitiesResourceTest {
             "secret-token",
             new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
             new RetryExecutor(NO_RETRY),
-            () -> null);
+            () -> null,
+            Clock.systemUTC());
     return new UtilitiesResource(transport, new JsonResponseParser());
   }
 
