@@ -914,6 +914,70 @@ class HttpTransportTest {
     assertThat(client.captured).hasSize(1);
   }
 
+  // ---------- §12 concurrency limit (50 in-flight) ----------
+
+  /**
+   * §12 mandates a 50-request concurrency cap on in-flight HTTP work. This test pins the value AND
+   * verifies the gating happens at the {@code transport.executeAsync} entry point — not just inside
+   * {@link HttpDispatcher} in isolation — so a future refactor that bypasses the dispatcher (or
+   * accidentally instantiates a parallel pool elsewhere) breaks the assertion.
+   *
+   * <p>Determinism: {@link TestHttpClients.Controllable} hands out fresh pending futures from
+   * {@code sendAsync}, so 50 dispatches fill the {@code pending} list and the 51st is forced onto
+   * the semaphore's slow path. Completing the in-flight set in two passes (the second covers the
+   * 51st request, which re-enters {@code sendAsync} as permits transfer through release()) drains
+   * the system back to a fully-available pool.
+   */
+  @Test
+  void respectsGlobalConcurrencyLimitOfFifty() {
+    // Pin the constant — a silent edit that drops it (or hikes it past 50) would otherwise pass
+    // every existing test while quietly violating §12.
+    assertThat(HttpTransport.CONCURRENCY_LIMIT).isEqualTo(50);
+
+    TestHttpClients.Controllable client = new TestHttpClients.Controllable();
+    HttpDispatcher dispatcher = new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT);
+    HttpTransport transport =
+        new HttpTransport(
+            "http://localhost",
+            "v1",
+            "test/0.0",
+            "secret-token",
+            dispatcher,
+            new RetryExecutor(NO_RETRY),
+            () -> null,
+            Clock.systemUTC());
+
+    List<CompletableFuture<HttpResponseEnvelope>> calls = new ArrayList<>();
+    for (int i = 0; i < 51; i++) {
+      calls.add(transport.executeAsync(RequestSpec.get("markets/status").build()));
+    }
+
+    // 50 reached the wire; the 51st is parked in the semaphore queue.
+    assertThat(client.pendingCount()).isEqualTo(50);
+    assertThat(dispatcher.queueLength()).isOne();
+    assertThat(dispatcher.availablePermits()).isZero();
+
+    HttpResponse<byte[]> ok =
+        TestHttpClients.response(
+            200,
+            new byte[0],
+            HttpHeaders.of(Map.of(), (a, b) -> true),
+            URI.create("http://localhost/v1/markets/status/"));
+
+    // Pass 1: complete the original 50. Each release transfers to the queued 51st, which
+    // re-enters sendAsync and lands a fresh pending future. The 49 remaining releases bump the
+    // available counter.
+    client.completeAll(ok);
+    // Pass 2: complete the 51st's now-pending sendFuture so its dispatch chain settles too.
+    client.completeAll(ok);
+
+    for (CompletableFuture<HttpResponseEnvelope> c : calls) {
+      assertThat(c).isCompleted();
+    }
+    assertThat(dispatcher.availablePermits()).isEqualTo(HttpTransport.CONCURRENCY_LIMIT);
+    assertThat(dispatcher.queueLength()).isZero();
+  }
+
   // ---------- stub HttpClient ----------
 
   /**
