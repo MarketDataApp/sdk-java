@@ -217,4 +217,39 @@ class HttpDispatcherTest {
     dispatcher.close();
     dispatcher.close(); // must be safe
   }
+
+  // ---------- safeUri (log redaction) ----------
+
+  @Test
+  void safeUriReturnsPathWhenNoQueryString() {
+    assertThat(HttpDispatcher.safeUri(URI.create("http://localhost/v1/markets/status/")))
+        .isEqualTo("/v1/markets/status/");
+  }
+
+  @Test
+  void safeUriOmitsQueryStringWithEllipsisMarker() {
+    // The "?…" suffix preserves the signal that the call carried params (useful for diagnostics)
+    // without persisting their values to logs. Symbols, account IDs, date ranges, hypothetical
+    // future "?token=" — all stay out of the log line.
+    assertThat(
+            HttpDispatcher.safeUri(
+                URI.create("http://localhost/v1/stocks/quotes/?symbol=AAPL&from=2024-01-01")))
+        .isEqualTo("/v1/stocks/quotes/?…");
+  }
+
+  @Test
+  void safeUriHandlesEmptyQueryDefensively() {
+    // URI like "/foo?" — empty query but the marker character is present. URI.getRawQuery()
+    // returns "" (non-null) in that case, so the suffix still applies.
+    assertThat(HttpDispatcher.safeUri(URI.create("http://localhost/foo?"))).isEqualTo("/foo?…");
+  }
+
+  @Test
+  void safeUriFallsBackToToStringForOpaqueUri() {
+    // Opaque URIs (scheme:opaque, no //authority) have a null path. Won't be built by the SDK
+    // for real requests, but the helper must never throw — that would convert a log call into
+    // a runtime failure.
+    assertThat(HttpDispatcher.safeUri(URI.create("mailto:user@example.com")))
+        .isEqualTo("mailto:user@example.com");
+  }
 }

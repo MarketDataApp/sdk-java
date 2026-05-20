@@ -285,7 +285,13 @@ final class HttpTransport implements AutoCloseable {
     MarketDataException ex = HttpStatusMapper.map(status, context, retryAfter);
     if (ex != null) {
       LOGGER.warning(
-          () -> "Request to " + uri + " returned HTTP " + status + ": " + ex.getMessage());
+          () ->
+              "Request to "
+                  + HttpDispatcher.safeUri(uri)
+                  + " returned HTTP "
+                  + status
+                  + ": "
+                  + ex.getMessage());
       throw ex;
     }
     // Mapper only returns null for 2xx, which the branch above already handled. Belt &

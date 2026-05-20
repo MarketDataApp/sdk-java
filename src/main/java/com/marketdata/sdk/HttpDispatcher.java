@@ -2,6 +2,7 @@ package com.marketdata.sdk;
 
 import com.marketdata.sdk.exception.ErrorContext;
 import com.marketdata.sdk.exception.NetworkError;
+import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -65,7 +66,7 @@ final class HttpDispatcher implements AutoCloseable {
   }
 
   private CompletableFuture<HttpResponse<byte[]>> send(HttpRequest request) {
-    LOGGER.fine(() -> "GET " + request.uri());
+    LOGGER.fine(() -> "GET " + safeUri(request.uri()));
     Instant start = Instant.now();
 
     CompletableFuture<HttpResponse<byte[]>> sendFuture;
@@ -77,13 +78,17 @@ final class HttpDispatcher implements AutoCloseable {
       // to prevent a permanent leak that would degrade the pool to deadlock.
       permits.release();
       LOGGER.warning(
-          () -> "Request to " + request.uri() + " failed before dispatch: " + t.getMessage());
+          () ->
+              "Request to "
+                  + safeUri(request.uri())
+                  + " failed before dispatch: "
+                  + t.getMessage());
       if (t instanceof Error err) {
         throw err;
       }
       return CompletableFuture.failedFuture(
           new NetworkError(
-              "Request to " + request.uri() + " failed before dispatch: " + t.getMessage(),
+              "Request to " + safeUri(request.uri()) + " failed before dispatch: " + t.getMessage(),
               ErrorContext.forNoResponse(request.uri().toString(), Instant.now()),
               t));
     }
@@ -98,14 +103,14 @@ final class HttpDispatcher implements AutoCloseable {
                 LOGGER.warning(
                     () ->
                         "Request to "
-                            + request.uri()
+                            + safeUri(request.uri())
                             + " failed after "
                             + elapsedMs
                             + "ms: "
                             + root.getMessage());
                 throw new CompletionException(
                     new NetworkError(
-                        "Request to " + request.uri() + " failed: " + root.getMessage(),
+                        "Request to " + safeUri(request.uri()) + " failed: " + root.getMessage(),
                         ErrorContext.forNoResponse(request.uri().toString(), Instant.now()),
                         root));
               }
@@ -114,12 +119,31 @@ final class HttpDispatcher implements AutoCloseable {
                       "Response "
                           + response.statusCode()
                           + " from "
-                          + request.uri()
+                          + safeUri(request.uri())
                           + " in "
                           + elapsedMs
                           + "ms");
               return response;
             });
+  }
+
+  /**
+   * Returns a log-safe rendition of {@code uri}: just the path, with a literal {@code "?…"}
+   * appended when the URI had a query string. The query is omitted so log lines never persist
+   * potentially-sensitive request parameters (PII like {@code account_id}, competitive-signal data
+   * like queried symbols, or a hypothetical future {@code ?token=}).
+   *
+   * <p>Exception context (via {@link ErrorContext}) still carries the full URI: that surface is for
+   * consumer code that has context to decide what to do with it; ambient logs are not.
+   */
+  static String safeUri(URI uri) {
+    String path = uri.getPath();
+    if (path == null) {
+      // Opaque URIs (scheme:opaque, no //authority) — defensive fallback. Won't happen for
+      // requests built by this SDK, but log-safety helpers must never throw.
+      return uri.toString();
+    }
+    return uri.getRawQuery() != null ? path + "?…" : path;
   }
 
   /** Permits not currently held nor queued. Exposed for diagnostics and tests. */
