@@ -137,6 +137,31 @@ class MarketDataLoggingTest {
     assertThat(sdkLogger().getLevel()).isEqualTo(Level.INFO);
   }
 
+  // ---------- §7 consolidation: every SDK class emits via the single root logger ----------
+
+  /**
+   * Regression guard for the consolidation: if anyone re-introduces a per-class logger via {@code
+   * Logger.getLogger(SomeClass.class.getName())}, the configure() consumer-pre-config detection and
+   * {@code useParentHandlers=false} guard would no longer cover the new sub-logger — records could
+   * double-emit through the root JUL handler or escape the SDK's level control.
+   */
+  @Test
+  void all_sdk_classes_emit_via_the_consolidated_root_logger() throws Exception {
+    for (Class<?> clazz :
+        java.util.List.of(
+            MarketDataClient.class, HttpTransport.class, HttpDispatcher.class, StatusCache.class)) {
+      java.lang.reflect.Field loggerField = clazz.getDeclaredField("LOGGER");
+      loggerField.setAccessible(true);
+      Logger logger = (Logger) loggerField.get(null);
+      assertThat(logger.getName())
+          .as(
+              "Class %s must use Logger.getLogger(MarketDataLogging.SDK_LOGGER_NAME) so its records"
+                  + " stay under the single configured root (§7).",
+              clazz.getSimpleName())
+          .isEqualTo(MarketDataLogging.SDK_LOGGER_NAME);
+    }
+  }
+
   /** Minimal Handler stub used to simulate a consumer-attached handler. */
   private static final class TestHandler extends Handler {
     @Override

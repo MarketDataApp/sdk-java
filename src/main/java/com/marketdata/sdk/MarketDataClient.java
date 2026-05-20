@@ -11,7 +11,11 @@ import org.jspecify.annotations.Nullable;
 
 public final class MarketDataClient implements AutoCloseable {
 
-  private static final Logger LOGGER = Logger.getLogger(MarketDataClient.class.getName());
+  // §7: one logger for the whole SDK (com.marketdata.sdk). Consumers configure or attach handlers
+  // to that single name; consolidating here keeps MarketDataLogging's consumer-pre-config
+  // detection and useParentHandlers=false guard aware of every emission path. Parity with the
+  // Python SDK (single marketdata.logger).
+  private static final Logger LOGGER = Logger.getLogger(MarketDataLogging.SDK_LOGGER_NAME);
 
   private final Configuration config;
   private final HttpTransport transport;

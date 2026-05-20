@@ -42,7 +42,7 @@ import org.jspecify.annotations.Nullable;
  */
 final class HttpTransport implements AutoCloseable {
 
-  private static final Logger LOGGER = Logger.getLogger(HttpTransport.class.getName());
+  private static final Logger LOGGER = Logger.getLogger(MarketDataLogging.SDK_LOGGER_NAME);
 
   /** SDK requirements §10: fixed 99-second per-request timeout. */
   static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(99);

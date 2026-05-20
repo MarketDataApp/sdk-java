@@ -30,7 +30,7 @@ import java.util.logging.Logger;
  */
 final class HttpDispatcher implements AutoCloseable {
 
-  private static final Logger LOGGER = Logger.getLogger(HttpDispatcher.class.getName());
+  private static final Logger LOGGER = Logger.getLogger(MarketDataLogging.SDK_LOGGER_NAME);
 
   private final HttpClient httpClient;
   private final AsyncSemaphore permits;

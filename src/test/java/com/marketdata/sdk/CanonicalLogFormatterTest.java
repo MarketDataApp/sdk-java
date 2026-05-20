@@ -21,10 +21,13 @@ class CanonicalLogFormatterTest {
   @Test
   void formatProducesCanonicalShape() {
     CanonicalLogFormatter fmt = new CanonicalLogFormatter();
+    // Production records all carry "com.marketdata.sdk" as the logger name (§7 consolidation);
+    // the formatter renders whatever name the record carries — this fixture uses the production
+    // value so reading it doesn't imply per-class sub-loggers exist.
     LogRecord r =
         recordAt(
             Level.INFO,
-            "com.marketdata.sdk.HttpTransport",
+            "com.marketdata.sdk",
             "Sending GET to https://api/v1/markets/status/",
             Instant.parse("2026-05-19T18:00:00Z"));
 
@@ -33,7 +36,7 @@ class CanonicalLogFormatterTest {
     // {timestamp} - {logger_name} - {level} - {message}\n
     String[] parts = out.split(" - ", 4);
     assertThat(parts).hasSize(4);
-    assertThat(parts[1]).isEqualTo("com.marketdata.sdk.HttpTransport");
+    assertThat(parts[1]).isEqualTo("com.marketdata.sdk");
     assertThat(parts[2]).isEqualTo("INFO");
     assertThat(parts[3]).startsWith("Sending GET to https://api/v1/markets/status/");
     assertThat(out).endsWith(System.lineSeparator());

@@ -42,7 +42,7 @@ import org.jspecify.annotations.Nullable;
  */
 final class StatusCache {
 
-  private static final Logger LOGGER = Logger.getLogger(StatusCache.class.getName());
+  private static final Logger LOGGER = Logger.getLogger(MarketDataLogging.SDK_LOGGER_NAME);
 
   static final Duration REFRESH_THRESHOLD = Duration.ofSeconds(270);
   static final Duration EXPIRY = Duration.ofSeconds(300);
