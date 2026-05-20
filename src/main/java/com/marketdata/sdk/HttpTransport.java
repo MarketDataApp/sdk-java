@@ -207,10 +207,27 @@ final class HttpTransport implements AutoCloseable {
         "Rate limit exhausted: 0 requests remaining (resets at " + snap.reset() + ")", context);
   }
 
+  /**
+   * Path of the {@code /status/} endpoint the {@link StatusCache} fetches. Hardcoded to the
+   * canonical no-prefix shape because today every {@link MarketDataClient} construction lands the
+   * endpoint at exactly this path; if a {@code baseUrl} with a path prefix ever ships (e.g. {@code
+   * https://corp/proxy}), the self-referential bypass below would silently stop applying and need
+   * to switch to a {@link URI} stored on the cache at construction time.
+   */
+  private static final String STATUS_ENDPOINT_PATH = "/status/";
+
   private boolean cacheAllowsRetry(URI uri) {
     StatusCache cache = statusCacheSupplier.get();
     if (cache == null) {
       return true; // pre-wire state or test setup without a cache
+    }
+    // Self-referential bypass: the cache's own fetcher targets /status/. If we consulted the
+    // cache for retries of that fetch and the snapshot reported /status/ offline (or any
+    // wildcard match grazed it), the retry would be blocked — and because no successful fetch
+    // can land, the snapshot would stay frozen in that "offline" state forever. Skip the cache
+    // for /status/ so the §9.5 gate cannot trap its own refresh.
+    if (STATUS_ENDPOINT_PATH.equals(uri.getPath())) {
+      return true;
     }
     return cache.check(uri) == StatusCache.Decision.ALLOW;
   }

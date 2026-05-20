@@ -682,6 +682,102 @@ class HttpTransportTest {
     assertThat(client.captured).hasSize(4);
   }
 
+  /**
+   * Self-referential bypass: even when the cache reports the /status/ service offline, retries of
+   * the /status/ fetch itself must proceed — otherwise the cache could never refresh out of an
+   * "offline" snapshot and would stay frozen in that state indefinitely.
+   */
+  @Test
+  void cacheDoesNotBlockRetriesOnTheStatusEndpointEvenWhenSnapshotMarksItOffline()
+      throws Exception {
+    com.marketdata.sdk.utilities.ApiStatus statusItselfOffline =
+        new com.marketdata.sdk.utilities.ApiStatus(
+            java.util.List.of(
+                new com.marketdata.sdk.utilities.ServiceStatus(
+                    "/status/",
+                    "offline",
+                    false,
+                    0.5,
+                    0.5,
+                    java.time.Instant.EPOCH.atZone(MarketDataDates.MARKET_ZONE))));
+    StatusCache cache =
+        new StatusCache(
+            () -> CompletableFuture.completedFuture(statusItselfOffline),
+            java.time.Clock.systemUTC());
+    cache.triggerRefresh();
+    Thread.sleep(20);
+
+    // Confirm the snapshot really would BLOCK /status/ retries if the bypass didn't exist.
+    assertThat(cache.check(URI.create("http://localhost/status/")))
+        .isEqualTo(StatusCache.Decision.BLOCK);
+
+    RetryPolicy fourAttempts = new RetryPolicy(4, Duration.ofMillis(1), Duration.ofMillis(1));
+    CapturingClient client =
+        new CapturingClient(503, new byte[0], HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport =
+        new HttpTransport(
+            "http://localhost",
+            "v1",
+            "test/0.0",
+            "secret-token",
+            new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
+            new RetryExecutor(fourAttempts),
+            () -> cache,
+            Clock.systemUTC());
+
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("status").unversioned().build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(ServerError.class);
+
+    // All 4 attempts run: the bypass kicked in for the /status/ path, so the cache did not
+    // veto. Without the bypass this would be 1.
+    assertThat(client.captured).hasSize(4);
+  }
+
+  @Test
+  void selfReferentialBypassDoesNotLeakToOtherEndpoints() throws Exception {
+    // Regression guard: the bypass for /status/ must NOT generalize. A different endpoint
+    // marked offline should still BLOCK retries as today.
+    com.marketdata.sdk.utilities.ApiStatus quotesOffline =
+        new com.marketdata.sdk.utilities.ApiStatus(
+            java.util.List.of(
+                new com.marketdata.sdk.utilities.ServiceStatus(
+                    "/v1/markets/quotes/",
+                    "offline",
+                    false,
+                    0.5,
+                    0.5,
+                    java.time.Instant.EPOCH.atZone(MarketDataDates.MARKET_ZONE))));
+    StatusCache cache =
+        new StatusCache(
+            () -> CompletableFuture.completedFuture(quotesOffline), java.time.Clock.systemUTC());
+    cache.triggerRefresh();
+    Thread.sleep(20);
+
+    RetryPolicy fourAttempts = new RetryPolicy(4, Duration.ofMillis(1), Duration.ofMillis(1));
+    CapturingClient client =
+        new CapturingClient(503, new byte[0], HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport =
+        new HttpTransport(
+            "http://localhost",
+            "v1",
+            "test/0.0",
+            "secret-token",
+            new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
+            new RetryExecutor(fourAttempts),
+            () -> cache,
+            Clock.systemUTC());
+
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/quotes").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(ServerError.class);
+
+    // Cache vetoed: only 1 attempt, no retries. The bypass is /status/-specific.
+    assertThat(client.captured).hasSize(1);
+  }
+
   // ---------- stub HttpClient ----------
 
   /**
