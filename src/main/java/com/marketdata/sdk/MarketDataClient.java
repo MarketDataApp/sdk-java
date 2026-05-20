@@ -95,11 +95,27 @@ public final class MarketDataClient implements AutoCloseable {
             "marketdata-sdk-java/" + Version.sdkVersion(),
             config.apiKey(),
             cacheRef::get);
-    JsonResponseParser parser = new JsonResponseParser();
-    this.utilities = new UtilitiesResource(transport, parser);
-    cacheRef.set(
-        new StatusCache(
-            () -> utilities.statusAsync().thenApply(Response::data), Clock.systemUTC()));
+    // Partial-construction guard: from here on the transport is a live AutoCloseable that holds
+    // the shared HttpClient and the 50-permit AsyncSemaphore. If any subsequent constructor
+    // throws (today none do, but a future change in UtilitiesResource / StatusCache could),
+    // the caller never receives a reference, their try-with-resources never fires, and the
+    // transport leaks until GC. Close it explicitly and surface the close failure (if any) as
+    // a suppressed exception on the primary cause — same pattern runStartupValidation already
+    // uses for the validation path.
+    try {
+      JsonResponseParser parser = new JsonResponseParser();
+      this.utilities = new UtilitiesResource(transport, parser);
+      cacheRef.set(
+          new StatusCache(
+              () -> utilities.statusAsync().thenApply(Response::data), Clock.systemUTC()));
+    } catch (Throwable t) {
+      try {
+        transport.close();
+      } catch (Throwable closeFailure) {
+        t.addSuppressed(closeFailure);
+      }
+      throw t;
+    }
 
     if (validateOnStartup) {
       runStartupValidation();
