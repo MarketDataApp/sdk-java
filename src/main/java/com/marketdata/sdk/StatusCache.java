@@ -66,6 +66,14 @@ final class StatusCache {
         snap == null || Duration.between(snap.fetchedAt, now).compareTo(REFRESH_THRESHOLD) >= 0;
     if (refreshNeeded) {
       triggerRefresh();
+      // Issue #19: re-read after triggerRefresh in case the fetcher completed synchronously (a
+      // test stub returning CompletableFuture.completedFuture, or any synchronous-by-design
+      // implementation). Without this re-read, a cold start always answers ALLOW — the local
+      // `snap` reference is still the null we captured above, even though `snapshot.get()` may
+      // now hold a fresh value populated by the synchronous whenComplete that ran inside
+      // triggerRefresh. The bug surfaces in production as "first request after startup against a
+      // known-offline service always burns the retry budget".
+      snap = snapshot.get();
     }
 
     boolean usable = snap != null && Duration.between(snap.fetchedAt, now).compareTo(EXPIRY) < 0;
@@ -113,12 +121,21 @@ final class StatusCache {
   /**
    * Find the cached status for the service whose path is the longest prefix of {@code uri}'s path.
    * Returns {@code null} when no service matches.
+   *
+   * <p>Issue #18: keys are normalized to end with {@code /} at snapshot-construction time and we
+   * also append {@code /} to the input path before comparing. Without this, a key {@code /v1/stock}
+   * would falsely match {@code /v1/stocks/quotes/AAPL/} (path component boundary not respected) and
+   * one malformed/truncated server-side entry could block retries for an unrelated service.
    */
   private static @Nullable String lookupService(Snapshot snap, URI uri) {
     String path = uri.getPath();
+    if (path == null) {
+      return null;
+    }
+    String normalizedPath = path.endsWith("/") ? path : path + "/";
     String bestKey = null;
     for (String key : snap.serviceToStatus.keySet()) {
-      if (path.startsWith(key) && (bestKey == null || key.length() > bestKey.length())) {
+      if (normalizedPath.startsWith(key) && (bestKey == null || key.length() > bestKey.length())) {
         bestKey = key;
       }
     }
@@ -138,7 +155,11 @@ final class StatusCache {
     static Snapshot from(ApiStatus apiStatus, Instant fetchedAt) {
       Map<String, String> map = new HashMap<>(apiStatus.services().size());
       for (ServiceStatus s : apiStatus.services()) {
-        map.put(s.service(), s.status());
+        // Issue #18: store with a trailing slash so path-boundary matching is correct. The
+        // server's `service` field is not contractually trailing-slashed; canonicalizing here
+        // (rather than in lookupService) keeps the hot read path simple.
+        String key = s.service().endsWith("/") ? s.service() : s.service() + "/";
+        map.put(key, s.status());
       }
       return new Snapshot(fetchedAt, Map.copyOf(map));
     }

@@ -134,11 +134,19 @@ class StatusCacheTest {
   void expiredCacheReturnsAllowAndRefreshes() {
     FixedClock clock = new FixedClock(Instant.parse("2026-01-01T00:00:00Z"));
     AtomicInteger refreshCalls = new AtomicInteger();
+    // First call returns synchronously to populate the cache; subsequent calls return a future
+    // that never completes — so the refresh is genuinely in-flight when we measure the decision,
+    // matching real-world async behavior. With the #19 fix, a synchronous-completing refresh
+    // would otherwise immediately overwrite the stale snapshot and the "stale → unknown → ALLOW"
+    // invariant would be untestable.
     StatusCache cache =
         new StatusCache(
             () -> {
-              refreshCalls.incrementAndGet();
-              return CompletableFuture.completedFuture(snapshot("/v1/x/", "offline"));
+              int n = refreshCalls.incrementAndGet();
+              if (n == 1) {
+                return CompletableFuture.completedFuture(snapshot("/v1/x/", "offline"));
+              }
+              return new CompletableFuture<>(); // never completes
             },
             clock);
     cache.triggerRefresh();
@@ -277,5 +285,65 @@ class StatusCacheTest {
     StatusCache.Decision d = cache.check(URI.create("http://api/status/"));
 
     assertThat(d).isEqualTo(StatusCache.Decision.ALLOW);
+  }
+
+  /**
+   * Issue #18: a truncated or malformed service entry like {@code /v1/stock} must NOT match the
+   * unrelated {@code /v1/stocks/...} endpoint. Without path-boundary normalization, one bad
+   * snapshot entry could block retries across an entire family of services.
+   */
+  @Test
+  void shorterServiceKeyDoesNotFalselyMatchLongerPath() {
+    FixedClock clock = new FixedClock(Instant.parse("2026-01-01T00:00:00Z"));
+    // Note: `/v1/stock` (no trailing slash, no `s`) — a truncated entry. With the trailing-slash
+    // normalization the cache key becomes `/v1/stock/`, which is NOT a path prefix of
+    // `/v1/stocks/quotes/AAPL/`.
+    StatusCache cache =
+        new StatusCache(
+            () -> CompletableFuture.completedFuture(snapshot("/v1/stock", "offline")), clock);
+    cache.triggerRefresh();
+
+    StatusCache.Decision d = cache.check(URI.create("http://api/v1/stocks/quotes/AAPL/"));
+
+    assertThat(d).isEqualTo(StatusCache.Decision.ALLOW);
+  }
+
+  /**
+   * Issue #18 positive case: a key that IS a real path-prefix still matches even when the server
+   * emits it without the trailing slash. The normalization is two-way (key + lookup path).
+   */
+  @Test
+  void serverKeyWithoutTrailingSlashStillMatchesGenuinePrefix() {
+    FixedClock clock = new FixedClock(Instant.parse("2026-01-01T00:00:00Z"));
+    StatusCache cache =
+        new StatusCache(
+            () -> CompletableFuture.completedFuture(snapshot("/v1/stocks/quotes", "offline")),
+            clock);
+    cache.triggerRefresh();
+
+    StatusCache.Decision d = cache.check(URI.create("http://api/v1/stocks/quotes/AAPL/"));
+
+    assertThat(d).isEqualTo(StatusCache.Decision.BLOCK);
+  }
+
+  /**
+   * Issue #19: with a synchronous fetcher, the snapshot is populated before {@code check} returns,
+   * so a cold start against a known-offline service must already see the BLOCK decision on the
+   * first call. Pre-fix the local {@code snap} reference was captured before {@code triggerRefresh}
+   * and never re-read, so the first call always answered ALLOW — burning the retry budget against a
+   * service the API had just reported offline.
+   */
+  @Test
+  void coldStartWithSyncFetcherUsesFreshSnapshotOnFirstCall() {
+    FixedClock clock = new FixedClock(Instant.parse("2026-01-01T00:00:00Z"));
+    StatusCache cache =
+        new StatusCache(
+            () -> CompletableFuture.completedFuture(snapshot("/v1/x/", "offline")), clock);
+
+    // No pre-warm — this is the very first check. The fetcher completes synchronously inside
+    // triggerRefresh and must populate the snapshot in time for the same call to use it.
+    StatusCache.Decision d = cache.check(URI.create("http://api/v1/x/"));
+
+    assertThat(d).isEqualTo(StatusCache.Decision.BLOCK);
   }
 }

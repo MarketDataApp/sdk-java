@@ -5,6 +5,7 @@ import com.marketdata.sdk.exception.NetworkError;
 import com.marketdata.sdk.exception.ServerError;
 import java.io.IOException;
 import java.time.Duration;
+import java.util.logging.Logger;
 
 /**
  * Decides which failures get retried and how long to wait between attempts. Per SDK requirements
@@ -28,6 +29,19 @@ import java.time.Duration;
  * external runtime state this class doesn't see.
  */
 final class RetryPolicy {
+
+  private static final Logger LOGGER = Logger.getLogger(MarketDataLogging.SDK_LOGGER_NAME);
+
+  /**
+   * Issue #21: hard cap on the server-supplied {@code Retry-After} the SDK will honor for its
+   * automatic retry. A compromised or buggy backend that emits {@code Retry-After: 9999999999}
+   * would otherwise freeze the next attempt for ~292 billion years inside the {@code
+   * delayedExecutor}. Above this threshold the SDK logs a warning and falls back to its calculated
+   * exponential backoff — the server's hint is still visible to consumers via {@code
+   * ServerError.getRetryAfter()} so they can decide on their own (e.g. surface to humans, schedule
+   * a real cool-off) without the SDK silently holding a thread for hours.
+   */
+  static final Duration MAX_RETRY_AFTER = Duration.ofMinutes(10);
 
   private final int maxAttempts;
   private final Duration initialBackoff;
@@ -78,7 +92,21 @@ final class RetryPolicy {
     if (cause instanceof ServerError server) {
       Duration override = server.getRetryAfter().orElse(null);
       if (override != null) {
-        return override;
+        if (override.compareTo(MAX_RETRY_AFTER) > 0) {
+          // Issue #21: server-supplied delay exceeds the SDK's hard cap. Log and fall through
+          // to the calculated exponential backoff. The unbounded value is still preserved on the
+          // ServerError instance for consumer inspection — only the SDK's own automatic wait is
+          // capped.
+          LOGGER.warning(
+              () ->
+                  "Server-supplied Retry-After of "
+                      + override.toSeconds()
+                      + "s exceeds cap of "
+                      + MAX_RETRY_AFTER.toSeconds()
+                      + "s; ignoring and using calculated exponential backoff");
+        } else {
+          return override;
+        }
       }
     }
     return backoffDelay(attempt);
@@ -116,7 +144,13 @@ final class RetryPolicy {
       // ConnectException, HttpTimeoutException, ...) and sync-throws from httpClient.sendAsync
       // (NPE, IllegalArgumentException — bugs, not network). Retry only the former; the latter
       // is deterministic and just burns the backoff for the same crash.
-      return net.getCause() instanceof IOException;
+      //
+      // Issue #15: walk the full cause chain rather than only checking the direct cause. JDK
+      // HttpClient under HTTP/2 multiplexing (and some JDK versions) can present an IOException
+      // nested under an ExecutionException/CompletionException wrapper that HttpDispatcher's
+      // single-level unwrap doesn't peel. Without the walk those legitimate transport failures
+      // fall out of retry silently — the SDK loses §9 resilience only under load.
+      return hasIoExceptionInCauseChain(net.getCause());
     }
     if (cause instanceof ServerError server) {
       int status = server.getStatusCode();
@@ -127,6 +161,31 @@ final class RetryPolicy {
     }
     // AuthenticationError, BadRequestError, RateLimitError, NotFoundError, ParseError: §9 says
     // never retry 4xx, and ParseError is deterministic.
+    return false;
+  }
+
+  /**
+   * Walks {@code t}'s {@link Throwable#getCause()} chain looking for an {@link IOException}.
+   * Returns {@code false} for a {@code null} root. The walk caps at a defensive depth and tracks
+   * visited frames so a malformed cycle (theoretically impossible per {@link Throwable}'s contract,
+   * but cheap to guard) cannot spin the retry decision.
+   */
+  private static boolean hasIoExceptionInCauseChain(
+      @org.jspecify.annotations.Nullable Throwable t) {
+    Throwable current = t;
+    int depth = 0;
+    while (current != null && depth < 16) {
+      if (current instanceof IOException) {
+        return true;
+      }
+      Throwable next = current.getCause();
+      if (next == current) {
+        // Self-cycle — getCause() of an exception that wraps itself. Bail out.
+        return false;
+      }
+      current = next;
+      depth++;
+    }
     return false;
   }
 }

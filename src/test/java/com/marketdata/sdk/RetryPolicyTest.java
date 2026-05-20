@@ -59,6 +59,49 @@ class RetryPolicyTest {
     assertThat(DEFAULTS.shouldRetry(syncThrow, 0)).isFalse();
   }
 
+  /**
+   * Issue #15: under HTTP/2 multiplexing (and certain JDK builds) a real IOException can be
+   * delivered nested two levels deep — typically {@code ExecutionException → IOException} — because
+   * HttpDispatcher's unwrap peels only one CompletionException layer. The retry decision must walk
+   * the chain or this resilience gap surfaces only in production under load.
+   */
+  @Test
+  void networkErrorsWithIoExceptionNestedInCauseChainAreRetriable() {
+    NetworkError nested =
+        new NetworkError(
+            "wrapped failure",
+            ctxNoResponse(),
+            new java.util.concurrent.ExecutionException(
+                new java.io.IOException("connect reset by peer")));
+    assertThat(DEFAULTS.shouldRetry(nested, 0)).isTrue();
+  }
+
+  @Test
+  void networkErrorsWithDeeplyNestedIoExceptionAreRetriable() {
+    // Three wrapper layers — the walk must still find the IOException at the bottom.
+    NetworkError deep =
+        new NetworkError(
+            "thrice wrapped",
+            ctxNoResponse(),
+            new java.util.concurrent.CompletionException(
+                new java.util.concurrent.ExecutionException(
+                    new RuntimeException(new java.io.IOException("socket closed")))));
+    assertThat(DEFAULTS.shouldRetry(deep, 0)).isTrue();
+  }
+
+  @Test
+  void networkErrorsWithDeeplyNestedNonIoCauseAreNotRetriable() {
+    // Regression guard: the walk must not classify any nested cause as IO — it has to find an
+    // IOException specifically. A chain of non-IO causes still surfaces as non-retriable.
+    NetworkError nonIo =
+        new NetworkError(
+            "thrice wrapped non-IO",
+            ctxNoResponse(),
+            new java.util.concurrent.ExecutionException(
+                new RuntimeException(new IllegalArgumentException("bug"))));
+    assertThat(DEFAULTS.shouldRetry(nonIo, 0)).isFalse();
+  }
+
   @Test
   void status500IsNotRetriable() {
     ServerError err = new ServerError("500", ctxWithStatus(500));
@@ -204,6 +247,42 @@ class RetryPolicyTest {
     // NetworkError doesn't carry Retry-After at all → exponential math.
     NetworkError net = new NetworkError("n", ctxNoResponse(), new IOException("down"));
     assertThat(DEFAULTS.backoffDelay(net, 1)).isEqualTo(Duration.ofSeconds(2));
+  }
+
+  /**
+   * Issue #21: a server emitting an unbounded {@code Retry-After} (compromised, buggy, or a
+   * malicious upstream proxy) must not freeze the SDK's automatic retry for an unreasonable
+   * duration. Above {@link RetryPolicy#MAX_RETRY_AFTER} the SDK falls back to its calculated
+   * exponential backoff. The server's hint itself is still preserved on {@code ServerError} so
+   * consumers can decide what to do with it.
+   */
+  @Test
+  void backoffIgnoresRetryAfterAboveCapAndFallsBackToExponential() {
+    ServerError pathological =
+        new ServerError(
+            "503",
+            ctxWithStatus(503),
+            null,
+            // Cap is 10 min; this would block the SDK for 1 day if honored verbatim.
+            Duration.ofDays(1));
+
+    // attempt 0 would be 1s exponential; that's what we expect since the 1d Retry-After is
+    // above the cap and ignored.
+    assertThat(DEFAULTS.backoffDelay(pathological, 0)).isEqualTo(Duration.ofSeconds(1));
+    // attempt 3 would be 8s exponential.
+    assertThat(DEFAULTS.backoffDelay(pathological, 3)).isEqualTo(Duration.ofSeconds(8));
+    // The original ServerError still carries the raw value — consumers see what the server said.
+    assertThat(pathological.getRetryAfter()).contains(Duration.ofDays(1));
+  }
+
+  @Test
+  void backoffHonorsRetryAfterRightAtTheCap() {
+    // Boundary: exactly MAX_RETRY_AFTER (10 min) is honored verbatim — only values strictly above
+    // the cap fall back to exponential.
+    ServerError atCap =
+        new ServerError("503", ctxWithStatus(503), null, RetryPolicy.MAX_RETRY_AFTER);
+
+    assertThat(DEFAULTS.backoffDelay(atCap, 0)).isEqualTo(RetryPolicy.MAX_RETRY_AFTER);
   }
 
   @Test
