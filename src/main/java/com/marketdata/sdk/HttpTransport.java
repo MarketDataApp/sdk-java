@@ -66,6 +66,8 @@ final class HttpTransport implements AutoCloseable {
   private final String apiVersion;
   private final String userAgent;
   private final @Nullable String token;
+  /** URI the StatusCache's own fetcher targets; matched verbatim by cacheAllowsRetry. */
+  private final URI statusEndpointUri;
 
   /**
    * Canonical constructor — all dependencies explicit. Production code uses {@link
@@ -97,6 +99,10 @@ final class HttpTransport implements AutoCloseable {
     this.retryExecutor = retryExecutor;
     this.statusCacheSupplier = statusCacheSupplier;
     this.clock = clock;
+    // Derive from baseUrl so a path-prefixed base (e.g. https://corp/proxy) still matches the
+    // /status/ self-referential bypass. Hardcoding "/status/" would silently stop working in
+    // that case.
+    this.statusEndpointUri = buildUri(RequestSpec.get("status").unversioned().build());
   }
 
   /**
@@ -110,15 +116,16 @@ final class HttpTransport implements AutoCloseable {
       String userAgent,
       @Nullable String token,
       Supplier<@Nullable StatusCache> statusCacheSupplier) {
+    Clock clock = Clock.systemUTC();
     return new HttpTransport(
         baseUrl,
         apiVersion,
         userAgent,
         token,
-        new HttpDispatcher(defaultHttpClient(), CONCURRENCY_LIMIT),
+        new HttpDispatcher(defaultHttpClient(), CONCURRENCY_LIMIT, clock),
         new RetryExecutor(RetryPolicy.defaults()),
         statusCacheSupplier,
-        Clock.systemUTC());
+        clock);
   }
 
   private static HttpClient defaultHttpClient() {
@@ -208,26 +215,18 @@ final class HttpTransport implements AutoCloseable {
         "Rate limit exhausted: 0 requests remaining (resets at " + snap.reset() + ")", context);
   }
 
-  /**
-   * Path of the {@code /status/} endpoint the {@link StatusCache} fetches. Hardcoded to the
-   * canonical no-prefix shape because today every {@link MarketDataClient} construction lands the
-   * endpoint at exactly this path; if a {@code baseUrl} with a path prefix ever ships (e.g. {@code
-   * https://corp/proxy}), the self-referential bypass below would silently stop applying and need
-   * to switch to a {@link URI} stored on the cache at construction time.
-   */
-  private static final String STATUS_ENDPOINT_PATH = "/status/";
-
   private boolean cacheAllowsRetry(URI uri) {
     StatusCache cache = statusCacheSupplier.get();
     if (cache == null) {
       return true; // pre-wire state or test setup without a cache
     }
-    // Self-referential bypass: the cache's own fetcher targets /status/. If we consulted the
-    // cache for retries of that fetch and the snapshot reported /status/ offline (or any
-    // wildcard match grazed it), the retry would be blocked — and because no successful fetch
-    // can land, the snapshot would stay frozen in that "offline" state forever. Skip the cache
-    // for /status/ so the §9.5 gate cannot trap its own refresh.
-    if (STATUS_ENDPOINT_PATH.equals(uri.getPath())) {
+    // Self-referential bypass: the cache's own fetcher targets statusEndpointUri. If we
+    // consulted the cache for retries of that fetch and the snapshot reported /status/ offline
+    // (or any wildcard match grazed it), the retry would be blocked — and because no
+    // successful fetch can land, the snapshot would stay frozen in that "offline" state
+    // forever. Skip the cache for the /status/ URI so the §9.5 gate cannot trap its own
+    // refresh.
+    if (statusEndpointUri.equals(uri)) {
       return true;
     }
     return cache.check(uri) == StatusCache.Decision.ALLOW;
@@ -239,6 +238,17 @@ final class HttpTransport implements AutoCloseable {
    */
   HttpResponseEnvelope executeSync(RequestSpec spec) {
     return joinSync(executeAsync(spec));
+  }
+
+  /** Instance bridge for resources: uses this transport's {@link Clock} for fallback errors. */
+  <T> T joinSync(CompletableFuture<T> future) {
+    try {
+      return future.join();
+    } catch (CompletionException e) {
+      throw asRuntime(e.getCause(), clock);
+    } catch (CancellationException e) {
+      throw asRuntime(e, clock);
+    }
   }
 
   @Override
@@ -274,7 +284,7 @@ final class HttpTransport implements AutoCloseable {
     if ((status >= 200 && status < 300) || status == 404) {
       return new HttpResponseEnvelope(response.body(), status, requestId, response.headers(), uri);
     }
-    Instant now = Instant.now();
+    Instant now = clock.instant();
     ErrorContext context = ErrorContext.forResponse(uri.toString(), status, requestId, now);
     Duration retryAfter =
         response
@@ -313,7 +323,7 @@ final class HttpTransport implements AutoCloseable {
       sb.append(apiVersion).append('/');
     }
     sb.append(path);
-    if (!path.endsWith("/")) {
+    if (!path.isEmpty() && !path.endsWith("/")) {
       sb.append('/');
     }
     Map<String, String> params = spec.queryParams();
@@ -359,29 +369,11 @@ final class HttpTransport implements AutoCloseable {
     return b.build();
   }
 
-  /**
-   * Sync bridge for resource façades: waits on {@code future}, unwrapping {@link
-   * CompletionException} so the caller sees the underlying {@link MarketDataException} directly
-   * (ADR-006), and routing cancellations through {@link #asRuntime} so the surface is uniform.
-   *
-   * <p>One place to fix the sync semantics; every {@code public T xxx()} wrapper in a resource is
-   * just {@code return joinSync(xxxAsync())}.
-   */
-  static <T> T joinSync(CompletableFuture<T> future) {
-    try {
-      return future.join();
-    } catch (CompletionException e) {
-      throw asRuntime(e.getCause());
-    } catch (CancellationException e) {
-      throw asRuntime(e);
-    }
-  }
-
   // Visible for tests: under the current SDK design, executeAsync always wraps failures as
   // MarketDataException so the MDE branch is the only one reached from the public surface.
   // The other two branches are defensive guardrails — extracted so they can be exercised
   // directly by tests rather than relying on a synthetic public-API path.
-  static RuntimeException asRuntime(@Nullable Throwable cause) {
+  static RuntimeException asRuntime(@Nullable Throwable cause, Clock clock) {
     if (cause instanceof MarketDataException mde) {
       return mde;
     }
@@ -390,7 +382,7 @@ final class HttpTransport implements AutoCloseable {
     }
     return new NetworkError(
         "Unexpected failure invoking SDK",
-        ErrorContext.forNoResponse("(unknown)", Instant.now()),
+        ErrorContext.forNoResponse("(unknown)", clock.instant()),
         cause);
   }
 }

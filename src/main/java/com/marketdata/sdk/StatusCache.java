@@ -12,6 +12,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -39,6 +41,8 @@ import org.jspecify.annotations.Nullable;
  * Decision#ALLOW}s them, per §9.5.
  */
 final class StatusCache {
+
+  private static final Logger LOGGER = Logger.getLogger(StatusCache.class.getName());
 
   static final Duration REFRESH_THRESHOLD = Duration.ofSeconds(270);
   static final Duration EXPIRY = Duration.ofSeconds(300);
@@ -83,6 +87,10 @@ final class StatusCache {
     try {
       future = fetcher.get();
     } catch (Throwable t) {
+      // Sync-throw from the fetcher (rare — most failures arrive as a failed future). Log so a
+      // permanently-broken fetcher doesn't degrade silently into "stale snapshot forever".
+      LOGGER.log(
+          Level.WARNING, "StatusCache fetcher threw synchronously; snapshot persists.", t);
       refreshInFlight.set(false);
       return;
     }
@@ -91,8 +99,12 @@ final class StatusCache {
           try {
             if (err == null && apiStatus != null) {
               snapshot.set(Snapshot.from(apiStatus, clock.instant()));
+            } else if (err != null) {
+              // On error: cache persists — §9.5 "Cache persists across failed refresh attempts" —
+              // but the failure is logged so operators can detect a /status/ outage instead of
+              // wondering why the SDK keeps blocking retries against a stale snapshot.
+              LOGGER.log(Level.WARNING, "StatusCache refresh failed; snapshot persists.", err);
             }
-            // On error: cache persists — §9.5 "Cache persists across failed refresh attempts".
           } finally {
             refreshInFlight.set(false);
           }

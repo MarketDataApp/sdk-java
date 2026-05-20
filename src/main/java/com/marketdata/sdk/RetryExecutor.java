@@ -79,16 +79,17 @@ final class RetryExecutor {
       AtomicReference<@Nullable CompletableFuture<T>> currentAttempt) {
     if (result.isDone()) {
       // Caller cancelled (or completed exceptionally from a previous attempt's whenComplete).
-      // Don't invoke the supplier again.
+      // Don't invoke the supplier again. Checking isDone() (not just isCancelled()) avoids
+      // running a fresh attempt after the previous one's whenComplete completed `result`.
       return;
     }
     CompletableFuture<T> dispatched = supplier.get();
     currentAttempt.set(dispatched);
 
-    // If the caller cancelled `result` between attempts (during a backoff window), the handler
-    // installed in execute() has fired but `currentAttempt` was either null or pointing to
-    // the previous (already-done) attempt — so the new attempt was never cancelled. Check
-    // here and propagate immediately.
+    // Race: `result.cancel(...)` may have fired between the isDone() check above and the
+    // currentAttempt.set() call. The cancellation handler in execute() observes
+    // currentAttempt under that race: if it sees the previous (already-done) attempt, it
+    // doesn't cancel the new one. Re-check after publishing the new attempt.
     if (result.isCancelled() && !dispatched.isDone()) {
       dispatched.cancel(false);
       return;

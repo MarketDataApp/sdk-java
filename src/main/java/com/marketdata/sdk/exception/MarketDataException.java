@@ -1,5 +1,7 @@
 package com.marketdata.sdk.exception;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -31,8 +33,31 @@ public abstract sealed class MarketDataException extends RuntimeException
     return context.requestId();
   }
 
+  /**
+   * The request URL with any query string redacted (replaced by {@code ?…}). Mirrors the SDK's
+   * ambient-log policy — query strings can carry PII (account IDs), competitive signal (queried
+   * symbols), or hypothetical future credentials, none of which should land in consumer logs
+   * just because someone called {@code logger.error("Request failed: " + ex.getRequestUrl())}.
+   * The full URI (with query) is preserved internally; use {@link #getContext()} when raw access
+   * is genuinely needed for diagnostics that won't be persisted.
+   */
   public String getRequestUrl() {
-    return context.requestUrl();
+    return redactQuery(context.requestUrl());
+  }
+
+  private static String redactQuery(String rawUrl) {
+    try {
+      URI uri = new URI(rawUrl);
+      if (uri.getRawQuery() == null) {
+        return rawUrl;
+      }
+      int qIndex = rawUrl.indexOf('?');
+      return qIndex < 0 ? rawUrl : rawUrl.substring(0, qIndex) + "?…";
+    } catch (URISyntaxException e) {
+      // Defensive: never throw from a getter. If the stored URL is malformed, return verbatim —
+      // it's the consumer's problem to diagnose, but not one to compound by hiding everything.
+      return rawUrl;
+    }
   }
 
   public int getStatusCode() {

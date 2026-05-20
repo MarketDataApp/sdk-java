@@ -6,32 +6,41 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Loads {@code .env} key=value pairs from disk. {@code .env} is the third tier of the configuration
  * cascade (after explicit args and env vars), and is optional — a missing file is normal and never
- * logs. However, an <em>existing</em> file that the SDK fails to read is suspicious: the user
- * placed a {@code .env} expecting it to apply, and silently falling through to defaults would
- * surface later as a confusing {@code AuthenticationError} with no breadcrumb. In that case we emit
- * a WARNING and still degrade to an empty map, so {@link Configuration#resolve} can fall through
- * the cascade rather than failing startup.
+ * reports a warning. However, an <em>existing</em> file that the SDK fails to read is suspicious:
+ * the user placed a {@code .env} expecting it to apply, and silently falling through to defaults
+ * would surface later as a confusing {@code AuthenticationError} with no breadcrumb.
+ *
+ * <p>Warnings are collected into a caller-supplied sink rather than emitted via the SDK logger
+ * directly. The loader runs inside {@link Configuration#resolve} which itself runs <em>before</em>
+ * {@link MarketDataLogging#configure}, so logging from here would land on an unconfigured JUL
+ * logger — wrong format, possibly invisible. {@link MarketDataClient} drains the sink after
+ * configuring logging, so the breadcrumb reaches its intended destination.
  */
 final class DotEnvLoader {
 
-  private static final Logger LOG = Logger.getLogger(MarketDataLogging.SDK_LOGGER_NAME);
+  /** Diagnostic emitted by the loader, replayed by {@link MarketDataClient} after logging setup. */
+  record Warning(Level level, String message, @Nullable Throwable cause) {}
 
-  static Map<String, String> load(Path path) {
+  static Map<String, String> load(Path path, Consumer<Warning> warnings) {
     if (!Files.exists(path)) {
       return Map.of();
     }
     if (!Files.isReadable(path)) {
-      LOG.log(
-          Level.WARNING,
-          "Found .env at {0} but it is not readable (permission denied?) — falling back to env"
-              + " vars/defaults.",
-          path);
+      warnings.accept(
+          new Warning(
+              Level.WARNING,
+              "Found .env at "
+                  + path
+                  + " but it is not readable (permission denied?) — falling back to env"
+                  + " vars/defaults.",
+              null));
       return Map.of();
     }
     Map<String, String> result = new LinkedHashMap<>();
@@ -50,10 +59,11 @@ final class DotEnvLoader {
         result.put(key, value);
       }
     } catch (IOException e) {
-      LOG.log(
-          Level.WARNING,
-          "Failed to read .env at " + path + " — falling back to env vars/defaults.",
-          e);
+      warnings.accept(
+          new Warning(
+              Level.WARNING,
+              "Failed to read .env at " + path + " — falling back to env vars/defaults.",
+              e));
       return Map.of();
     }
     return Map.copyOf(result);

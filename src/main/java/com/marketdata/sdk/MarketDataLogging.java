@@ -53,7 +53,22 @@ final class MarketDataLogging {
    *     {@link #DEFAULT_LEVEL}.
    */
   static void configure(@Nullable String levelSpec) {
+    Level requested = parseLevel(levelSpec);
     if (!configured.compareAndSet(false, true)) {
+      // Already configured. If the caller is asking for a different level than the first call
+      // installed, the result is "their level is silently ignored" — flag it at DEBUG so a
+      // test that sees stale logging knows where to look, without spamming production where
+      // re-creating the client is normal.
+      Level installed = Logger.getLogger(SDK_LOGGER_NAME).getLevel();
+      if (installed != null && !installed.equals(requested)) {
+        LOG.fine(
+            () ->
+                "MarketDataLogging.configure called with level "
+                    + requested.getName()
+                    + " but logger is already configured at "
+                    + installed.getName()
+                    + "; ignoring (first-call-wins).");
+      }
       return;
     }
     Logger sdkLogger = Logger.getLogger(SDK_LOGGER_NAME);
@@ -71,20 +86,44 @@ final class MarketDataLogging {
     handler.setLevel(Level.ALL);
     sdkLogger.addHandler(handler);
     sdkLogger.setUseParentHandlers(false);
-    sdkLogger.setLevel(parseLevel(levelSpec));
+    sdkLogger.setLevel(requested);
   }
+
+  private static final java.util.logging.Logger LOG =
+      java.util.logging.Logger.getLogger(SDK_LOGGER_NAME);
+
+  static final java.util.Set<String> VALID_LEVEL_NAMES =
+      java.util.Set.of("DEBUG", "INFO", "WARNING", "ERROR");
 
   static Level parseLevel(@Nullable String levelSpec) {
     if (levelSpec == null) {
       return DEFAULT_LEVEL;
     }
-    return switch (levelSpec.trim().toUpperCase(Locale.ROOT)) {
-      case "DEBUG" -> Level.FINE;
-      case "INFO" -> Level.INFO;
-      case "WARNING" -> Level.WARNING;
-      case "ERROR" -> Level.SEVERE;
-      default -> DEFAULT_LEVEL; // unknown spec → fall back to default rather than throw
-    };
+    String normalized = levelSpec.trim().toUpperCase(Locale.ROOT);
+    Level resolved =
+        switch (normalized) {
+          case "DEBUG" -> Level.FINE;
+          case "INFO" -> Level.INFO;
+          case "WARNING" -> Level.WARNING;
+          case "ERROR" -> Level.SEVERE;
+          default -> null;
+        };
+    if (resolved != null) {
+      return resolved;
+    }
+    // Unknown spec — fall back to the default level, but loudly. A silent fallback was the
+    // worst of both worlds: the consumer typed something wrong and saw INFO output instead of
+    // the DEBUG they expected, with no breadcrumb pointing at the typo.
+    LOG.warning(
+        () ->
+            "Unrecognized MARKETDATA_LOGGING_LEVEL value '"
+                + levelSpec
+                + "'; expected one of "
+                + VALID_LEVEL_NAMES
+                + ". Falling back to "
+                + DEFAULT_LEVEL.getName()
+                + ".");
+    return DEFAULT_LEVEL;
   }
 
   /**

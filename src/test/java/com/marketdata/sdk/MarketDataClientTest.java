@@ -36,10 +36,12 @@ class MarketDataClientTest {
   }
 
   @Test
-  void no_arg_constructor_resolves_defaults_and_returns_empty_rate_limits(@TempDir Path tmp) {
+  void no_arg_constructor_resolves_defaults_and_returns_null_rate_limits(@TempDir Path tmp) {
     try (MarketDataClient client =
         new MarketDataClient(null, null, null, false, NO_ENV, noDotEnv(tmp))) {
-      assertThat(client.getRateLimits()).isEqualTo(RateLimitSnapshot.EMPTY);
+      // Before any rate-limit-bearing response arrives, the snapshot is null — distinct from a
+      // server-reported (0, 0, EPOCH, 0) snapshot that a real "remaining=0" would produce.
+      assertThat(client.getRateLimits()).isNull();
     }
   }
 
@@ -171,7 +173,7 @@ class MarketDataClientTest {
     // that path here — this test asserts config resolution and token redaction, not the live
     // call. Use the 4-arg variant with validateOnStartup=false to keep this a pure unit test.
     try (MarketDataClient client = new MarketDataClient(null, null, null, false)) {
-      assertThat(client.getRateLimits()).isEqualTo(RateLimitSnapshot.EMPTY);
+      assertThat(client.getRateLimits()).isNull();
       assertThat(client.toString()).startsWith("MarketDataClient[").endsWith("]");
 
       String envToken = System.getenv(EnvVars.TOKEN);

@@ -20,14 +20,6 @@ class RateLimitSnapshotTest {
   }
 
   @Test
-  void empty_snapshot_has_zero_values_and_epoch_reset() {
-    assertThat(RateLimitSnapshot.EMPTY.limit()).isZero();
-    assertThat(RateLimitSnapshot.EMPTY.remaining()).isZero();
-    assertThat(RateLimitSnapshot.EMPTY.consumed()).isZero();
-    assertThat(RateLimitSnapshot.EMPTY.reset()).isEqualTo(Instant.EPOCH);
-  }
-
-  @Test
   void records_with_same_values_are_equal() {
     Instant reset = Instant.parse("2026-05-15T12:00:00Z");
 

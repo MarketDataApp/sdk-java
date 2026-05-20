@@ -2,6 +2,8 @@ package com.marketdata.sdk;
 
 import java.nio.file.Path;
 import java.time.Clock;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.logging.Logger;
@@ -45,8 +47,18 @@ public final class MarketDataClient implements AutoCloseable {
       boolean validateOnStartup,
       Function<String, @Nullable String> env,
       Path dotEnvPath) {
-    this.config = Configuration.resolve(apiKey, baseUrl, apiVersion, env, dotEnvPath);
+    // Collect warnings from the configuration cascade (e.g. an unreadable .env) instead of
+    // letting DotEnvLoader log them directly. The loader runs BEFORE MarketDataLogging.configure
+    // — emitting WARNINGs there would land on an unconfigured JUL logger (wrong format,
+    // possibly invisible), undermining the breadcrumb the WARNING exists to provide.
+    List<DotEnvLoader.Warning> pendingWarnings = new ArrayList<>();
+    this.config =
+        Configuration.resolve(
+            apiKey, baseUrl, apiVersion, env, dotEnvPath, pendingWarnings::add);
     MarketDataLogging.configure(config.loggingLevel());
+    for (DotEnvLoader.Warning w : pendingWarnings) {
+      LOGGER.log(w.level(), w.message(), w.cause());
+    }
     LOGGER.info(
         () ->
             "MarketDataClient initialized: baseUrl="
@@ -106,10 +118,10 @@ public final class MarketDataClient implements AutoCloseable {
       LOGGER.info(() -> "validateOnStartup skipped: demo mode is active (no token configured).");
       return;
     }
-    // Single-attempt: see RetryPolicy#noRetry for why startup doesn't use the default budget
-    // (the consumer would otherwise wait up to ~6.75 min if the API is unreachable).
+    // Intent-named auth probe in UtilitiesResource — single-attempt so a slow/down API surfaces
+    // here within seconds instead of burning the default retry budget (~6.75 min).
     try {
-      utilities.user(RetryPolicy.noRetry());
+      utilities.validateAuth();
     } catch (Throwable t) {
       try {
         close();
@@ -121,12 +133,12 @@ public final class MarketDataClient implements AutoCloseable {
   }
 
   /**
-   * Latest rate-limit snapshot recorded from any successful response. Returns {@link
-   * RateLimitSnapshot#EMPTY} until the first rate-limit-bearing response has arrived; never null.
+   * Latest rate-limit snapshot recorded from any successful response. Returns {@code null} until
+   * the first rate-limit-bearing response has arrived — a real {@code remaining=0} reported by the
+   * server stays observable as {@code snapshot.remaining() == 0}, distinct from "no snapshot yet".
    */
-  public RateLimitSnapshot getRateLimits() {
-    RateLimitSnapshot latest = transport.getLatestRateLimits();
-    return latest != null ? latest : RateLimitSnapshot.EMPTY;
+  public @Nullable RateLimitSnapshot getRateLimits() {
+    return transport.getLatestRateLimits();
   }
 
   @Override

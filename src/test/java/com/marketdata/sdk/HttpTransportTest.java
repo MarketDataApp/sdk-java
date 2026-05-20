@@ -116,6 +116,17 @@ class HttpTransportTest {
   }
 
   @Test
+  void emptyPathDoesNotProduceDoubleSlash() {
+    CapturingClient client =
+        new CapturingClient(200, "ok".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    transport.executeAsync(RequestSpec.get("").build()).join();
+
+    assertThat(client.captured.get(0).uri().toString()).isEqualTo("http://localhost/v1/");
+  }
+
+  @Test
   void leadingSlashInPathIsStripped() {
     CapturingClient client =
         new CapturingClient(200, "ok".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));

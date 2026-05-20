@@ -38,7 +38,7 @@ public final class UtilitiesResource {
 
   /** Sync wrapper for {@link #headersAsync()}; see {@link HttpTransport#joinSync} for semantics. */
   public Response<RequestHeaders> headers() {
-    return HttpTransport.joinSync(headersAsync());
+    return transport.joinSync(headersAsync());
   }
 
   /**
@@ -50,24 +50,25 @@ public final class UtilitiesResource {
     return executeAndWrap(RequestSpec.get("user").build(), User.class);
   }
 
-  /**
-   * Like {@link #userAsync()}, but driven by a caller-supplied {@link RetryPolicy}. Package-private
-   * because the only consumer today is {@link MarketDataClient#runStartupValidation()}, which wants
-   * a single-attempt call so a slow/down API doesn't burn the full retry budget before the
-   * constructor returns.
-   */
-  CompletableFuture<Response<User>> userAsync(RetryPolicy policy) {
-    return executeAndWrap(RequestSpec.get("user").build(), policy, User.class);
-  }
-
   /** Sync wrapper for {@link #userAsync()}. */
   public Response<User> user() {
-    return HttpTransport.joinSync(userAsync());
+    return transport.joinSync(userAsync());
   }
 
-  /** Sync wrapper for {@link #userAsync(RetryPolicy)}; package-private. */
-  Response<User> user(RetryPolicy policy) {
-    return HttpTransport.joinSync(userAsync(policy));
+  /**
+   * Auth probe used by {@link MarketDataClient}'s startup validation. Hits {@code GET /v1/user/}
+   * with a single-attempt policy so a slow/down API surfaces to the constructor immediately
+   * instead of burning the default retry budget (~6.75 min worst-case). Result is discarded —
+   * only the throw shape matters: 401 → {@link com.marketdata.sdk.exception.AuthenticationError},
+   * other failures propagate as their typed {@link
+   * com.marketdata.sdk.exception.MarketDataException} subtype.
+   *
+   * <p>Package-private and intent-named: not part of the public API and not an "endpoint" in the
+   * §1.2 sense, so ADR-006's sync+async parity does not apply.
+   */
+  void validateAuth() {
+    transport.joinSync(
+        executeAndWrap(RequestSpec.get("user").build(), RetryPolicy.noRetry(), User.class));
   }
 
   /**
@@ -82,7 +83,7 @@ public final class UtilitiesResource {
 
   /** Sync wrapper for {@link #statusAsync()}. */
   public Response<ApiStatus> status() {
-    return HttpTransport.joinSync(statusAsync());
+    return transport.joinSync(statusAsync());
   }
 
   // ---------- internal helpers ----------

@@ -5,6 +5,7 @@ import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
@@ -23,13 +24,27 @@ record Configuration(
   private static final Set<String> ALLOWED_SCHEMES = Set.of("http", "https");
   private static final Pattern API_VERSION_PATTERN = Pattern.compile("[A-Za-z0-9._-]+");
 
+  /**
+   * Convenience overload that discards any {@link DotEnvLoader.Warning}s. Used by tests and any
+   * call site that does not need to replay them through a freshly-configured logger.
+   */
   static Configuration resolve(
       @Nullable String explicitApiKey,
       @Nullable String explicitBaseUrl,
       @Nullable String explicitApiVersion,
       Function<String, @Nullable String> env,
       Path dotEnvPath) {
-    Map<String, String> dotEnv = DotEnvLoader.load(dotEnvPath);
+    return resolve(explicitApiKey, explicitBaseUrl, explicitApiVersion, env, dotEnvPath, w -> {});
+  }
+
+  static Configuration resolve(
+      @Nullable String explicitApiKey,
+      @Nullable String explicitBaseUrl,
+      @Nullable String explicitApiVersion,
+      Function<String, @Nullable String> env,
+      Path dotEnvPath,
+      Consumer<DotEnvLoader.Warning> warnings) {
+    Map<String, String> dotEnv = DotEnvLoader.load(dotEnvPath, warnings);
     String apiKey = pickFirst(explicitApiKey, env.apply(EnvVars.TOKEN), dotEnv.get(EnvVars.TOKEN));
     String baseUrl =
         pickFirstOrDefault(

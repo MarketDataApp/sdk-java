@@ -8,7 +8,7 @@ import com.marketdata.sdk.utilities.ApiStatus;
 import com.marketdata.sdk.utilities.RequestHeaders;
 import com.marketdata.sdk.utilities.User;
 import java.io.IOException;
-import java.time.Instant;
+import java.time.Clock;
 
 /**
  * Decodes {@link HttpResponseEnvelope} bodies into typed records.
@@ -24,8 +24,13 @@ import java.time.Instant;
 final class JsonResponseParser {
 
   private final ObjectMapper mapper;
+  private final Clock clock;
 
   JsonResponseParser() {
+    this(Clock.systemUTC());
+  }
+
+  JsonResponseParser(Clock clock) {
     ObjectMapper m = new ObjectMapper();
     SimpleModule wireModule = new SimpleModule("marketdata-wire");
     wireModule.addDeserializer(RequestHeaders.class, new RequestHeadersDeserializer());
@@ -33,6 +38,7 @@ final class JsonResponseParser {
     wireModule.addDeserializer(ApiStatus.class, new ApiStatusDeserializer());
     m.registerModule(wireModule);
     this.mapper = m;
+    this.clock = clock;
   }
 
   /**
@@ -46,7 +52,7 @@ final class JsonResponseParser {
     } catch (IOException e) {
       ErrorContext context =
           ErrorContext.forResponse(
-              env.url().toString(), env.statusCode(), env.requestId(), Instant.now());
+              env.url().toString(), env.statusCode(), env.requestId(), clock.instant());
       throw new ParseError(
           "Failed to decode response from " + env.url() + ": " + e.getMessage(), context, e);
     }

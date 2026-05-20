@@ -70,17 +70,6 @@ class RequestSpecTest {
   }
 
   @Test
-  void htmlFormatWiresThroughEvenThoughItIsNotUserVisible() {
-    // Format.HTML is package-private — no SDK consumer can reference it — but the transport
-    // pipeline must accept it end-to-end so the day the server lights up HTML responses, the
-    // only change is exposing a `...AsHtml()` method on the relevant resource.
-    RequestSpec spec = RequestSpec.get("stocks/candles").format(Format.HTML).build();
-    assertThat(spec.format()).isEqualTo(Format.HTML);
-    assertThat(spec.queryParams()).containsEntry("format", "html");
-    assertThat(Format.HTML.mediaType()).isEqualTo("text/html");
-  }
-
-  @Test
   void dateformatWritesQueryParam() {
     RequestSpec spec = RequestSpec.get("stocks/candles").dateformat(DateFormat.SPREADSHEET).build();
     assertThat(spec.queryParams()).containsEntry("dateformat", "spreadsheet");

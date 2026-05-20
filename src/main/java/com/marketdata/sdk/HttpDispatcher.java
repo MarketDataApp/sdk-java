@@ -7,6 +7,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.CancellationException;
@@ -33,10 +34,16 @@ final class HttpDispatcher implements AutoCloseable {
 
   private final HttpClient httpClient;
   private final AsyncSemaphore permits;
+  private final Clock clock;
 
   HttpDispatcher(HttpClient httpClient, int concurrencyLimit) {
+    this(httpClient, concurrencyLimit, Clock.systemUTC());
+  }
+
+  HttpDispatcher(HttpClient httpClient, int concurrencyLimit, Clock clock) {
     this.httpClient = httpClient;
     this.permits = new AsyncSemaphore(concurrencyLimit);
+    this.clock = clock;
   }
 
   /**
@@ -67,7 +74,7 @@ final class HttpDispatcher implements AutoCloseable {
 
   private CompletableFuture<HttpResponse<byte[]>> send(HttpRequest request) {
     LOGGER.fine(() -> "GET " + safeUri(request.uri()));
-    Instant start = Instant.now();
+    Instant start = clock.instant();
 
     CompletableFuture<HttpResponse<byte[]>> sendFuture;
     try {
@@ -89,7 +96,7 @@ final class HttpDispatcher implements AutoCloseable {
       return CompletableFuture.failedFuture(
           new NetworkError(
               "Request to " + safeUri(request.uri()) + " failed before dispatch: " + t.getMessage(),
-              ErrorContext.forNoResponse(request.uri().toString(), Instant.now()),
+              ErrorContext.forNoResponse(request.uri().toString(), clock.instant()),
               t));
     }
 
@@ -97,7 +104,7 @@ final class HttpDispatcher implements AutoCloseable {
         .whenComplete((r, t) -> permits.release())
         .handle(
             (response, error) -> {
-              long elapsedMs = Duration.between(start, Instant.now()).toMillis();
+              long elapsedMs = Duration.between(start, clock.instant()).toMillis();
               if (error != null) {
                 Throwable root = unwrap(error);
                 LOGGER.warning(
@@ -111,7 +118,7 @@ final class HttpDispatcher implements AutoCloseable {
                 throw new CompletionException(
                     new NetworkError(
                         "Request to " + safeUri(request.uri()) + " failed: " + root.getMessage(),
-                        ErrorContext.forNoResponse(request.uri().toString(), Instant.now()),
+                        ErrorContext.forNoResponse(request.uri().toString(), clock.instant()),
                         root));
               }
               LOGGER.fine(

@@ -30,11 +30,11 @@ class ResponseTest {
     assertThat(r.data()).isEqualTo("payload");
     assertThat(r.statusCode()).isEqualTo(200);
     assertThat(r.requestUrl()).isEqualTo(URI.create("http://x/y"));
-    assertThat(r.requestId()).contains("req-id-123");
+    assertThat(r.requestId()).isEqualTo("req-id-123");
   }
 
   @Test
-  void requestIdEmptyWhenServerOmitsIt() {
+  void requestIdNullWhenServerOmitsIt() {
     HttpResponseEnvelope e =
         new HttpResponseEnvelope(
             "x".getBytes(),
@@ -44,28 +44,22 @@ class ResponseTest {
             URI.create("http://x"));
     Response<String> r = Response.wrap("data", e, Format.JSON);
 
-    assertThat(r.requestId()).isEmpty();
+    assertThat(r.requestId()).isNull();
   }
 
   // ---------- format detection ----------
 
   @Test
   void formatDetectionExposesBooleansOnly() {
-    // The Format enum itself is package-private (HTML is hidden from consumers per ADR).
-    // Consumers only see the booleans.
+    // The Format enum itself is package-private; consumers only see the booleans.
     Response<String> json = Response.wrap("a", env("a".getBytes(), 200, "http://x"), Format.JSON);
     Response<String> csv = Response.wrap("a", env("a".getBytes(), 200, "http://x"), Format.CSV);
-    Response<String> html = Response.wrap("a", env("a".getBytes(), 200, "http://x"), Format.HTML);
 
     assertThat(json.isJson()).isTrue();
     assertThat(json.isCsv()).isFalse();
-    assertThat(json.isHtml()).isFalse();
 
     assertThat(csv.isCsv()).isTrue();
     assertThat(csv.isJson()).isFalse();
-
-    assertThat(html.isHtml()).isTrue();
-    assertThat(html.isJson()).isFalse();
   }
 
   // ---------- no-data ----------

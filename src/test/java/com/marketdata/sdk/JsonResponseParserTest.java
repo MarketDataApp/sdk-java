@@ -92,16 +92,52 @@ class JsonResponseParserTest {
   }
 
   @Test
-  void missingUserFieldsDefaultLeniently() {
-    // The server sends all three fields today, but if a future regression drops one, the SDK
-    // should produce a populated record with defaults rather than blow up parsing.
+  void missingUserNumericFieldRaisesParseError() {
+    // Strict: a silent zero would mask backend regressions and surface later as a confusing
+    // "quota apparently exhausted". Same policy as ParallelArrays.
     JsonResponseParser parser = new JsonResponseParser();
 
-    User u = parser.parse(env("{\"x-ratelimit-requests-limit\":500}"), User.class);
+    assertThatThrownBy(
+            () -> parser.parse(env("{\"x-ratelimit-requests-limit\":500}"), User.class))
+        .isInstanceOf(ParseError.class)
+        .hasMessageContaining("missing or non-integer")
+        .hasMessageContaining("x-ratelimit-requests-remaining");
+  }
 
-    assertThat(u.requestsRemaining()).isZero();
-    assertThat(u.requestsLimit()).isEqualTo(500);
-    assertThat(u.optionsDataPermissions()).isEmpty();
+  @Test
+  void userNumericFieldOfWrongTypeRaisesParseError() {
+    // String "500" instead of integer 500 — strict rejection rather than Jackson's lax coercion.
+    JsonResponseParser parser = new JsonResponseParser();
+
+    assertThatThrownBy(
+            () ->
+                parser.parse(
+                    env(
+                        "{\"x-ratelimit-requests-remaining\":\"5\","
+                            + "\"x-ratelimit-requests-limit\":10,"
+                            + "\"x-options-data-permissions\":\"\"}"),
+                    User.class))
+        .isInstanceOf(ParseError.class)
+        .hasMessageContaining("non-integer")
+        .hasMessageContaining("x-ratelimit-requests-remaining");
+  }
+
+  @Test
+  void userMissingOptionsPermsRaisesParseError() {
+    // The empty string is the legitimate "real-time access" marker — but the field must be
+    // present as a JSON string. Absence is treated as a backend regression, not a default.
+    JsonResponseParser parser = new JsonResponseParser();
+
+    assertThatThrownBy(
+            () ->
+                parser.parse(
+                    env(
+                        "{\"x-ratelimit-requests-remaining\":1,"
+                            + "\"x-ratelimit-requests-limit\":2}"),
+                    User.class))
+        .isInstanceOf(ParseError.class)
+        .hasMessageContaining("missing or non-string")
+        .hasMessageContaining("x-options-data-permissions");
   }
 
   // ---------- ApiStatus: parallel-arrays wire format zipped into List<ServiceStatus> ----------

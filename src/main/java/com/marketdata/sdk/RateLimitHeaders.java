@@ -14,8 +14,7 @@ import org.jspecify.annotations.Nullable;
  * partial responses preserves the caller's last-known-good snapshot in {@link
  * HttpTransport#latestRateLimits} instead of clobbering it with phantom zeros — those would
  * otherwise trip {@link HttpTransport#checkRateLimitPreflight} into blocking subsequent requests
- * with a fake {@code remaining=0}, and would surface in {@code client.getRateLimits()} as a
- * snapshot the consumer can't tell apart from a real one.
+ * with a fake {@code remaining=0}.
  */
 final class RateLimitHeaders {
 
