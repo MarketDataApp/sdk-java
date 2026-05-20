@@ -57,11 +57,84 @@ class HttpStatusMapperTest {
   }
 
   @ParameterizedTest
-  @ValueSource(ints = {402, 403, 405, 418})
+  @ValueSource(ints = {402, 403, 405, 418, 422, 451})
   void maps_unhandled_four_xx_to_bad_request_error(int statusCode) {
     @Nullable MarketDataException exception = HttpStatusMapper.map(statusCode, context(statusCode));
 
     assertThat(exception).isExactlyInstanceOf(BadRequestError.class);
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {402, 403, 405, 418})
+  void unhandled_four_xx_message_includes_the_status_code(int statusCode) {
+    // Previously the default branch produced a generic "Unexpected status code: 403" which read
+    // like an SDK bug rather than a server response. The message now identifies the bucket
+    // ("Client error") and the actual status, making it obvious what came back.
+    @Nullable MarketDataException exception = HttpStatusMapper.map(statusCode, context(statusCode));
+
+    assertThat(exception).isNotNull();
+    assertThat(exception.getMessage())
+        .contains("Client error")
+        .contains(String.valueOf(statusCode));
+  }
+
+  // ---------- 3xx redirects ----------
+
+  @ParameterizedTest
+  @ValueSource(ints = {301, 302, 303, 304, 307, 308})
+  void maps_three_xx_to_bad_request_with_redirect_message(int statusCode) {
+    // HttpClient is configured with followRedirects(NORMAL); a 3xx escaping that means the
+    // redirect could not be followed (cross-protocol, max-redirects hit, etc.). Treat as
+    // BadRequestError so the retry layer does not loop on the same redirect, with a message
+    // that points the user at the likely cause.
+    @Nullable MarketDataException exception = HttpStatusMapper.map(statusCode, context(statusCode));
+
+    assertThat(exception).isExactlyInstanceOf(BadRequestError.class);
+    assertThat(exception.getMessage())
+        .contains("Unhandled redirect")
+        .contains(String.valueOf(statusCode))
+        .contains("baseUrl");
+    assertThat(exception.getStatusCode()).isEqualTo(statusCode);
+  }
+
+  // ---------- 1xx informational ----------
+
+  @ParameterizedTest
+  @ValueSource(ints = {100, 101, 102})
+  void maps_one_xx_to_bad_request_with_informational_message(int statusCode) {
+    // HttpClient handles 100 Continue internally — reaching the mapper with a 1xx means the
+    // server is doing something protocol-weird. Surface with a clear "informational" message
+    // rather than the generic "Unexpected status code".
+    @Nullable MarketDataException exception = HttpStatusMapper.map(statusCode, context(statusCode));
+
+    assertThat(exception).isExactlyInstanceOf(BadRequestError.class);
+    assertThat(exception.getMessage())
+        .contains("informational")
+        .contains(String.valueOf(statusCode));
+  }
+
+  // ---------- out-of-range fallback ----------
+
+  @ParameterizedTest
+  @ValueSource(ints = {0, -1, 600, 999})
+  void maps_out_of_range_to_bad_request_with_unexpected_message(int statusCode) {
+    @Nullable MarketDataException exception = HttpStatusMapper.map(statusCode, context(statusCode));
+
+    assertThat(exception).isExactlyInstanceOf(BadRequestError.class);
+    assertThat(exception.getMessage())
+        .contains("Unexpected HTTP status")
+        .contains(String.valueOf(statusCode));
+  }
+
+  // ---------- 5xx messages include the actual status ----------
+
+  @ParameterizedTest
+  @ValueSource(ints = {500, 502, 503, 504, 599})
+  void server_error_message_includes_the_actual_status(int statusCode) {
+    @Nullable MarketDataException exception = HttpStatusMapper.map(statusCode, context(statusCode));
+
+    assertThat(exception).isExactlyInstanceOf(ServerError.class);
+    assertThat(exception.getMessage()).contains(String.valueOf(statusCode));
   }
 
   @Test
