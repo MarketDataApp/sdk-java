@@ -4,6 +4,7 @@ import com.marketdata.sdk.exception.ErrorContext;
 import com.marketdata.sdk.exception.MarketDataException;
 import com.marketdata.sdk.exception.NetworkError;
 import com.marketdata.sdk.exception.RateLimitError;
+import com.marketdata.sdk.exception.ServerError;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -275,7 +276,7 @@ final class HttpTransport implements AutoCloseable {
     }
     Instant now = Instant.now();
     ErrorContext context = ErrorContext.forResponse(uri.toString(), status, requestId, now);
-    java.time.Duration retryAfter =
+    Duration retryAfter =
         response
             .headers()
             .firstValue("Retry-After")
@@ -289,8 +290,7 @@ final class HttpTransport implements AutoCloseable {
     }
     // Mapper only returns null for 2xx, which the branch above already handled. Belt &
     // suspenders for the impossible case so a future mapper edit can't silently swallow.
-    throw new com.marketdata.sdk.exception.ServerError(
-        "Unmapped status " + status + " from " + uri, context);
+    throw new ServerError("Unmapped status " + status + " from " + uri, context);
   }
 
   private URI buildUri(RequestSpec spec) {
