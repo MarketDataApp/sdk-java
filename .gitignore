@@ -25,6 +25,11 @@ Thumbs.db
 .env
 .env.local
 
+# Python (examples/mock-server)
+.venv/
+__pycache__/
+*.pyc
+
 # Logs / coverage
 *.log
 hs_err_pid*

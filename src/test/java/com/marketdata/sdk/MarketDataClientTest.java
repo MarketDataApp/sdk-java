@@ -160,7 +160,7 @@ class MarketDataClientTest {
   @Test
   @Timeout(value = 5, unit = TimeUnit.SECONDS)
   void run_startup_validation_skips_in_demo_mode(@TempDir Path tmp) {
-    // §5: when apiKey is unresolvable (demo mode), runStartupValidation must not hit /v1/user/ —
+    // §5: when apiKey is unresolvable (demo mode), runStartupValidation must not hit /user/ —
     // the server would return 401, breaking construction for any consumer who tries to "kick
     // the tires" without a token. The @Timeout guards against regression: if the skip ever
     // breaks, the test fails in 5s instead of hanging on the full retry budget (~6.75 min).
@@ -173,7 +173,7 @@ class MarketDataClientTest {
 
   @Test
   void quick_start_usage_resolves_real_environment_and_never_leaks_token() {
-    // The no-arg public ctor now hits /v1/user/ for startup validation (§5). Don't exercise
+    // The no-arg public ctor now hits /user/ for startup validation (§5). Don't exercise
     // that path here — this test asserts config resolution and token redaction, not the live
     // call. Use the 4-arg variant with validateOnStartup=false to keep this a pure unit test.
     try (MarketDataClient client = new MarketDataClient(null, null, null, false)) {

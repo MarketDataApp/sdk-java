@@ -1,7 +1,7 @@
 package com.marketdata.sdk.utilities;
 
 /**
- * Response shape for {@code GET /v1/user/} — the caller's current quota and data-tier permissions.
+ * Response shape for {@code GET /user/} — the caller's current quota and data-tier permissions.
  *
  * <p>The numeric fields duplicate information that arrives on every response via the {@code
  * x-api-ratelimit-*} headers (see {@link com.marketdata.sdk.RateLimitSnapshot}); the dedicated

@@ -87,11 +87,13 @@ class UtilitiesResourceTest {
     assertThat(rh.headers()).containsEntry("x", "1");
   }
 
-  // ---------- /v1/user/ endpoint ----------
+  // ---------- /user/ endpoint ----------
 
   @Test
-  void userHitsVersionedEndpoint() {
-    // Contrast with /headers/ — /v1/user/ is under the versioned prefix.
+  void userHitsUnversionedEndpoint() {
+    // The backend mounts the user router at the API root (no /v1/ prefix), same as /status/
+    // and /headers/. Hitting /v1/user/ falls through to the global 404 handler — the SDK
+    // must request /user/ directly.
     CapturingClient client =
         new CapturingClient(
             200,
@@ -103,7 +105,7 @@ class UtilitiesResourceTest {
 
     utilities.userAsync().join();
 
-    assertThat(client.captured.get(0).uri().toString()).isEqualTo("http://localhost/v1/user/");
+    assertThat(client.captured.get(0).uri().toString()).isEqualTo("http://localhost/user/");
   }
 
   @Test
@@ -141,10 +143,9 @@ class UtilitiesResourceTest {
   }
 
   /**
-   * The {@code /v1/user/} endpoint's typical failure mode is "no billing plan" — surfaces as 401.
-   * The sync method must unwrap it to {@link AuthenticationError} directly so {@code
-   * validateOnStartup} (when wired) can catch it without digging through {@code
-   * CompletionException}.
+   * The {@code /user/} endpoint's typical failure mode is "no billing plan" — surfaces as 401. The
+   * sync method must unwrap it to {@link AuthenticationError} directly so {@code validateOnStartup}
+   * (when wired) can catch it without digging through {@code CompletionException}.
    */
   @Test
   void user401SurfacesAuthenticationErrorDirectly() {

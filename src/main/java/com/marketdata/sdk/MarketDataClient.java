@@ -143,14 +143,14 @@ public final class MarketDataClient implements AutoCloseable {
   }
 
   /**
-   * Fire a single call to {@code GET /v1/user/} to confirm the token is accepted and a billing plan
-   * is attached (SDK requirements §5). A 401 surfaces as {@link
+   * Fire a single call to {@code GET /user/} to confirm the token is accepted and a billing plan is
+   * attached (SDK requirements §5). A 401 surfaces as {@link
    * com.marketdata.sdk.exception.AuthenticationError} directly via the sync wrapper. On any failure
    * we close the transport before re-throwing so a partially-constructed client doesn't leak its
    * HttpClient — the caller's try-with-resources is never triggered if the constructor itself
    * fails.
    *
-   * <p>Skipped in demo mode: there is no token to validate, and {@code /v1/user/} would
+   * <p>Skipped in demo mode: there is no token to validate, and {@code /user/} would
    * deterministically return 401, breaking construction for any consumer who instantiates the SDK
    * without a token configured (the "I want to kick the tires" path).
    *
