@@ -2,11 +2,12 @@ package com.marketdata.sdk.exception;
 
 import org.jspecify.annotations.Nullable;
 
-/** The API response could not be decoded into the expected model. */
 public final class ParseError extends MarketDataException {
 
+  private static final long serialVersionUID = 1L;
+
   public ParseError(String message, ErrorContext context) {
-    super(message, context, null);
+    this(message, context, null);
   }
 
   public ParseError(String message, ErrorContext context, @Nullable Throwable cause) {

@@ -1,158 +1,187 @@
 package com.marketdata.sdk;
 
-import java.time.Duration;
-import java.util.logging.Level;
+import java.nio.file.Path;
+import java.time.Clock;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
-/**
- * Entry point to the Market Data Java SDK.
- *
- * <p>One {@code MarketDataClient} per application. Resource façades (e.g. {@link #markets()}) are
- * accessed through the client; all HTTP-shaped concerns (connection pooling, HTTP/2, the global
- * concurrency semaphore, rate-limit header parsing) live in the internal {@link HttpTransport} the
- * client owns.
- *
- * <p>Two constructors:
- *
- * <ul>
- *   <li>{@link #MarketDataClient()} — production path. Resolves everything from the cascade in §4
- *       ({@code MARKETDATA_*} environment variable → value in a {@code .env} file → built-in
- *       default). With no token in the cascade, enters <em>demo mode</em> — authenticated endpoints
- *       will fail and the {@code Authorization} header is omitted.
- *   <li>{@link #MarketDataClient(String, String, String, boolean)} — explicit-control path for
- *       tests and short-lived runtimes. Each parameter may still be {@code null} to defer to the
- *       cascade for that single value.
- * </ul>
- *
- * <p>Instances are immutable: every field is {@code final} and assigned in the constructor.
- */
 public final class MarketDataClient implements AutoCloseable {
 
-  /** SDK requirements §10: fixed 99-second per-request timeout. */
-  public static final Duration REQUEST_TIMEOUT = HttpTransport.REQUEST_TIMEOUT;
+  // §7: one logger for the whole SDK (com.marketdata.sdk). Consumers configure or attach handlers
+  // to that single name; consolidating here keeps MarketDataLogging's consumer-pre-config
+  // detection and useParentHandlers=false guard aware of every emission path. Parity with the
+  // Python SDK (single marketdata.logger).
+  private static final Logger LOGGER = Logger.getLogger(MarketDataLogging.SDK_LOGGER_NAME);
 
-  /** SDK requirements §10: fixed 2-second connect timeout. */
-  public static final Duration CONNECT_TIMEOUT = HttpTransport.CONNECT_TIMEOUT;
-
-  /** SDK requirements §12: maximum concurrent in-flight requests per client. */
-  public static final int CONCURRENCY_LIMIT = HttpTransport.CONCURRENCY_LIMIT;
-
-  private static final Logger LOG = Logger.getLogger(MarketDataClient.class.getName());
-
+  private final Configuration config;
   private final HttpTransport transport;
+  private final UtilitiesResource utilities;
 
-  private final @Nullable String token;
-  private final String baseUrl;
-  private final String apiVersion;
-  private final String userAgent;
-  private final boolean demoMode;
-  private final boolean validateOnStartup;
-
-  // Resources — eagerly constructed; one record-shaped object per resource group.
-  private final MarketsResource markets;
-
-  /**
-   * Production constructor. Resolves all settings from the configuration cascade in SDK
-   * requirements §4 (env var → {@code .env} → built-in default) and enables startup validation.
-   *
-   * <p>Equivalent to {@link #MarketDataClient(String, String, String, boolean) new
-   * MarketDataClient(null, null, null, true)}.
-   */
   public MarketDataClient() {
     this(null, null, null, true);
   }
 
-  /**
-   * Explicit-control constructor for tests and short-lived runtimes. Each of {@code apiKey}, {@code
-   * baseUrl}, and {@code apiVersion} may be {@code null} to defer to the cascade in §4 for that
-   * single value.
-   *
-   * @param apiKey explicit API token, or {@code null} to resolve from {@code MARKETDATA_TOKEN} →
-   *     {@code .env} → demo mode
-   * @param baseUrl override the API base URL, or {@code null} to resolve to {@link
-   *     Configuration#DEFAULT_BASE_URL}
-   * @param apiVersion override the API version segment, or {@code null} to resolve to {@link
-   *     Configuration#DEFAULT_API_VERSION}
-   * @param validateOnStartup whether to validate the token on construction by calling {@code
-   *     /user/} (SDK requirements §5). Pass {@code false} for short-lived runtimes where the
-   *     startup hit is undesirable.
-   */
   public MarketDataClient(
       @Nullable String apiKey,
       @Nullable String baseUrl,
       @Nullable String apiVersion,
       boolean validateOnStartup) {
-    Configuration config = Configuration.loadFromProcess();
-    this.token = config.resolve(apiKey, EnvVars.TOKEN);
-    this.baseUrl =
-        trimTrailingSlash(
-            config.resolveOrDefault(baseUrl, EnvVars.BASE_URL, Configuration.DEFAULT_BASE_URL));
-    this.apiVersion =
-        config.resolveOrDefault(apiVersion, EnvVars.API_VERSION, Configuration.DEFAULT_API_VERSION);
-    this.demoMode = this.token == null;
-    this.validateOnStartup = validateOnStartup;
-    this.userAgent = "marketdata-sdk-java/" + Version.current();
-
-    this.transport = new HttpTransport(this.baseUrl, this.apiVersion, this.userAgent, this.token);
-    this.markets = new MarketsResource(this.transport);
-
-    LOG.log(
-        Level.INFO,
-        "Initialized Market Data SDK {0} (baseUrl={1}, apiVersion={2}, demoMode={3})",
-        new Object[] {Version.current(), this.baseUrl, this.apiVersion, this.demoMode});
-    if (this.demoMode) {
-      LOG.warning(
-          "No API token provided — running in demo mode. Authenticated endpoints will fail with"
-              + " AuthenticationError on first call.");
-    } else if (LOG.isLoggable(Level.FINE)) {
-      LOG.log(Level.FINE, "Token: {0}", Tokens.redact(this.token));
-    }
-
-    // SDK requirements §5: validate on startup by default. The actual
-    // /user/ call lands with the user resource; this flag is the seam.
-  }
-
-  // ---------------------------------------------------------------------
-  // Resource accessors
-  // ---------------------------------------------------------------------
-
-  /** Façade for the {@code /v1/markets/*} endpoint group. */
-  public MarketsResource markets() {
-    return markets;
-  }
-
-  // ---------------------------------------------------------------------
-  // Configuration accessors
-  // ---------------------------------------------------------------------
-
-  public String getBaseUrl() {
-    return baseUrl;
-  }
-
-  public String getApiVersion() {
-    return apiVersion;
-  }
-
-  public String getUserAgent() {
-    return userAgent;
-  }
-
-  public boolean isDemoMode() {
-    return demoMode;
-  }
-
-  public boolean isValidateOnStartup() {
-    return validateOnStartup;
+    this(
+        apiKey,
+        baseUrl,
+        apiVersion,
+        validateOnStartup,
+        EnvVars.systemLookup(),
+        Configuration.DEFAULT_DOTENV_PATH);
   }
 
   /**
-   * Latest client-level rate-limit snapshot, or {@code null} if no rate-limit-bearing response has
-   * been received yet. Once populated, the snapshot persists across subsequent calls — a successful
-   * response that arrives without {@code x-api-ratelimit-*} headers (e.g. during a server-side
-   * middleware outage) does not clear it.
+   * Package-private ctor with the env-lookup and dotEnv-path seams exposed so tests can drive the
+   * configuration cascade hermetically. The public 4-arg ctor delegates here with {@link
+   * EnvVars#systemLookup()} and {@link Configuration#DEFAULT_DOTENV_PATH}.
    */
-  public @Nullable RateLimits getRateLimits() {
+  MarketDataClient(
+      @Nullable String apiKey,
+      @Nullable String baseUrl,
+      @Nullable String apiVersion,
+      boolean validateOnStartup,
+      Function<String, @Nullable String> env,
+      Path dotEnvPath) {
+    // Collect warnings from the configuration cascade (e.g. an unreadable .env) instead of
+    // letting DotEnvLoader log them directly. The loader runs BEFORE MarketDataLogging.configure
+    // — emitting WARNINGs there would land on an unconfigured JUL logger (wrong format,
+    // possibly invisible), undermining the breadcrumb the WARNING exists to provide.
+    List<DotEnvLoader.Warning> pendingWarnings = new ArrayList<>();
+    try {
+      this.config =
+          Configuration.resolve(apiKey, baseUrl, apiVersion, env, dotEnvPath, pendingWarnings::add);
+    } catch (RuntimeException e) {
+      // Issue #25: if resolve fails (typically IAE — invalid baseUrl/apiVersion/apiKey from the
+      // cascade), the consumer would otherwise lose any .env warnings collected so far. That
+      // hides the real story: e.g. "your .env was unreadable, so the missing baseUrl fell
+      // through to a default that conflicts with your explicit apiVersion". Attach each warning
+      // as a suppressed exception so the diagnostic trail surfaces in the same stack trace.
+      attachWarningsAsSuppressed(e, pendingWarnings);
+      throw e;
+    }
+    MarketDataLogging.configure(config.loggingLevel());
+    for (DotEnvLoader.Warning w : pendingWarnings) {
+      LOGGER.log(w.level(), w.message(), w.cause());
+    }
+    LOGGER.info(
+        () ->
+            "MarketDataClient initialized: baseUrl="
+                + config.baseUrl()
+                + ", apiVersion="
+                + config.apiVersion()
+                + ", token="
+                + Tokens.redact(config.apiKey())
+                + ", demoMode="
+                + DemoMode.isDemo(config));
+
+    // §9.5: the status cache pre-checks /status/ before retrying 5xx. The cache's fetcher uses
+    // `utilities.statusAsync()`, which goes through this transport — a chicken-and-egg. We
+    // resolve it with a deferred reference: the transport reads the cache through a supplier,
+    // which returns null until the cache is constructed (just below this transport instance).
+    AtomicReference<StatusCache> cacheRef = new AtomicReference<>();
+    this.transport =
+        HttpTransport.withDefaults(
+            config.baseUrl(),
+            config.apiVersion(),
+            "marketdata-sdk-java/" + Version.sdkVersion(),
+            config.apiKey(),
+            cacheRef::get);
+    // Partial-construction guard: from here on the transport is a live AutoCloseable that holds
+    // the shared HttpClient and the 50-permit AsyncSemaphore. If any subsequent constructor
+    // throws (today none do, but a future change in UtilitiesResource / StatusCache could),
+    // the caller never receives a reference, their try-with-resources never fires, and the
+    // transport leaks until GC. Close it explicitly and surface the close failure (if any) as
+    // a suppressed exception on the primary cause — same pattern runStartupValidation already
+    // uses for the validation path.
+    try {
+      JsonResponseParser parser = new JsonResponseParser();
+      this.utilities = new UtilitiesResource(transport, parser);
+      cacheRef.set(
+          new StatusCache(
+              () -> utilities.statusAsync().thenApply(Response::data), Clock.systemUTC()));
+    } catch (Throwable t) {
+      try {
+        transport.close();
+      } catch (Throwable closeFailure) {
+        t.addSuppressed(closeFailure);
+      }
+      throw t;
+    }
+
+    if (validateOnStartup) {
+      runStartupValidation();
+    }
+  }
+
+  /**
+   * Attach each pending {@code .env} warning to {@code primary} as a suppressed exception so the
+   * diagnostic trail survives a configuration-resolve failure. {@link Throwable#getCause()} would
+   * conflict with the actual cause of the IAE; suppressed is the right surface for "additional
+   * context the consumer should see alongside the primary failure".
+   */
+  private static void attachWarningsAsSuppressed(
+      RuntimeException primary, List<DotEnvLoader.Warning> warnings) {
+    for (DotEnvLoader.Warning w : warnings) {
+      Throwable wrapper =
+          new RuntimeException("[.env " + w.level() + "] " + w.message(), w.cause());
+      primary.addSuppressed(wrapper);
+    }
+  }
+
+  /** System endpoints documented at the API root: {@code /headers/} (and more to come). */
+  public UtilitiesResource utilities() {
+    return utilities;
+  }
+
+  /**
+   * Fire a single call to {@code GET /user/} to confirm the token is accepted and a billing plan is
+   * attached (SDK requirements §5). A 401 surfaces as {@link
+   * com.marketdata.sdk.exception.AuthenticationError} directly via the sync wrapper. On any failure
+   * we close the transport before re-throwing so a partially-constructed client doesn't leak its
+   * HttpClient — the caller's try-with-resources is never triggered if the constructor itself
+   * fails.
+   *
+   * <p>Skipped in demo mode: there is no token to validate, and {@code /user/} would
+   * deterministically return 401, breaking construction for any consumer who instantiates the SDK
+   * without a token configured (the "I want to kick the tires" path).
+   *
+   * <p>Package-private so the demo-mode skip can be tested hermetically (i.e. without depending on
+   * whether {@code MARKETDATA_TOKEN} is set in the runner's environment).
+   */
+  void runStartupValidation() {
+    if (DemoMode.isDemo(config)) {
+      LOGGER.info(() -> "validateOnStartup skipped: demo mode is active (no token configured).");
+      return;
+    }
+    // Intent-named auth probe in UtilitiesResource — single-attempt so a slow/down API surfaces
+    // here within seconds instead of burning the default retry budget (~6.75 min).
+    try {
+      utilities.validateAuth();
+    } catch (Throwable t) {
+      try {
+        close();
+      } catch (Throwable closeFailure) {
+        t.addSuppressed(closeFailure);
+      }
+      throw t;
+    }
+  }
+
+  /**
+   * Latest rate-limit snapshot recorded from any successful response. Returns {@code null} until
+   * the first rate-limit-bearing response has arrived — a real {@code remaining=0} reported by the
+   * server stays observable as {@code snapshot.remaining() == 0}, distinct from "no snapshot yet".
+   */
+  public @Nullable RateLimitSnapshot getRateLimits() {
     return transport.getLatestRateLimits();
   }
 
@@ -161,7 +190,16 @@ public final class MarketDataClient implements AutoCloseable {
     transport.close();
   }
 
-  private static String trimTrailingSlash(String url) {
-    return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
+  @Override
+  public String toString() {
+    return "MarketDataClient[baseUrl="
+        + config.baseUrl()
+        + ", apiVersion="
+        + config.apiVersion()
+        + ", apiKey="
+        + Tokens.redact(config.apiKey())
+        + ", demoMode="
+        + DemoMode.isDemo(config)
+        + "]";
   }
 }

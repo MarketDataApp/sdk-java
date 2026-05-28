@@ -3,497 +3,1009 @@ package com.marketdata.sdk;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.marketdata.sdk.exception.NetworkError;
-import java.io.IOException;
-import java.lang.reflect.Field;
-import java.net.Authenticator;
-import java.net.CookieHandler;
-import java.net.ProxySelector;
+import com.marketdata.sdk.exception.AuthenticationError;
+import com.marketdata.sdk.exception.BadRequestError;
+import com.marketdata.sdk.exception.NotFoundError;
+import com.marketdata.sdk.exception.RateLimitError;
+import com.marketdata.sdk.exception.ServerError;
+import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.net.http.WebSocket;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
-// These tests cover the SINGLE-ATTEMPT semantics of executeAsync. Retry behavior is exercised
-// separately in HttpTransportRetryTest; here we explicitly disable retry so a permit-release
-// assertion reflects exactly one HTTP call per executeAsync invocation.
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.Executor;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLParameters;
 import org.junit.jupiter.api.Test;
 
 class HttpTransportTest {
 
-  /** Policy with a single attempt — disables retry so each test asserts one HTTP call only. */
+  /** RetryPolicy with a single attempt so each test's HTTP-call count is unambiguous. */
   private static final RetryPolicy NO_RETRY =
       new RetryPolicy(1, Duration.ofMillis(1), Duration.ofMillis(1));
 
-  /**
-   * Regression for the synchronous-throw permit leak: if {@code httpClient.sendAsync(...)} throws
-   * before returning a future (rare but possible — malformed request, internal NPE, OOM), the
-   * {@code whenComplete(release)} chain never forms. Without explicit release in the catch, every
-   * such failure burns a permit forever; a long-lived process eventually deadlocks once 50 such
-   * failures accumulate.
-   *
-   * <p>This test runs more requests than {@link HttpTransport#CONCURRENCY_LIMIT} against a stub
-   * client whose {@code sendAsync} always throws — if a permit ever leaked, the {@code
-   * (limit+1)}-th call would block indefinitely on {@code acquire()} and the test would time out.
-   */
-  @Test
-  void permitReleasedWhenSendAsyncThrowsSynchronously() throws Exception {
-    HttpTransport transport =
-        new HttpTransport(
-            "http://localhost", "v1", "test/0.0", null, new SyncThrowingHttpClient(), NO_RETRY);
-
-    AsyncSemaphore permits = readSemaphore(transport);
-    int initial = permits.availablePermits();
-    assertThat(initial).isEqualTo(HttpTransport.CONCURRENCY_LIMIT);
-
-    int n = HttpTransport.CONCURRENCY_LIMIT + 5;
-    for (int i = 0; i < n; i++) {
-      CompletableFuture<Object> f =
-          transport.executeAsync(RequestSpec.get("ping").build(), Object.class);
-
-      assertThat(f).isCompletedExceptionally();
-      assertThatThrownBy(f::join)
-          .isInstanceOf(CompletionException.class)
-          .hasCauseInstanceOf(NetworkError.class)
-          .hasMessageContaining("before dispatch");
-    }
-
-    // If even one permit had leaked, this would be < initial; the (limit+1)-th call would
-    // also have blocked instead of failing fast.
-    assertThat(permits.availablePermits()).isEqualTo(initial);
+  private static HttpTransport newTransport(HttpClient client) {
+    return newTransport(client, Clock.systemUTC());
   }
 
-  /**
-   * Errors thrown synchronously by {@link HttpClient#sendAsync} (e.g. {@code OutOfMemoryError})
-   * must surface with their original type preserved — wrapping a JVM-level {@link Error} in a
-   * {@link com.marketdata.sdk.exception.NetworkError} would mask the real cause and produce a
-   * misleading "network failure" for what is actually a runtime crash. Covers the {@code if (t
-   * instanceof Error err) throw err;} branch in {@code dispatch}; the {@link
-   * java.util.concurrent.CompletableFuture#thenCompose} machinery catches the rethrown Error and
-   * exposes it as the future's root cause rather than letting it propagate synchronously.
-   */
+  private static HttpTransport newTransport(HttpClient client, Clock clock) {
+    return new HttpTransport(
+        "http://localhost",
+        "v1",
+        "test/0.0",
+        "secret-token",
+        new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
+        new RetryExecutor(NO_RETRY),
+        () -> null,
+        clock);
+  }
+
+  // ---------- URL & header composition ----------
+
   @Test
-  void errorThrownSynchronouslyIsPreservedAsRootCause() throws Exception {
+  void buildsUrlWithBaseVersionPathTrailingSlashAndEncodedQuery() {
+    CapturingClient client =
+        new CapturingClient(200, "ok".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    transport
+        .executeAsync(
+            RequestSpec.get("markets/status")
+                .query("date", "2024-05-01")
+                .query("country", "US")
+                .build())
+        .join();
+
+    HttpRequest sent = client.captured.get(0);
+    assertThat(sent.uri().toString())
+        .isEqualTo("http://localhost/v1/markets/status/?date=2024-05-01&country=US");
+  }
+
+  @Test
+  void sendsAuthorizationUserAgentAndAcceptHeaders() {
+    CapturingClient client =
+        new CapturingClient(200, "ok".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    transport.executeAsync(RequestSpec.get("markets/status").format(Format.CSV).build()).join();
+
+    HttpRequest sent = client.captured.get(0);
+    assertThat(sent.headers().firstValue("Authorization")).contains("Bearer secret-token");
+    assertThat(sent.headers().firstValue("User-Agent")).contains("test/0.0");
+    assertThat(sent.headers().firstValue("Accept")).contains("text/csv");
+    assertThat(sent.timeout()).contains(HttpTransport.REQUEST_TIMEOUT);
+  }
+
+  @Test
+  void noAuthorizationHeaderWhenTokenIsNull() {
+    CapturingClient client =
+        new CapturingClient(200, "ok".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
     HttpTransport transport =
         new HttpTransport(
-            "http://localhost", "v1", "test/0.0", null, new ErrorThrowingHttpClient(), NO_RETRY);
+            "http://localhost",
+            "v1",
+            "test/0.0",
+            null,
+            new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
+            new RetryExecutor(NO_RETRY),
+            () -> null,
+            Clock.systemUTC());
 
-    AsyncSemaphore permits = readSemaphore(transport);
-    int initial = permits.availablePermits();
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
 
-    CompletableFuture<Object> f =
-        transport.executeAsync(RequestSpec.get("ping").build(), Object.class);
+    assertThat(client.captured.get(0).headers().firstValue("Authorization")).isEmpty();
+  }
 
-    assertThat(f).isCompletedExceptionally();
-    assertThatThrownBy(f::join)
+  @Test
+  void unversionedSpecOmitsTheVersionSegment() {
+    // /status/ and /headers/ are documented at the API root, not under /v1/. The transport must
+    // honor the spec's unversioned flag so those system endpoints reach the right URL.
+    CapturingClient client =
+        new CapturingClient(200, "ok".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    transport.executeAsync(RequestSpec.get("status").unversioned().build()).join();
+
+    assertThat(client.captured.get(0).uri().toString()).isEqualTo("http://localhost/status/");
+  }
+
+  @Test
+  void emptyPathDoesNotProduceDoubleSlash() {
+    CapturingClient client =
+        new CapturingClient(200, "ok".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    transport.executeAsync(RequestSpec.get("").build()).join();
+
+    assertThat(client.captured.get(0).uri().toString()).isEqualTo("http://localhost/v1/");
+  }
+
+  @Test
+  void leadingSlashInPathIsStripped() {
+    CapturingClient client =
+        new CapturingClient(200, "ok".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    transport.executeAsync(RequestSpec.get("/markets/status").build()).join();
+
+    // Defensive strip — no double slash even when the resource accidentally prepends one.
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/markets/status/");
+  }
+
+  @Test
+  void queryParamWithSpaceEncodesAsPercent20NotPlus() {
+    // URLEncoder defaults to form-encoding (spaces → "+"), which strict RFC-3986 servers treat
+    // as a literal "+" in the query string. The transport patches this to "%20" so endpoints
+    // taking arbitrary text (e.g. a multi-word symbol or description) round-trip correctly.
+    CapturingClient client =
+        new CapturingClient(200, "ok".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    transport
+        .executeAsync(RequestSpec.get("stocks/quotes").query("symbol", "BRK A").build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/stocks/quotes/?symbol=BRK%20A");
+  }
+
+  @Test
+  void queryParamWithReservedCharactersIsPercentEncoded() {
+    // Reserved characters like &, =, ?, # in a value must be percent-encoded so they aren't
+    // parsed as query-string delimiters. URLEncoder handles these correctly out of the box —
+    // this test just locks in that behavior so a future refactor of encodeQueryComponent
+    // doesn't accidentally regress it.
+    CapturingClient client =
+        new CapturingClient(200, "ok".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    transport.executeAsync(RequestSpec.get("stocks/quotes").query("q", "a&b=c?d#e").build()).join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/stocks/quotes/?q=a%26b%3Dc%3Fd%23e");
+  }
+
+  // ---------- response envelope ----------
+
+  @Test
+  void successReturnsEnvelopeWithBodyStatusAndRequestId() {
+    HttpHeaders headers = TestHttpClients.headersOf(Map.of("cf-ray", "abc-123"));
+    CapturingClient client = new CapturingClient(200, "payload".getBytes(), headers);
+    HttpTransport transport = newTransport(client);
+
+    HttpResponseEnvelope env =
+        transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+
+    assertThat(new String(env.body())).isEqualTo("payload");
+    assertThat(env.statusCode()).isEqualTo(200);
+    assertThat(env.requestId()).isEqualTo("abc-123");
+    assertThat(env.url().toString()).isEqualTo("http://localhost/v1/markets/status/");
+  }
+
+  @Test
+  void status203AlsoReturnsEnvelope() {
+    CapturingClient client =
+        new CapturingClient(203, "cached".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    HttpResponseEnvelope env =
+        transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+
+    assertThat(env.statusCode()).isEqualTo(203);
+    assertThat(new String(env.body())).isEqualTo("cached");
+  }
+
+  @Test
+  void status404AlsoReturnsEnvelope() {
+    // The API uses 404 for "no_data" responses; the body still carries a payload that resources
+    // need to inspect.
+    CapturingClient client =
+        new CapturingClient(
+            404, "{\"s\":\"no_data\"}".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    HttpResponseEnvelope env =
+        transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+
+    assertThat(env.statusCode()).isEqualTo(404);
+    assertThat(new String(env.body())).isEqualTo("{\"s\":\"no_data\"}");
+  }
+
+  // ---------- status routing to typed exceptions ----------
+
+  @Test
+  void status401ThrowsAuthenticationError() {
+    CapturingClient client =
+        new CapturingClient(401, new byte[0], HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
         .isInstanceOf(CompletionException.class)
-        .hasRootCauseInstanceOf(OutOfMemoryError.class)
-        .hasRootCauseMessage("simulated synchronous Error from sendAsync");
+        .hasCauseInstanceOf(AuthenticationError.class);
+  }
 
-    // Permit released even though the catch took the Error branch — a leak here would
-    // accumulate over a long-lived process and eventually deadlock the pool.
-    assertThat(permits.availablePermits()).isEqualTo(initial);
+  @Test
+  void status400ThrowsBadRequestError() {
+    CapturingClient client =
+        new CapturingClient(400, new byte[0], HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(BadRequestError.class);
+  }
+
+  @Test
+  void status429ThrowsRateLimitError() {
+    CapturingClient client =
+        new CapturingClient(429, new byte[0], HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(RateLimitError.class);
+  }
+
+  @Test
+  void status500ThrowsServerError() {
+    CapturingClient client =
+        new CapturingClient(500, new byte[0], HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(ServerError.class);
+  }
+
+  @Test
+  void status418ThrowsNotFoundFallbackOrServerError() {
+    // Sanity: unmapped 4xx falls through to HttpStatusMapper's catch-all; we don't pin to
+    // a specific type here, only that it surfaces as SOME MarketDataException.
+    CapturingClient client =
+        new CapturingClient(418, new byte[0], HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(com.marketdata.sdk.exception.MarketDataException.class);
+  }
+
+  @Test
+  void notFoundStatusIsNotThrownBecauseTheApiUsesItForNoData() {
+    // Sanity: 404 must NOT route to NotFoundError — it carries a no_data body. The status
+    // routing's "if 200/203/404 return envelope" branch covers this.
+    CapturingClient client =
+        new CapturingClient(404, "{}".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    HttpResponseEnvelope env =
+        transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+    assertThat(env.statusCode()).isEqualTo(404);
+    // Compiler-only: ensure NotFoundError exists so test wouldn't compile if removed.
+    @SuppressWarnings("unused")
+    Class<?> noisy = NotFoundError.class;
+  }
+
+  // ---------- rate-limit snapshot ----------
+
+  @Test
+  void rateLimitSnapshotUpdatesWhenHeadersPresent() {
+    HttpHeaders headers =
+        TestHttpClients.headersOf(
+            Map.of(
+                "x-api-ratelimit-limit", "1000",
+                "x-api-ratelimit-remaining", "987",
+                "x-api-ratelimit-reset", "1714867200",
+                "x-api-ratelimit-consumed", "13"));
+    CapturingClient client = new CapturingClient(200, "ok".getBytes(), headers);
+    HttpTransport transport = newTransport(client);
+
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+
+    RateLimitSnapshot snap = transport.getLatestRateLimits();
+    assertThat(snap).isNotNull();
+    assertThat(snap.limit()).isEqualTo(1000);
+    assertThat(snap.remaining()).isEqualTo(987);
+    assertThat(snap.consumed()).isEqualTo(13);
+  }
+
+  @Test
+  void rateLimitSnapshotNotClearedByResponseWithoutHeaders() {
+    // First call sets a snapshot; second call returns no headers; snapshot must remain
+    // populated (vs flickering to null).
+    // Real data has remaining > 0 — otherwise the §10.3 pre-flight would block the second call.
+    HttpHeaders withRl =
+        TestHttpClients.headersOf(
+            Map.of(
+                "x-api-ratelimit-limit", "500",
+                "x-api-ratelimit-remaining", "100",
+                "x-api-ratelimit-reset", "1714867200",
+                "x-api-ratelimit-consumed", "400"));
+    HttpHeaders empty = HttpHeaders.of(Map.of(), (a, b) -> true);
+    CapturingClient client = new CapturingClient(200, "ok".getBytes(), withRl);
+    HttpTransport transport = newTransport(client);
+
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+    RateLimitSnapshot before = transport.getLatestRateLimits();
+    assertThat(before).isNotNull();
+
+    client.nextHeaders = empty;
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+
+    assertThat(transport.getLatestRateLimits()).isSameAs(before);
+  }
+
+  @Test
+  void rateLimitSnapshotNotClobberedByPartialHeaders() {
+    // §8.2: the four x-api-ratelimit-* headers travel together. A response that only carries a
+    // subset is treated as "no rate-limit info" — we keep the last-known-good snapshot instead
+    // of stomping it with phantom zeros that would trip the §10.3 preflight.
+    HttpHeaders complete =
+        TestHttpClients.headersOf(
+            Map.of(
+                "x-api-ratelimit-limit", "500",
+                "x-api-ratelimit-remaining", "100",
+                "x-api-ratelimit-reset", "1714867200",
+                "x-api-ratelimit-consumed", "400"));
+    HttpHeaders partial =
+        TestHttpClients.headersOf(
+            Map.of(
+                "x-api-ratelimit-limit", "500",
+                "x-api-ratelimit-remaining", "99")); // missing reset + consumed
+    CapturingClient client = new CapturingClient(200, "ok".getBytes(), complete);
+    HttpTransport transport = newTransport(client);
+
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+    RateLimitSnapshot before = transport.getLatestRateLimits();
+    assertThat(before).isNotNull();
+
+    client.nextHeaders = partial;
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+
+    assertThat(transport.getLatestRateLimits()).isSameAs(before);
+  }
+
+  // ---------- sync bridge ----------
+
+  @Test
+  void executeSyncReturnsEnvelopeOnSuccess() {
+    CapturingClient client =
+        new CapturingClient(200, "ok".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    HttpResponseEnvelope env = transport.executeSync(RequestSpec.get("markets/status").build());
+
+    assertThat(env.statusCode()).isEqualTo(200);
+  }
+
+  @Test
+  void executeSyncUnwrapsCompletionExceptionToCause() {
+    CapturingClient client =
+        new CapturingClient(500, new byte[0], HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    assertThatThrownBy(() -> transport.executeSync(RequestSpec.get("markets/status").build()))
+        .isInstanceOf(ServerError.class); // not CompletionException, not wrapped
+  }
+
+  // ---------- §10.3 pre-flight rate-limit check ----------
+
+  private static HttpHeaders rateLimitHeaders(int remaining) {
+    // Reset always in the future relative to Clock.systemUTC() so the preflight's reset-window
+    // guard treats the snapshot as "still exhausted" rather than "stale — let it through".
+    long resetEpoch = Instant.now().plus(Duration.ofHours(1)).getEpochSecond();
+    return TestHttpClients.headersOf(
+        Map.of(
+            "x-api-ratelimit-limit",
+            "1000",
+            "x-api-ratelimit-remaining",
+            String.valueOf(remaining),
+            "x-api-ratelimit-reset",
+            String.valueOf(resetEpoch),
+            "x-api-ratelimit-consumed",
+            "1"));
   }
 
   /**
-   * Regression for the slow-path cancellation leak (Issue #1, Component A). When the pool is
-   * saturated, {@code acquire()} returns a pending waiter that is enqueued. The future the caller
-   * actually sees is the downstream {@code thenCompose} result, NOT the waiter. Cancelling the
-   * downstream does <em>not</em> propagate to the waiter (standard CompletableFuture semantics), so
-   * the waiter is still alive when {@code release()} runs — release() "transfers" the permit by
-   * completing the waiter, but the {@code thenCompose} function never executes because its
-   * dependent future is already cancelled. Result: the permit is lost forever.
-   *
-   * <p>This test saturates the pool with {@link HttpTransport#CONCURRENCY_LIMIT} fast-path
-   * dispatches whose HTTP futures we control, queues {@code extras} slow-path callers, cancels all
-   * the slow-path futures, and then completes the fast-path HTTP futures so {@code release()}
-   * fires. Once every dispatch has settled, every permit must be back in the pool.
+   * After a response that exhausts credits, the next call must fail fast with {@link
+   * RateLimitError} and never reach the HttpClient. Without §10.3 we'd waste a real request to
+   * discover the same answer the snapshot already gave us.
    */
   @Test
-  void permitsAreReleasedWhenSlowPathFuturesAreCancelled() throws Exception {
-    ControllableHttpClient client = new ControllableHttpClient();
+  void preflightRejectsWhenSnapshotShowsZeroRemaining() {
+    CapturingClient client =
+        new CapturingClient(200, "ok".getBytes(), rateLimitHeaders(/* remaining */ 0));
+    HttpTransport transport = newTransport(client);
+
+    // First call populates the snapshot (remaining=0) and succeeds normally.
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+    assertThat(client.captured).hasSize(1);
+
+    // Second call should be vetoed by the pre-flight; HttpClient must not see it.
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(com.marketdata.sdk.exception.RateLimitError.class);
+
+    assertThat(client.captured).hasSize(1);
+  }
+
+  @Test
+  void preflightAllowsWhenSnapshotShowsCreditsRemaining() {
+    CapturingClient client =
+        new CapturingClient(200, "ok".getBytes(), rateLimitHeaders(/* remaining */ 42));
+    HttpTransport transport = newTransport(client);
+
+    // First call populates the snapshot.
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+    // Second call should proceed — credits still available.
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+
+    assertThat(client.captured).hasSize(2);
+  }
+
+  /**
+   * Before any rate-limit-bearing response has arrived, the snapshot is {@code null} — the first
+   * request must NOT be blocked despite there being "zero" remaining in the EMPTY sentinel. The
+   * pre-flight gate has to distinguish "no data yet" from "actually exhausted".
+   */
+  @Test
+  void preflightAllowsTheFirstRequestWhenNoSnapshotExistsYet() {
+    CapturingClient client =
+        new CapturingClient(200, "ok".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    // No prior response → no snapshot → request proceeds.
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+
+    assertThat(client.captured).hasSize(1);
+    assertThat(transport.getLatestRateLimits()).isNull();
+  }
+
+  /**
+   * The reset-window guard: once {@code reset} has elapsed the preflight must let the request
+   * through even though {@code remaining=0}. Without this guard a single response with {@code
+   * remaining=0} would lock the client out forever — no request reaches the wire, so the snapshot
+   * never refreshes from a fresh response.
+   */
+  @Test
+  void preflightAllowsWhenResetWindowHasElapsed() {
+    // reset = 15:00:00 UTC; the test runs the second call at 15:00:10 — past the reset, so the
+    // preflight must allow the request even though remaining=0.
+    Instant resetTs = Instant.parse("2026-05-20T15:00:00Z");
+    long resetEpoch = resetTs.getEpochSecond();
+    Clock fixedAfterReset = Clock.fixed(resetTs.plus(Duration.ofSeconds(10)), ZoneOffset.UTC);
+
+    HttpHeaders exhausted =
+        TestHttpClients.headersOf(
+            Map.of(
+                "x-api-ratelimit-limit", "1000",
+                "x-api-ratelimit-remaining", "0",
+                "x-api-ratelimit-reset", String.valueOf(resetEpoch),
+                "x-api-ratelimit-consumed", "1000"));
+    CapturingClient client = new CapturingClient(200, "ok".getBytes(), exhausted);
+    HttpTransport transport = newTransport(client, fixedAfterReset);
+
+    // First call lands the exhausted snapshot.
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+    assertThat(client.captured).hasSize(1);
+
+    // Second call: remaining=0, but reset has already passed → preflight must allow.
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+    assertThat(client.captured).hasSize(2);
+  }
+
+  @Test
+  void preflightAllowsAtTheExactResetInstant() {
+    // Boundary check: "now == reset" is treated as window-elapsed (the server has presumably
+    // refreshed by the instant the reset timestamp names).
+    Instant resetTs = Instant.parse("2026-05-20T15:00:00Z");
+    Clock fixedAtReset = Clock.fixed(resetTs, ZoneOffset.UTC);
+
+    HttpHeaders exhausted =
+        TestHttpClients.headersOf(
+            Map.of(
+                "x-api-ratelimit-limit", "1000",
+                "x-api-ratelimit-remaining", "0",
+                "x-api-ratelimit-reset", String.valueOf(resetTs.getEpochSecond()),
+                "x-api-ratelimit-consumed", "1000"));
+    CapturingClient client = new CapturingClient(200, "ok".getBytes(), exhausted);
+    HttpTransport transport = newTransport(client, fixedAtReset);
+
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+
+    assertThat(client.captured).hasSize(2);
+  }
+
+  /**
+   * §9.4 vs §10.3 conflict: a 5xx response can carry both rate-limit headers (which exhaust the
+   * snapshot) AND an explicit {@code Retry-After} (which schedules the retry). The retry must honor
+   * the server's directive — bypassing the local preflight gate — otherwise the SDK would sabotage
+   * the server-orchestrated backoff. Two attempts must reach the wire.
+   */
+  @Test
+  void retryWithServerHintedRetryAfterBypassesPreflight() {
+    HttpHeaders exhaustedWithHint =
+        TestHttpClients.headersOf(
+            Map.of(
+                "x-api-ratelimit-limit",
+                "1000",
+                "x-api-ratelimit-remaining",
+                "0",
+                "x-api-ratelimit-reset",
+                String.valueOf(Instant.now().plus(Duration.ofHours(1)).getEpochSecond()),
+                "x-api-ratelimit-consumed",
+                "1000",
+                "Retry-After",
+                "0"));
+    CapturingClient client = new CapturingClient(503, new byte[0], exhaustedWithHint);
+    RetryPolicy twoAttempts = new RetryPolicy(2, Duration.ofMillis(1), Duration.ofMillis(1));
     HttpTransport transport =
-        new HttpTransport("http://localhost", "v1", "test/0.0", null, client, NO_RETRY);
+        new HttpTransport(
+            "http://localhost",
+            "v1",
+            "test/0.0",
+            "secret-token",
+            new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
+            new RetryExecutor(twoAttempts),
+            () -> null,
+            Clock.systemUTC());
 
-    AsyncSemaphore permits = readSemaphore(transport);
-    int initial = permits.availablePermits();
-    assertThat(initial).isEqualTo(HttpTransport.CONCURRENCY_LIMIT);
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(ServerError.class);
 
-    // Saturate the pool — these go through the fast path (acquire returns an already-completed
-    // future), dispatch is invoked, sendAsync is called → ControllableHttpClient returns a
-    // pending future we hold the handle to.
-    List<CompletableFuture<Object>> fastPath = new ArrayList<>(initial);
-    for (int i = 0; i < initial; i++) {
-      fastPath.add(transport.executeAsync(RequestSpec.get("ping").build(), Object.class));
-    }
-    assertThat(permits.availablePermits()).isZero();
-    assertThat(permits.queueLength()).isZero();
-    assertThat(client.pendingCount()).isEqualTo(initial);
-
-    // Slow path — these enqueue waiters in the semaphore. dispatch is NOT yet called for them.
-    int extras = 5;
-    List<CompletableFuture<Object>> slowPath = new ArrayList<>(extras);
-    for (int i = 0; i < extras; i++) {
-      slowPath.add(transport.executeAsync(RequestSpec.get("ping").build(), Object.class));
-    }
-    assertThat(permits.queueLength()).isEqualTo(extras);
-
-    // Caller cancels every slow-path future. Without the fix, the waiters stay live in the
-    // queue — release() will later transfer permits into the cancelled-downstream waiters
-    // and the permits disappear.
-    for (CompletableFuture<Object> f : slowPath) {
-      f.cancel(false);
-    }
-
-    // Complete every fast-path HTTP future. Each completion fires whenComplete(release).
-    // Failing the future bypasses body decoding (which would NPE on a null response) while
-    // still exercising the release path.
-    client.failAll(new IOException("simulated end of test"));
-
-    // After every dispatch has settled, the pool must be fully restored.
-    assertThat(permits.queueLength()).isZero();
-    assertThat(permits.availablePermits())
-        .as("every permit should be back in the pool — no leaks from cancelled slow-path futures")
-        .isEqualTo(initial);
-  }
-
-  // ---------- asRuntime: covers the three branches in the executeSync catch ----------
-
-  @Test
-  void asRuntimeReturnsMarketDataExceptionUnchanged() {
-    // The `instanceof MarketDataException` branch — the only one reached from the public
-    // surface today (every failure from executeAsync is wrapped as an MDE subtype).
-    com.marketdata.sdk.exception.BadRequestError mde =
-        new com.marketdata.sdk.exception.BadRequestError(
-            "bad", com.marketdata.sdk.exception.ErrorContext.empty());
-
-    RuntimeException result = HttpTransport.asRuntime(mde);
-
-    assertThat(result).isSameAs(mde);
-  }
-
-  @Test
-  void asRuntimeRethrowsNonMdeRuntimeExceptionUnchanged() {
-    // Defensive guardrail: if some future code path lets a non-MDE RuntimeException reach
-    // .join()'s cause, surface it as-is rather than wrapping it.
-    IllegalStateException re = new IllegalStateException("unexpected");
-
-    RuntimeException result = HttpTransport.asRuntime(re);
-
-    assertThat(result).isSameAs(re);
-  }
-
-  @Test
-  void asRuntimeWrapsNonRuntimeCauseInNetworkError() {
-    // Last-resort branch: cause is an Error (or null). Wrap in NetworkError so the public
-    // surface still observes the sealed MarketDataException hierarchy.
-    OutOfMemoryError error = new OutOfMemoryError("simulated");
-
-    RuntimeException result = HttpTransport.asRuntime(error);
-
-    assertThat(result).isInstanceOf(com.marketdata.sdk.exception.NetworkError.class);
-    assertThat(result.getCause()).isSameAs(error);
-    assertThat(result.getMessage()).contains("Unexpected failure invoking SDK");
-  }
-
-  @Test
-  void asRuntimeWrapsNullCauseInNetworkError() {
-    // CompletableFuture.join() can in principle deliver a CompletionException whose cause
-    // is null (defensive: should never happen in practice but ergonomically harmless).
-    RuntimeException result = HttpTransport.asRuntime(null);
-
-    assertThat(result).isInstanceOf(com.marketdata.sdk.exception.NetworkError.class);
-    assertThat(result.getCause()).isNull();
-  }
-
-  // ---------- unwrap: covers all 4 branches of `t instanceof CE && t.getCause() != null`
-  // ----------
-
-  @Test
-  void unwrapReturnsNonCompletionExceptionUnchanged() {
-    // First branch of `&&` is false → short-circuit, return t as-is. The most common path
-    // in production: handle() in CompletableFuture already unwraps CompletionException.
-    java.io.IOException io = new java.io.IOException("boom");
-    assertThat(HttpTransport.unwrap(io)).isSameAs(io);
-  }
-
-  @Test
-  void unwrapReturnsCauseOfNestedCompletionException() {
-    // Both branches true: CompletionException with a cause. Returns the cause.
-    java.io.IOException root = new java.io.IOException("root");
-    CompletionException wrapped = new CompletionException(root);
-
-    assertThat(HttpTransport.unwrap(wrapped)).isSameAs(root);
-  }
-
-  @Test
-  void unwrapReturnsCompletionExceptionWithoutCauseUnchanged() {
-    // First branch true, second branch false: CompletionException with `null` cause. The
-    // method returns t itself rather than dereferencing the missing cause.
-    CompletionException causeless = new CompletionException(null);
-
-    assertThat(HttpTransport.unwrap(causeless)).isSameAs(causeless);
-  }
-
-  // ---------- helpers ----------
-
-  private static AsyncSemaphore readSemaphore(HttpTransport t) throws Exception {
-    Field f = HttpTransport.class.getDeclaredField("concurrencyPermits");
-    f.setAccessible(true);
-    return (AsyncSemaphore) f.get(t);
+    // Both attempts reached the wire: the snapshot would have BLOCKed the retry, but the
+    // server's Retry-After said "come back" and the SDK honored it. Without the bypass this
+    // would be 1 (and the final cause would be RateLimitError).
+    assertThat(client.captured).hasSize(2);
   }
 
   /**
-   * Bare-bones {@link HttpClient} subclass whose {@code sendAsync} throws synchronously. Every
-   * other abstract method is stubbed with {@code UnsupportedOperationException} since the test
-   * never exercises them.
+   * Regression guard for the bypass scope: when the retry is NOT server-hinted (no {@code
+   * Retry-After}), the snapshot's exhaustion verdict still vetoes the retry. Otherwise we'd be
+   * leaking the bypass to every retry and defeating §10.3 entirely.
    */
-  private static final class SyncThrowingHttpClient extends HttpClient {
-    @Override
-    public <T> CompletableFuture<HttpResponse<T>> sendAsync(
-        HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler) {
-      throw new IllegalArgumentException("simulated synchronous throw from sendAsync");
-    }
+  @Test
+  void retryWithoutServerHintStillTriggersPreflightBlock() {
+    HttpHeaders exhaustedNoHint =
+        TestHttpClients.headersOf(
+            Map.of(
+                "x-api-ratelimit-limit",
+                "1000",
+                "x-api-ratelimit-remaining",
+                "0",
+                "x-api-ratelimit-reset",
+                String.valueOf(Instant.now().plus(Duration.ofHours(1)).getEpochSecond()),
+                "x-api-ratelimit-consumed",
+                "1000"));
+    CapturingClient client = new CapturingClient(503, new byte[0], exhaustedNoHint);
+    RetryPolicy twoAttempts = new RetryPolicy(2, Duration.ofMillis(1), Duration.ofMillis(1));
+    HttpTransport transport =
+        new HttpTransport(
+            "http://localhost",
+            "v1",
+            "test/0.0",
+            "secret-token",
+            new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
+            new RetryExecutor(twoAttempts),
+            () -> null,
+            Clock.systemUTC());
 
-    @Override
-    public Optional<CookieHandler> cookieHandler() {
-      return Optional.empty();
-    }
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(RateLimitError.class);
 
-    @Override
-    public Optional<Duration> connectTimeout() {
-      return Optional.empty();
-    }
+    // Only the first attempt reached the wire; the retry was vetoed by the preflight because
+    // the previous cause had no server-side Retry-After to authorize the bypass.
+    assertThat(client.captured).hasSize(1);
+  }
 
-    @Override
-    public Redirect followRedirects() {
-      return Redirect.NEVER;
-    }
+  @Test
+  void preflightStillBlocksWhenResetIsInTheFuture() {
+    // reset is in the future → the snapshot's "exhausted" verdict is still current; the
+    // preflight must veto the second call.
+    Instant resetTs = Instant.parse("2026-05-20T15:30:00Z");
+    Clock fixedBeforeReset = Clock.fixed(resetTs.minus(Duration.ofMinutes(5)), ZoneOffset.UTC);
 
-    @Override
-    public Optional<ProxySelector> proxy() {
-      return Optional.empty();
-    }
+    HttpHeaders exhausted =
+        TestHttpClients.headersOf(
+            Map.of(
+                "x-api-ratelimit-limit", "1000",
+                "x-api-ratelimit-remaining", "0",
+                "x-api-ratelimit-reset", String.valueOf(resetTs.getEpochSecond()),
+                "x-api-ratelimit-consumed", "1000"));
+    CapturingClient client = new CapturingClient(200, "ok".getBytes(), exhausted);
+    HttpTransport transport = newTransport(client, fixedBeforeReset);
 
-    @Override
-    public SSLContext sslContext() {
-      throw new UnsupportedOperationException();
-    }
+    transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+    assertThat(client.captured).hasSize(1);
 
-    @Override
-    public SSLParameters sslParameters() {
-      throw new UnsupportedOperationException();
-    }
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(RateLimitError.class);
 
-    @Override
-    public Optional<Authenticator> authenticator() {
-      return Optional.empty();
-    }
+    assertThat(client.captured).hasSize(1);
+  }
 
-    @Override
-    public Version version() {
-      return Version.HTTP_1_1;
-    }
+  // ---------- §9.4 Retry-After header ----------
 
-    @Override
-    public Optional<Executor> executor() {
-      return Optional.empty();
-    }
+  /**
+   * When the server attaches a {@code Retry-After} header to a 5xx response, the resulting {@link
+   * ServerError} must carry the parsed {@link Duration} so the retry policy can override its
+   * calculated backoff with the server's directive.
+   */
+  @Test
+  void serverErrorCarriesParsedRetryAfterDuration() {
+    HttpHeaders headers = TestHttpClients.headersOf(Map.of("Retry-After", "7"));
+    CapturingClient client = new CapturingClient(503, new byte[0], headers);
+    HttpTransport transport = newTransport(client);
 
-    @Override
-    public <T> HttpResponse<T> send(
-        HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler)
-        throws IOException, InterruptedException {
-      throw new UnsupportedOperationException();
-    }
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(ServerError.class)
+        .satisfies(
+            t -> {
+              ServerError se = (ServerError) t.getCause();
+              assertThat(se.getRetryAfter()).contains(Duration.ofSeconds(7));
+            });
+  }
 
-    @Override
-    public <T> CompletableFuture<HttpResponse<T>> sendAsync(
-        HttpRequest request,
-        HttpResponse.BodyHandler<T> responseBodyHandler,
-        HttpResponse.PushPromiseHandler<T> pushPromiseHandler) {
-      throw new UnsupportedOperationException();
-    }
+  @Test
+  void serverErrorRetryAfterIsEmptyWhenHeaderAbsent() {
+    CapturingClient client =
+        new CapturingClient(503, new byte[0], HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
 
-    @Override
-    public WebSocket.Builder newWebSocketBuilder() {
-      throw new UnsupportedOperationException();
-    }
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(ServerError.class)
+        .satisfies(
+            t -> {
+              ServerError se = (ServerError) t.getCause();
+              assertThat(se.getRetryAfter()).isEmpty();
+            });
   }
 
   /**
-   * Stub {@link HttpClient} whose {@code sendAsync} returns a fresh, never-auto-completing future
-   * for each call. The test holds the references and chooses when to complete them — that's the
-   * lever the slow-path cancellation regression test pulls to deterministically drive the {@code
-   * whenComplete(release)} path.
+   * RFC 6585 defines {@code Retry-After} for 429. The SDK does not retry 429 itself, but the
+   * consumer can read the directive to schedule its own backoff. The parsed duration must travel
+   * with the {@link RateLimitError}.
    */
-  private static final class ControllableHttpClient extends HttpClient {
-    private final List<CompletableFuture<HttpResponse<?>>> pending = new ArrayList<>();
+  @Test
+  void rateLimitErrorCarriesParsedRetryAfterDuration() {
+    HttpHeaders headers = TestHttpClients.headersOf(Map.of("Retry-After", "30"));
+    CapturingClient client = new CapturingClient(429, new byte[0], headers);
+    HttpTransport transport = newTransport(client);
 
-    @SuppressWarnings("unchecked")
-    @Override
-    public <T> CompletableFuture<HttpResponse<T>> sendAsync(
-        HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler) {
-      CompletableFuture<HttpResponse<T>> f = new CompletableFuture<>();
-      pending.add((CompletableFuture<HttpResponse<?>>) (CompletableFuture<?>) f);
-      return f;
-    }
-
-    int pendingCount() {
-      return pending.size();
-    }
-
-    void failAll(Throwable t) {
-      for (CompletableFuture<HttpResponse<?>> f : pending) {
-        f.completeExceptionally(t);
-      }
-    }
-
-    @Override
-    public Optional<CookieHandler> cookieHandler() {
-      return Optional.empty();
-    }
-
-    @Override
-    public Optional<Duration> connectTimeout() {
-      return Optional.empty();
-    }
-
-    @Override
-    public Redirect followRedirects() {
-      return Redirect.NEVER;
-    }
-
-    @Override
-    public Optional<ProxySelector> proxy() {
-      return Optional.empty();
-    }
-
-    @Override
-    public SSLContext sslContext() {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public SSLParameters sslParameters() {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public Optional<Authenticator> authenticator() {
-      return Optional.empty();
-    }
-
-    @Override
-    public Version version() {
-      return Version.HTTP_1_1;
-    }
-
-    @Override
-    public Optional<Executor> executor() {
-      return Optional.empty();
-    }
-
-    @Override
-    public <T> HttpResponse<T> send(
-        HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler)
-        throws IOException, InterruptedException {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public <T> CompletableFuture<HttpResponse<T>> sendAsync(
-        HttpRequest request,
-        HttpResponse.BodyHandler<T> responseBodyHandler,
-        HttpResponse.PushPromiseHandler<T> pushPromiseHandler) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public WebSocket.Builder newWebSocketBuilder() {
-      throw new UnsupportedOperationException();
-    }
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(RateLimitError.class)
+        .satisfies(
+            t -> {
+              RateLimitError rle = (RateLimitError) t.getCause();
+              assertThat(rle.getRetryAfter()).contains(Duration.ofSeconds(30));
+            });
   }
 
-  /** Same skeleton as {@link SyncThrowingHttpClient} but throws an {@link Error} (OOM-shaped). */
-  private static final class ErrorThrowingHttpClient extends HttpClient {
+  @Test
+  void rateLimitErrorRetryAfterIsEmptyWhenHeaderAbsent() {
+    CapturingClient client =
+        new CapturingClient(429, new byte[0], HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport = newTransport(client);
+
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(RateLimitError.class)
+        .satisfies(
+            t -> {
+              RateLimitError rle = (RateLimitError) t.getCause();
+              assertThat(rle.getRetryAfter()).isEmpty();
+            });
+  }
+
+  // ---------- §9.5 status-cache gate ----------
+
+  /**
+   * Even with a 5xx that the policy would retry, an "offline" entry in the cache must veto the
+   * retry. The dispatcher should see exactly one call: the original attempt; no retries are
+   * scheduled.
+   */
+  @Test
+  void cacheOfflineEntryVetoesA5xxRetry() throws Exception {
+    com.marketdata.sdk.utilities.ApiStatus offlineForService =
+        new com.marketdata.sdk.utilities.ApiStatus(
+            java.util.List.of(
+                new com.marketdata.sdk.utilities.ServiceStatus(
+                    "/v1/markets/status/",
+                    "offline",
+                    false,
+                    0.5,
+                    0.5,
+                    java.time.Instant.EPOCH.atZone(MarketDataDates.MARKET_ZONE))));
+    StatusCache cache =
+        new StatusCache(
+            () -> CompletableFuture.completedFuture(offlineForService),
+            java.time.Clock.systemUTC());
+    cache.triggerRefresh();
+    // Wait for the snapshot to land — the fetcher returns a completed future, so the
+    // whenComplete fires synchronously on the same thread, but be defensive.
+    Thread.sleep(20);
+
+    // Allow 4 retries so we'd retry on a 5xx — IF the cache didn't veto.
+    RetryPolicy fourAttempts = new RetryPolicy(4, Duration.ofMillis(1), Duration.ofMillis(1));
+    CapturingClient client =
+        new CapturingClient(503, new byte[0], HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport =
+        new HttpTransport(
+            "http://localhost",
+            "v1",
+            "test/0.0",
+            "secret-token",
+            new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
+            new RetryExecutor(fourAttempts),
+            () -> cache,
+            Clock.systemUTC());
+
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(ServerError.class);
+
+    // The cache vetoed: exactly one HTTP dispatch, no retries scheduled.
+    assertThat(client.captured).hasSize(1);
+  }
+
+  /** When the cache says online (or no entry matches), retries proceed normally. */
+  @Test
+  void cacheOnlineEntryAllowsNormalRetryFlow() throws Exception {
+    com.marketdata.sdk.utilities.ApiStatus online =
+        new com.marketdata.sdk.utilities.ApiStatus(
+            java.util.List.of(
+                new com.marketdata.sdk.utilities.ServiceStatus(
+                    "/v1/markets/status/",
+                    "online",
+                    true,
+                    1.0,
+                    1.0,
+                    java.time.Instant.EPOCH.atZone(MarketDataDates.MARKET_ZONE))));
+    StatusCache cache =
+        new StatusCache(
+            () -> CompletableFuture.completedFuture(online), java.time.Clock.systemUTC());
+    cache.triggerRefresh();
+    Thread.sleep(20);
+
+    RetryPolicy fourAttempts = new RetryPolicy(4, Duration.ofMillis(1), Duration.ofMillis(1));
+    CapturingClient client =
+        new CapturingClient(503, new byte[0], HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport =
+        new HttpTransport(
+            "http://localhost",
+            "v1",
+            "test/0.0",
+            "secret-token",
+            new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
+            new RetryExecutor(fourAttempts),
+            () -> cache,
+            Clock.systemUTC());
+
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(ServerError.class);
+
+    // 4 attempts: initial + 3 retries (policy allows; cache doesn't veto).
+    assertThat(client.captured).hasSize(4);
+  }
+
+  /**
+   * Self-referential bypass: even when the cache reports the /status/ service offline, retries of
+   * the /status/ fetch itself must proceed — otherwise the cache could never refresh out of an
+   * "offline" snapshot and would stay frozen in that state indefinitely.
+   */
+  @Test
+  void cacheDoesNotBlockRetriesOnTheStatusEndpointEvenWhenSnapshotMarksItOffline()
+      throws Exception {
+    com.marketdata.sdk.utilities.ApiStatus statusItselfOffline =
+        new com.marketdata.sdk.utilities.ApiStatus(
+            java.util.List.of(
+                new com.marketdata.sdk.utilities.ServiceStatus(
+                    "/status/",
+                    "offline",
+                    false,
+                    0.5,
+                    0.5,
+                    java.time.Instant.EPOCH.atZone(MarketDataDates.MARKET_ZONE))));
+    StatusCache cache =
+        new StatusCache(
+            () -> CompletableFuture.completedFuture(statusItselfOffline),
+            java.time.Clock.systemUTC());
+    cache.triggerRefresh();
+    Thread.sleep(20);
+
+    // Confirm the snapshot really would BLOCK /status/ retries if the bypass didn't exist.
+    assertThat(cache.check(URI.create("http://localhost/status/")))
+        .isEqualTo(StatusCache.Decision.BLOCK);
+
+    RetryPolicy fourAttempts = new RetryPolicy(4, Duration.ofMillis(1), Duration.ofMillis(1));
+    CapturingClient client =
+        new CapturingClient(503, new byte[0], HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport =
+        new HttpTransport(
+            "http://localhost",
+            "v1",
+            "test/0.0",
+            "secret-token",
+            new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
+            new RetryExecutor(fourAttempts),
+            () -> cache,
+            Clock.systemUTC());
+
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("status").unversioned().build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(ServerError.class);
+
+    // All 4 attempts run: the bypass kicked in for the /status/ path, so the cache did not
+    // veto. Without the bypass this would be 1.
+    assertThat(client.captured).hasSize(4);
+  }
+
+  @Test
+  void selfReferentialBypassDoesNotLeakToOtherEndpoints() throws Exception {
+    // Regression guard: the bypass for /status/ must NOT generalize. A different endpoint
+    // marked offline should still BLOCK retries as today.
+    com.marketdata.sdk.utilities.ApiStatus quotesOffline =
+        new com.marketdata.sdk.utilities.ApiStatus(
+            java.util.List.of(
+                new com.marketdata.sdk.utilities.ServiceStatus(
+                    "/v1/markets/quotes/",
+                    "offline",
+                    false,
+                    0.5,
+                    0.5,
+                    java.time.Instant.EPOCH.atZone(MarketDataDates.MARKET_ZONE))));
+    StatusCache cache =
+        new StatusCache(
+            () -> CompletableFuture.completedFuture(quotesOffline), java.time.Clock.systemUTC());
+    cache.triggerRefresh();
+    Thread.sleep(20);
+
+    RetryPolicy fourAttempts = new RetryPolicy(4, Duration.ofMillis(1), Duration.ofMillis(1));
+    CapturingClient client =
+        new CapturingClient(503, new byte[0], HttpHeaders.of(Map.of(), (a, b) -> true));
+    HttpTransport transport =
+        new HttpTransport(
+            "http://localhost",
+            "v1",
+            "test/0.0",
+            "secret-token",
+            new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
+            new RetryExecutor(fourAttempts),
+            () -> cache,
+            Clock.systemUTC());
+
+    assertThatThrownBy(
+            () -> transport.executeAsync(RequestSpec.get("markets/quotes").build()).join())
+        .isInstanceOf(CompletionException.class)
+        .hasCauseInstanceOf(ServerError.class);
+
+    // Cache vetoed: only 1 attempt, no retries. The bypass is /status/-specific.
+    assertThat(client.captured).hasSize(1);
+  }
+
+  // ---------- §12 concurrency limit (50 in-flight) ----------
+
+  /**
+   * §12 mandates a 50-request concurrency cap on in-flight HTTP work. This test pins the value AND
+   * verifies the gating happens at the {@code transport.executeAsync} entry point — not just inside
+   * {@link HttpDispatcher} in isolation — so a future refactor that bypasses the dispatcher (or
+   * accidentally instantiates a parallel pool elsewhere) breaks the assertion.
+   *
+   * <p>Determinism: {@link TestHttpClients.Controllable} hands out fresh pending futures from
+   * {@code sendAsync}, so 50 dispatches fill the {@code pending} list and the 51st is forced onto
+   * the semaphore's slow path. Completing the in-flight set in two passes (the second covers the
+   * 51st request, which re-enters {@code sendAsync} as permits transfer through release()) drains
+   * the system back to a fully-available pool.
+   */
+  @Test
+  void respectsGlobalConcurrencyLimitOfFifty() {
+    // Pin the constant — a silent edit that drops it (or hikes it past 50) would otherwise pass
+    // every existing test while quietly violating §12.
+    assertThat(HttpTransport.CONCURRENCY_LIMIT).isEqualTo(50);
+
+    TestHttpClients.Controllable client = new TestHttpClients.Controllable();
+    HttpDispatcher dispatcher = new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT);
+    HttpTransport transport =
+        new HttpTransport(
+            "http://localhost",
+            "v1",
+            "test/0.0",
+            "secret-token",
+            dispatcher,
+            new RetryExecutor(NO_RETRY),
+            () -> null,
+            Clock.systemUTC());
+
+    List<CompletableFuture<HttpResponseEnvelope>> calls = new ArrayList<>();
+    for (int i = 0; i < 51; i++) {
+      calls.add(transport.executeAsync(RequestSpec.get("markets/status").build()));
+    }
+
+    // 50 reached the wire; the 51st is parked in the semaphore queue.
+    assertThat(client.pendingCount()).isEqualTo(50);
+    assertThat(dispatcher.queueLength()).isOne();
+    assertThat(dispatcher.availablePermits()).isZero();
+
+    HttpResponse<byte[]> ok =
+        TestHttpClients.response(
+            200,
+            new byte[0],
+            HttpHeaders.of(Map.of(), (a, b) -> true),
+            URI.create("http://localhost/v1/markets/status/"));
+
+    // Pass 1: complete the original 50. Each release transfers to the queued 51st, which
+    // re-enters sendAsync and lands a fresh pending future. The 49 remaining releases bump the
+    // available counter.
+    client.completeAll(ok);
+    // Pass 2: complete the 51st's now-pending sendFuture so its dispatch chain settles too.
+    client.completeAll(ok);
+
+    for (CompletableFuture<HttpResponseEnvelope> c : calls) {
+      assertThat(c).isCompleted();
+    }
+    assertThat(dispatcher.availablePermits()).isEqualTo(HttpTransport.CONCURRENCY_LIMIT);
+    assertThat(dispatcher.queueLength()).isZero();
+  }
+
+  // ---------- stub HttpClient ----------
+
+  /**
+   * Captures every {@link HttpRequest} that flows through {@code sendAsync} and replies with a
+   * canned {@link HttpResponse}. Tests can mutate {@code nextHeaders}/{@code nextBody}/{@code
+   * nextStatus} between calls to drive different responses across requests.
+   */
+  private static final class CapturingClient extends TestHttpClients.StubHttpClient {
+    final List<HttpRequest> captured = new ArrayList<>();
+    int nextStatus;
+    byte[] nextBody;
+    HttpHeaders nextHeaders;
+
+    CapturingClient(int status, byte[] body, HttpHeaders headers) {
+      this.nextStatus = status;
+      this.nextBody = body;
+      this.nextHeaders = headers;
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
     @Override
     public <T> CompletableFuture<HttpResponse<T>> sendAsync(
-        HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler) {
-      throw new OutOfMemoryError("simulated synchronous Error from sendAsync");
-    }
-
-    @Override
-    public Optional<CookieHandler> cookieHandler() {
-      return Optional.empty();
-    }
-
-    @Override
-    public Optional<Duration> connectTimeout() {
-      return Optional.empty();
-    }
-
-    @Override
-    public Redirect followRedirects() {
-      return Redirect.NEVER;
-    }
-
-    @Override
-    public Optional<ProxySelector> proxy() {
-      return Optional.empty();
-    }
-
-    @Override
-    public SSLContext sslContext() {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public SSLParameters sslParameters() {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public Optional<Authenticator> authenticator() {
-      return Optional.empty();
-    }
-
-    @Override
-    public Version version() {
-      return Version.HTTP_1_1;
-    }
-
-    @Override
-    public Optional<Executor> executor() {
-      return Optional.empty();
-    }
-
-    @Override
-    public <T> HttpResponse<T> send(
-        HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler)
-        throws IOException, InterruptedException {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public <T> CompletableFuture<HttpResponse<T>> sendAsync(
-        HttpRequest request,
-        HttpResponse.BodyHandler<T> responseBodyHandler,
-        HttpResponse.PushPromiseHandler<T> pushPromiseHandler) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public WebSocket.Builder newWebSocketBuilder() {
-      throw new UnsupportedOperationException();
+        HttpRequest request, HttpResponse.BodyHandler<T> bh) {
+      captured.add(request);
+      HttpResponse<byte[]> resp =
+          TestHttpClients.response(
+              nextStatus, nextBody, nextHeaders, URI.create("http://localhost"));
+      return (CompletableFuture) CompletableFuture.completedFuture(resp);
     }
   }
 }

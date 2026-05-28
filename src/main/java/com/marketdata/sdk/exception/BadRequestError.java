@@ -2,11 +2,12 @@ package com.marketdata.sdk.exception;
 
 import org.jspecify.annotations.Nullable;
 
-/** The request was malformed or invalid (HTTP 400 / 422). */
 public final class BadRequestError extends MarketDataException {
 
+  private static final long serialVersionUID = 1L;
+
   public BadRequestError(String message, ErrorContext context) {
-    super(message, context, null);
+    this(message, context, null);
   }
 
   public BadRequestError(String message, ErrorContext context, @Nullable Throwable cause) {

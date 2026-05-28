@@ -10,6 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Default retry attempts corrected from 3 to 4 (one initial + three retries) to
   match SDK requirements §9.3 ("max 3 retries, yielding 4 total attempts").
+- `.env` parser now strips trailing inline `# comment` markers (quote-aware: a
+  `#` inside single/double quotes or adjacent to value chars stays part of the
+  value). Previously a line like `MARKETDATA_TOKEN=abc # prod` produced the
+  literal value `abc # prod`, which passes `validateApiKey` (printable ASCII)
+  and surfaces later as a confusing `AuthenticationError` far from the .env
+  source that caused it.
+- `RequestHeaders` canonical constructor now rejects a `null` `headers` map
+  with a clear `NullPointerException` naming the field, replacing the bare
+  `Map.copyOf(null)` NPE that left consumers hunting for the offending
+  argument. The wire-format deserializer additionally intercepts a top-level
+  JSON `null` body via `JsonDeserializer#getNullValue` and surfaces it as a
+  `ParseError` carrying the endpoint URL, status, and request id — preventing
+  a malformed `/headers/` response from manifesting as an opaque NPE further
+  down the call stack.
 
 ### Added
 - Project scaffold per ADRs 001–007: Gradle Kotlin DSL build, JDK 17 toolchain,

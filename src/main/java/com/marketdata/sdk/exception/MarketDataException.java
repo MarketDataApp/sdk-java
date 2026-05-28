@@ -1,20 +1,12 @@
 package com.marketdata.sdk.exception;
 
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.time.Instant;
 import java.time.ZoneId;
-import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import org.jspecify.annotations.Nullable;
 
-/**
- * Root of the SDK exception hierarchy.
- *
- * <p>Sealed so consumer {@code switch} statements over its subtypes are compile-time exhaustive.
- * Every instance carries the support context fields required by SDK requirements §6.2 and exposes a
- * {@link #getSupportInfo()} string per §6.3.
- *
- * <p>Subtypes use {@link ErrorContext#empty()} for client-side validation errors that occur before
- * any HTTP request is dispatched.
- */
 public abstract sealed class MarketDataException extends RuntimeException
     permits AuthenticationError,
         BadRequestError,
@@ -24,57 +16,81 @@ public abstract sealed class MarketDataException extends RuntimeException
         NetworkError,
         ParseError {
 
-  private static final ZoneId EASTERN = ZoneId.of("America/New_York");
-  private static final DateTimeFormatter TIMESTAMP_FORMAT =
-      DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+  private static final long serialVersionUID = 1L;
 
-  private final @Nullable String requestId;
-  private final @Nullable String requestUrl;
-  private final @Nullable Integer statusCode;
-  private final ZonedDateTime timestamp;
+  private final ErrorContext context;
 
   protected MarketDataException(String message, ErrorContext context, @Nullable Throwable cause) {
     super(message, cause);
-    this.requestId = context.requestId();
-    this.requestUrl = context.requestUrl();
-    this.statusCode = context.statusCode();
-    this.timestamp = ZonedDateTime.now(EASTERN);
+    this.context = context;
+  }
+
+  public ErrorContext getContext() {
+    return context;
   }
 
   public @Nullable String getRequestId() {
-    return requestId;
+    return context.requestId();
   }
 
-  public @Nullable String getRequestUrl() {
-    return requestUrl;
+  /**
+   * The request URL with any query string redacted (replaced by {@code ?…}). Mirrors the SDK's
+   * ambient-log policy — query strings can carry PII (account IDs), competitive signal (queried
+   * symbols), or hypothetical future credentials, none of which should land in consumer logs just
+   * because someone called {@code logger.error("Request failed: " + ex.getRequestUrl())}. The full
+   * URI (with query) is preserved internally; use {@link #getContext()} when raw access is
+   * genuinely needed for diagnostics that won't be persisted.
+   */
+  public String getRequestUrl() {
+    return redactQuery(context.requestUrl());
   }
 
-  public @Nullable Integer getStatusCode() {
-    return statusCode;
+  private static String redactQuery(String rawUrl) {
+    try {
+      URI uri = new URI(rawUrl);
+      if (uri.getRawQuery() == null) {
+        return rawUrl;
+      }
+      int qIndex = rawUrl.indexOf('?');
+      return qIndex < 0 ? rawUrl : rawUrl.substring(0, qIndex) + "?…";
+    } catch (URISyntaxException e) {
+      // Defensive: never throw from a getter. If the stored URL is malformed, return verbatim —
+      // it's the consumer's problem to diagnose, but not one to compound by hiding everything.
+      return rawUrl;
+    }
   }
 
-  public ZonedDateTime getTimestamp() {
-    return timestamp;
+  public int getStatusCode() {
+    return context.statusCode();
+  }
+
+  public Instant getTimestamp() {
+    return context.timestamp();
   }
 
   public String getExceptionType() {
     return getClass().getSimpleName();
   }
 
-  /**
-   * Multi-line, human-readable summary of the error and its context, intended to be copy-pasted
-   * into a support ticket. Never contains the API token or request body.
-   */
   public String getSupportInfo() {
-    StringBuilder sb = new StringBuilder(256);
-    sb.append("Market Data SDK Error\n");
-    sb.append("---------------------\n");
-    sb.append("Type:        ").append(getExceptionType()).append('\n');
-    sb.append("Message:     ").append(getMessage()).append('\n');
-    sb.append("Status code: ").append(statusCode != null ? statusCode : "(n/a)").append('\n');
-    sb.append("Request ID:  ").append(requestId != null ? requestId : "(n/a)").append('\n');
-    sb.append("Request URL: ").append(requestUrl != null ? requestUrl : "(n/a)").append('\n');
-    sb.append("Timestamp:   ").append(timestamp.format(TIMESTAMP_FORMAT)).append(" (US/Eastern)");
-    return sb.toString();
+    String requestId = getRequestId();
+    String message = getMessage();
+    return String.join(
+        System.lineSeparator(),
+        "--- MARKET DATA SUPPORT INFO ---",
+        formatField("request_id:", requestId == null ? "(not provided)" : requestId),
+        formatField("request_url:", getRequestUrl()),
+        formatField("status_code:", String.valueOf(getStatusCode())),
+        formatField("timestamp:", EASTERN_FORMATTER.format(getTimestamp())),
+        formatField("message:", message == null ? "" : message),
+        formatField("exception_type:", getExceptionType()),
+        "--------------------------------");
+  }
+
+  private static final DateTimeFormatter EASTERN_FORMATTER =
+      DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.of("America/New_York"));
+
+  private static String formatField(String name, String value) {
+    return String.format("%-16s%s", name, value);
   }
 }

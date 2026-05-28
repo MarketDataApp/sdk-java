@@ -1,21 +1,32 @@
 package com.marketdata.sdk;
 
-/**
- * Names of the {@code MARKETDATA_*} environment variables consulted by the SDK. Mirrors SDK
- * requirements §4.
- */
+import java.util.Set;
+import java.util.function.Function;
+import org.jspecify.annotations.Nullable;
+
 final class EnvVars {
 
-  public static final String TOKEN = "MARKETDATA_TOKEN";
-  public static final String BASE_URL = "MARKETDATA_BASE_URL";
-  public static final String API_VERSION = "MARKETDATA_API_VERSION";
-  public static final String LOGGING_LEVEL = "MARKETDATA_LOGGING_LEVEL";
-  public static final String OUTPUT_FORMAT = "MARKETDATA_OUTPUT_FORMAT";
-  public static final String DATE_FORMAT = "MARKETDATA_DATE_FORMAT";
-  public static final String COLUMNS = "MARKETDATA_COLUMNS";
-  public static final String ADD_HEADERS = "MARKETDATA_ADD_HEADERS";
-  public static final String USE_HUMAN_READABLE = "MARKETDATA_USE_HUMAN_READABLE";
-  public static final String MODE = "MARKETDATA_MODE";
+  static final String TOKEN = "MARKETDATA_TOKEN";
+  static final String BASE_URL = "MARKETDATA_BASE_URL";
+  static final String API_VERSION = "MARKETDATA_API_VERSION";
+  static final String LOGGING_LEVEL = "MARKETDATA_LOGGING_LEVEL";
+  static final String DATE_FORMAT = "MARKETDATA_DATE_FORMAT";
+
+  static final Set<String> ALLOWED_KEYS =
+      Set.of(TOKEN, BASE_URL, API_VERSION, LOGGING_LEVEL, DATE_FORMAT);
+
+  /**
+   * Lookup function over the SDK-relevant environment variables. Restricts reads to {@link
+   * #ALLOWED_KEYS} so the {@link Function} can be passed around safely — any other key returns
+   * {@code null} without touching {@code System.getenv}. Today's only caller ({@link
+   * Configuration#resolve}) already invokes with just the {@code MARKETDATA_*} keys; the
+   * restriction is defensive: a future caller that accidentally tries to read {@code PATH} or
+   * {@code AWS_SECRET_ACCESS_KEY} through this seam would silently get {@code null} instead of
+   * leaking the value.
+   */
+  static Function<String, @Nullable String> systemLookup() {
+    return key -> ALLOWED_KEYS.contains(key) ? System.getenv(key) : null;
+  }
 
   private EnvVars() {}
 }

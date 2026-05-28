@@ -138,6 +138,10 @@ tasks.register<JacocoReport>("jacocoAggregateReport") {
 // main's last value) is enforced in CI — see .github/workflows/pull-request.yml
 // and .github/scripts/check-coverage-delta.py. Not enforced locally so that
 // dev iteration isn't blocked while coverage is in flux.
+//
+// SDK requirements §15.3 mandates 100% line coverage with explicit ignore
+// comments on untestable lines. Target deferred until business resources land
+// and the defensive-guards cleanup pass can run together.
 
 spotless {
     java {
