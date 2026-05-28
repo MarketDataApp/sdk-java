@@ -23,6 +23,13 @@ import org.jspecify.annotations.Nullable;
  * {@link MarketDataLogging#configure}, so logging from here would land on an unconfigured JUL
  * logger — wrong format, possibly invisible. {@link MarketDataClient} drains the sink after
  * configuring logging, so the breadcrumb reaches its intended destination.
+ *
+ * <p>Supported syntax: {@code KEY=value} pairs, full-line {@code #} comments, blank lines, single-
+ * or double-quote-wrapped values (quotes are stripped, inner whitespace preserved), and trailing
+ * inline {@code # comment} markers — recognized only when the {@code #} is outside any quoted span
+ * <em>and</em> preceded by whitespace (or sits at the start of the value). A {@code #} adjacent to
+ * value chars stays part of the value, so URLs with fragments and tokens that contain {@code #}
+ * survive intact.
  */
 final class DotEnvLoader {
 
@@ -70,7 +77,8 @@ final class DotEnvLoader {
         if (allowedKeys != null && !allowedKeys.contains(key)) {
           continue;
         }
-        String value = stripQuotes(trimmed.substring(eq + 1).trim());
+        String afterEq = trimmed.substring(eq + 1).trim();
+        String value = stripQuotes(stripInlineComment(afterEq).trim());
         result.put(key, value);
       }
     } catch (IOException e) {
@@ -82,6 +90,45 @@ final class DotEnvLoader {
       return Map.of();
     }
     return Map.copyOf(result);
+  }
+
+  /**
+   * Strip a trailing inline comment from {@code value} if present. An inline comment is a {@code #}
+   * that is (a) outside any single- or double-quoted span, and (b) preceded by whitespace or sits
+   * at the very start of {@code value}. A {@code #} adjacent to value chars (e.g. {@code pa#ss},
+   * {@code "https://x.example/#frag"} unquoted as {@code https://x.example/#frag}) is part of the
+   * value, not a comment marker — matching python-dotenv and dotenv-java conventions, which keep
+   * URLs and hash-containing tokens intact unless the author put a space before the {@code #}.
+   *
+   * <p>Quotes are tracked but not consumed: the wrapping quotes are still present in the returned
+   * string and are stripped afterwards by {@link #stripQuotes}. The walk does not interpret escape
+   * sequences, matching the existing quote handling (no {@code \"} support either).
+   *
+   * <p>Trailing whitespace left behind between the value and the stripped {@code #} is removed by
+   * the caller's {@code trim()}.
+   */
+  private static String stripInlineComment(String value) {
+    boolean inSingle = false;
+    boolean inDouble = false;
+    for (int i = 0; i < value.length(); i++) {
+      char c = value.charAt(i);
+      if (inSingle) {
+        if (c == '\'') {
+          inSingle = false;
+        }
+      } else if (inDouble) {
+        if (c == '"') {
+          inDouble = false;
+        }
+      } else if (c == '\'') {
+        inSingle = true;
+      } else if (c == '"') {
+        inDouble = true;
+      } else if (c == '#' && (i == 0 || Character.isWhitespace(value.charAt(i - 1)))) {
+        return value.substring(0, i);
+      }
+    }
+    return value;
   }
 
   private static String stripQuotes(String value) {

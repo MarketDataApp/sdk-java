@@ -157,6 +157,22 @@ class DotEnvLoaderTest {
   }
 
   @Test
+  void load_ignores_comment_lines_with_leading_whitespace(@TempDir Path tmp) throws IOException {
+    // The parser trims each line before checking the `#` prefix, so indented full-line comments
+    // (common when commenting out a block inside an aligned section) are skipped too.
+    Path file =
+        Files.writeString(
+            tmp.resolve(".env"),
+            """
+                    # leading-spaces comment
+                \t# leading-tab comment
+                TOKEN=abc
+                """);
+
+    assertThat(load(file)).containsExactlyEntriesOf(Map.of("TOKEN", "abc"));
+  }
+
+  @Test
   void load_ignores_blank_lines(@TempDir Path tmp) throws IOException {
     Path file =
         Files.writeString(
@@ -170,6 +186,169 @@ class DotEnvLoaderTest {
                 """);
 
     assertThat(load(file)).containsEntry("TOKEN", "abc").containsEntry("BASE_URL", "https://x");
+  }
+
+  // ---------- inline comments ----------
+
+  @Test
+  void load_strips_inline_comment_after_whitespace(@TempDir Path tmp) throws IOException {
+    // The motivating bug: `TOKEN=abc # my note` previously yielded the literal value
+    // "abc # my note", which validateApiKey lets through (printable ASCII) and surfaces later
+    // as a confusing AuthenticationError far from the .env file that caused it.
+    Path file = Files.writeString(tmp.resolve(".env"), "TOKEN=abc123 # production token\n");
+
+    assertThat(load(file)).containsEntry("TOKEN", "abc123");
+  }
+
+  @Test
+  void load_strips_inline_comment_after_tab(@TempDir Path tmp) throws IOException {
+    // Any Unicode whitespace before `#` qualifies — tabs are common in hand-aligned .env files.
+    Path file = Files.writeString(tmp.resolve(".env"), "TOKEN=abc123\t# tab-separated comment\n");
+
+    assertThat(load(file)).containsEntry("TOKEN", "abc123");
+  }
+
+  @Test
+  void load_keeps_hash_when_not_preceded_by_whitespace(@TempDir Path tmp) throws IOException {
+    // `#` adjacent to value chars is part of the value (python-dotenv / dotenv-java convention).
+    // Critical for URLs with fragments and tokens that legitimately contain `#`.
+    Path file =
+        Files.writeString(
+            tmp.resolve(".env"),
+            """
+                TOKEN=abc#123
+                BASE_URL=https://example.com/path#frag
+                """);
+
+    assertThat(load(file))
+        .containsEntry("TOKEN", "abc#123")
+        .containsEntry("BASE_URL", "https://example.com/path#frag");
+  }
+
+  @Test
+  void load_keeps_hash_inside_double_quotes(@TempDir Path tmp) throws IOException {
+    Path file = Files.writeString(tmp.resolve(".env"), "TOKEN=\"abc # not a comment\"\n");
+
+    assertThat(load(file)).containsEntry("TOKEN", "abc # not a comment");
+  }
+
+  @Test
+  void load_keeps_hash_inside_single_quotes(@TempDir Path tmp) throws IOException {
+    Path file = Files.writeString(tmp.resolve(".env"), "TOKEN='abc # not a comment'\n");
+
+    assertThat(load(file)).containsEntry("TOKEN", "abc # not a comment");
+  }
+
+  @Test
+  void load_strips_inline_comment_after_closing_quote(@TempDir Path tmp) throws IOException {
+    // Quoted value followed by a real comment outside the quotes: the comment is stripped and the
+    // quotes are removed normally.
+    Path file = Files.writeString(tmp.resolve(".env"), "TOKEN=\"abc 123\" # the real comment\n");
+
+    assertThat(load(file)).containsEntry("TOKEN", "abc 123");
+  }
+
+  @Test
+  void load_records_empty_value_when_value_is_blank(@TempDir Path tmp) throws IOException {
+    // `KEY=` and `KEY=    ` both produce an empty-string entry. The cascade's pickFirst() treats
+    // blank values as unset, so this is functionally equivalent to omitting the key — but the
+    // parser still records it. Two reasons: (1) it documents the user's intent (they wrote the
+    // key, so it's part of the file's shape), and (2) it keeps the parser symmetric with the
+    // `KEY=#comment` case, which also yields "".
+    Path file =
+        Files.writeString(
+            tmp.resolve(".env"),
+            """
+                EMPTY_BARE=
+                EMPTY_SPACES=\s\s\s
+                KEPT=value
+                """);
+
+    Map<String, String> result = load(file);
+    assertThat(result)
+        .containsEntry("EMPTY_BARE", "")
+        .containsEntry("EMPTY_SPACES", "")
+        .containsEntry("KEPT", "value");
+  }
+
+  @Test
+  void load_strips_inline_comment_after_closing_single_quote(@TempDir Path tmp) throws IOException {
+    // Symmetry with `load_strips_inline_comment_after_closing_quote` (the double-quote variant):
+    // the walk treats single and double quotes the same way, so a `#` inside `'…'` is preserved
+    // and a `#` after the closing `'` with whitespace before it is a comment.
+    Path file =
+        Files.writeString(tmp.resolve(".env"), "TOKEN='abc # not a comment' # the real comment\n");
+
+    assertThat(load(file)).containsEntry("TOKEN", "abc # not a comment");
+  }
+
+  @Test
+  void load_strips_value_when_hash_is_first_non_whitespace_char(@TempDir Path tmp)
+      throws IOException {
+    // `KEY=#comment` and `KEY=   # comment` both leave an empty value. The cascade's
+    // pickFirst() treats blank values as unset, so this is functionally equivalent to omitting
+    // the line — the empty entry is still recorded for symmetry with `KEY=`.
+    Path file =
+        Files.writeString(
+            tmp.resolve(".env"),
+            """
+                EMPTY1=#comment-immediately
+                EMPTY2=   # comment after spaces
+                KEPT=value
+                """);
+
+    Map<String, String> result = load(file);
+    assertThat(result)
+        .containsEntry("EMPTY1", "")
+        .containsEntry("EMPTY2", "")
+        .containsEntry("KEPT", "value");
+  }
+
+  @Test
+  void load_first_unquoted_hash_wins_over_later_ones(@TempDir Path tmp) throws IOException {
+    // `value # first-comment # second` → everything from the first qualifying `#` onward is
+    // comment.
+    Path file = Files.writeString(tmp.resolve(".env"), "TOKEN=value # first-comment # second\n");
+
+    assertThat(load(file)).containsEntry("TOKEN", "value");
+  }
+
+  @Test
+  void load_keeps_hash_in_value_then_strips_later_comment(@TempDir Path tmp) throws IOException {
+    // The first `#` is adjacent to value chars (not a comment); the second `#` is preceded by
+    // whitespace (a comment) — only the trailing portion is stripped.
+    Path file = Files.writeString(tmp.resolve(".env"), "TOKEN=value#part more # real-comment\n");
+
+    assertThat(load(file)).containsEntry("TOKEN", "value#part more");
+  }
+
+  @Test
+  void load_keeps_hash_outside_quotes_after_closing_quote_without_whitespace(@TempDir Path tmp)
+      throws IOException {
+    // `"x"#y` — `#` is preceded by the closing quote, not whitespace, so it's part of the value.
+    // stripQuotes does nothing here (last char isn't a matching quote), so the literal pair-of-
+    // quotes-plus-hash-tail is preserved as authored.
+    Path file = Files.writeString(tmp.resolve(".env"), "TOKEN=\"x\"#y\n");
+
+    assertThat(load(file)).containsEntry("TOKEN", "\"x\"#y");
+  }
+
+  @Test
+  void load_last_assignment_wins_for_duplicate_keys(@TempDir Path tmp) throws IOException {
+    // Lines are processed top-to-bottom and stored in a LinkedHashMap, so a later assignment
+    // overwrites an earlier one for the same key. This documents the file as authoritative in
+    // line order — useful when a user commits a base `.env` and overrides a single line at the
+    // bottom for a local run.
+    Path file =
+        Files.writeString(
+            tmp.resolve(".env"),
+            """
+                TOKEN=first
+                TOKEN=second
+                TOKEN=third
+                """);
+
+    assertThat(load(file)).containsEntry("TOKEN", "third");
   }
 
   @Test
