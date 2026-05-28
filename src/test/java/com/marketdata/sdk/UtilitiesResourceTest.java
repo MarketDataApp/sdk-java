@@ -274,6 +274,25 @@ class UtilitiesResourceTest {
     assertThatThrownBy(utilities::headers).isInstanceOf(AuthenticationError.class);
   }
 
+  /**
+   * A literal JSON {@code null} body for {@code /headers/} must surface as a {@link
+   * com.marketdata.sdk.exception.ParseError} carrying the request URL, status, and id — never as a
+   * raw {@code NullPointerException} from the {@link RequestHeaders} canonical constructor. The
+   * {@link RequestHeadersDeserializer} pre-check converts the null token into a {@code
+   * JsonMappingException}, which {@link JsonResponseParser} wraps with the support context.
+   */
+  @Test
+  void headersJsonNullBodySurfacesParseErrorNotNpe() {
+    CapturingClient client =
+        new CapturingClient(200, "null".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    assertThatThrownBy(utilities::headers)
+        .isInstanceOf(com.marketdata.sdk.exception.ParseError.class)
+        .hasMessageContaining("/headers/")
+        .hasMessageContaining("JSON null");
+  }
+
   // ---------- stub HttpClient ----------
 
   private static final class CapturingClient extends TestHttpClients.StubHttpClient {
