@@ -67,7 +67,8 @@ final class MarketDataDates {
    * values are either epoch seconds (interpreted in {@link #MARKET_ZONE}) or Excel serials
    * (whole-day part of days since 1899-12-30).
    */
-  static LocalDate parseDateField(JsonParser p, JsonNode node, String fieldName)
+  static LocalDate parseDateField(
+      @org.jspecify.annotations.Nullable JsonParser p, JsonNode node, String fieldName)
       throws JsonMappingException {
     if (node == null || node.isNull()) {
       throw new JsonMappingException(p, "missing field: " + fieldName);
@@ -96,7 +97,8 @@ final class MarketDataDates {
    * and offset ({@code "yyyy-MM-dd HH:mm:ss XXX"}); numeric values are epoch seconds or fractional
    * Excel serials.
    */
-  static ZonedDateTime parseTimestampField(JsonParser p, JsonNode node, String fieldName)
+  static ZonedDateTime parseTimestampField(
+      @org.jspecify.annotations.Nullable JsonParser p, JsonNode node, String fieldName)
       throws JsonMappingException {
     if (node == null || node.isNull()) {
       throw new JsonMappingException(p, "missing field: " + fieldName);

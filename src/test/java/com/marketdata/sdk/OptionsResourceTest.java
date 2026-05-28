@@ -4,10 +4,23 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.marketdata.sdk.exception.ParseError;
+import com.marketdata.sdk.options.ExpirationFilter;
+import com.marketdata.sdk.options.ExpirationStrikes;
+import com.marketdata.sdk.options.OptionQuote;
+import com.marketdata.sdk.options.OptionSide;
+import com.marketdata.sdk.options.OptionsChain;
+import com.marketdata.sdk.options.OptionsChainRequest;
 import com.marketdata.sdk.options.OptionsExpirations;
 import com.marketdata.sdk.options.OptionsExpirationsRequest;
 import com.marketdata.sdk.options.OptionsLookup;
 import com.marketdata.sdk.options.OptionsLookupRequest;
+import com.marketdata.sdk.options.OptionsQuoteRequest;
+import com.marketdata.sdk.options.OptionsQuotes;
+import com.marketdata.sdk.options.OptionsQuotesRequest;
+import com.marketdata.sdk.options.OptionsStrikes;
+import com.marketdata.sdk.options.OptionsStrikesRequest;
+import com.marketdata.sdk.options.StrikeFilter;
+import com.marketdata.sdk.options.StrikeRange;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpHeaders;
@@ -339,10 +352,669 @@ class OptionsResourceTest {
         .hasMessageContaining("non-string, non-numeric");
   }
 
+  // ---------- strikes: URL & params ----------
+
+  @Test
+  void strikesHitsVersionedEndpoint() {
+    CapturingClient client =
+        okWith("{\"s\":\"ok\",\"updated\":1705449600,\"2025-01-17\":[140,145,150]}");
+    OptionsResource options = resourceWith(client);
+
+    options.strikesAsync(OptionsStrikesRequest.of("AAPL")).join();
+
+    String url = client.captured.get(0).uri().toString();
+    assertThat(url).isEqualTo("http://localhost/v1/options/strikes/AAPL/");
+  }
+
+  @Test
+  void strikesAttachesExpirationAndDateFilters() {
+    CapturingClient client =
+        okWith("{\"s\":\"ok\",\"updated\":1705449600,\"2025-01-17\":[140,145]}");
+    OptionsResource options = resourceWith(client);
+
+    options
+        .strikesAsync(
+            OptionsStrikesRequest.builder("AAPL")
+                .expiration(LocalDate.of(2025, Month.JANUARY, 17))
+                .date(LocalDate.of(2024, Month.DECEMBER, 16))
+                .build())
+        .join();
+
+    String url = client.captured.get(0).uri().toString();
+    assertThat(url)
+        .isEqualTo(
+            "http://localhost/v1/options/strikes/AAPL/?expiration=2025-01-17&date=2024-12-16");
+  }
+
+  // ---------- strikes: response decoding ----------
+
+  @Test
+  void strikesDecodesMultipleExpirations() {
+    ZoneId et = ZoneId.of("America/New_York");
+    CapturingClient client =
+        okWith(
+            "{\"s\":\"ok\",\"updated\":1705449600,"
+                + "\"2025-01-17\":[140.0,145.0,150.0],"
+                + "\"2025-02-21\":[135.0,140.0,145.0,150.0]}");
+    OptionsResource options = resourceWith(client);
+
+    OptionsStrikes strikes = options.strikes(OptionsStrikesRequest.of("AAPL")).data();
+
+    assertThat(strikes.expirations()).hasSize(2);
+    ExpirationStrikes first = strikes.expirations().get(0);
+    assertThat(first.expiration())
+        .isEqualTo(LocalDate.of(2025, Month.JANUARY, 17).atStartOfDay(et));
+    assertThat(first.strikes()).containsExactly(140.0, 145.0, 150.0);
+    ExpirationStrikes second = strikes.expirations().get(1);
+    assertThat(second.expiration())
+        .isEqualTo(LocalDate.of(2025, Month.FEBRUARY, 21).atStartOfDay(et));
+    assertThat(second.strikes()).containsExactly(135.0, 140.0, 145.0, 150.0);
+    assertThat(strikes.updated()).isNotNull();
+    assertThat(strikes.updated().getZone().getId()).isEqualTo("America/New_York");
+  }
+
+  @Test
+  void strikesAcceptsTimestampStringFormatForUpdated() {
+    // The expiration keys are ALWAYS literal ISO dates regardless of dateformat (the backend
+    // emits str(date) for the key, ignoring the format param). Only `updated` honors dateformat.
+    CapturingClient client =
+        okWith("{\"s\":\"ok\",\"updated\":\"2025-01-16 19:00:00 -05:00\",\"2025-01-17\":[150.0]}");
+    OptionsResource options = resourceWith(client);
+
+    OptionsStrikes strikes = options.strikes(OptionsStrikesRequest.of("AAPL")).data();
+    assertThat(strikes.expirations()).hasSize(1);
+    assertThat(strikes.updated()).isNotNull();
+    assertThat(strikes.updated().toLocalDate()).isEqualTo(LocalDate.of(2025, Month.JANUARY, 16));
+  }
+
+  // ---------- strikes: envelope handling ----------
+
+  @Test
+  void strikesNoDataEnvelopeYieldsEmptyList() {
+    // The strikes endpoint also attaches nextTime/prevTime hints in no_data envelopes; the
+    // deserializer ignores them (they aren't part of the typed surface).
+    CapturingClient client = okWith("{\"s\":\"no_data\",\"nextTime\":null,\"prevTime\":null}");
+    OptionsResource options = resourceWith(client);
+
+    OptionsStrikes strikes = options.strikes(OptionsStrikesRequest.of("BOGUS")).data();
+    assertThat(strikes.expirations()).isEmpty();
+    assertThat(strikes.updated()).isNull();
+  }
+
+  @Test
+  void strikesErrorEnvelopeSurfacesAsParseError() {
+    CapturingClient client = okWith("{\"s\":\"error\",\"errmsg\":\"Symbol not found\"}");
+    OptionsResource options = resourceWith(client);
+
+    assertThatThrownBy(() -> options.strikes(OptionsStrikesRequest.of("BOGUS")))
+        .isInstanceOf(ParseError.class)
+        .hasMessageContaining("Symbol not found");
+  }
+
+  @Test
+  void strikesMissingUpdatedThrowsParseError() {
+    CapturingClient client = okWith("{\"s\":\"ok\",\"2025-01-17\":[150.0]}");
+    OptionsResource options = resourceWith(client);
+
+    assertThatThrownBy(() -> options.strikes(OptionsStrikesRequest.of("AAPL")))
+        .isInstanceOf(ParseError.class)
+        .hasMessageContaining("updated");
+  }
+
+  @Test
+  void strikesUnrecognizedTopLevelKeyThrowsParseError() {
+    // Strict-by-default — a non-date, non-{s,updated} key signals server change. Surfacing it
+    // gives us a diagnostic breadcrumb instead of silently dropping data.
+    CapturingClient client = okWith("{\"s\":\"ok\",\"updated\":1705449600,\"surprise\":[1.0]}");
+    OptionsResource options = resourceWith(client);
+
+    assertThatThrownBy(() -> options.strikes(OptionsStrikesRequest.of("AAPL")))
+        .isInstanceOf(ParseError.class)
+        .hasMessageContaining("unrecognized top-level key: surprise");
+  }
+
+  @Test
+  void strikesNonNumericStrikeThrowsParseError() {
+    CapturingClient client =
+        okWith("{\"s\":\"ok\",\"updated\":1705449600,\"2025-01-17\":[\"oops\"]}");
+    OptionsResource options = resourceWith(client);
+
+    assertThatThrownBy(() -> options.strikes(OptionsStrikesRequest.of("AAPL")))
+        .isInstanceOf(ParseError.class)
+        .hasMessageContaining("non-numeric strike");
+  }
+
+  @Test
+  void strikesNonArrayExpirationValueThrowsParseError() {
+    CapturingClient client = okWith("{\"s\":\"ok\",\"updated\":1705449600,\"2025-01-17\":150.0}");
+    OptionsResource options = resourceWith(client);
+
+    assertThatThrownBy(() -> options.strikes(OptionsStrikesRequest.of("AAPL")))
+        .isInstanceOf(ParseError.class)
+        .hasMessageContaining("non-array value for expiration");
+  }
+
+  @Test
+  void strikesSyncMirrorsAsync() {
+    CapturingClient client = okWith("{\"s\":\"ok\",\"updated\":1705449600,\"2025-01-17\":[150.0]}");
+    OptionsResource options = resourceWith(client);
+
+    OptionsStrikes strikes = options.strikes(OptionsStrikesRequest.of("AAPL")).data();
+    assertThat(strikes.expirations()).hasSize(1);
+  }
+
+  // ---------- quote (singular): URL & params ----------
+
+  private static final String CANNED_QUOTE_BODY =
+      "{\"s\":\"ok\","
+          + "\"optionSymbol\":[\"AAPL250117C00150000\"],"
+          + "\"underlying\":[\"AAPL\"],"
+          + "\"expiration\":[1737136800],"
+          + "\"side\":[\"call\"],"
+          + "\"strike\":[150],"
+          + "\"firstTraded\":[1663118400],"
+          + "\"dte\":[45],"
+          + "\"updated\":[1705449600],"
+          + "\"bid\":[52.1],\"bidSize\":[10],\"mid\":[52.35],\"ask\":[52.6],\"askSize\":[15],"
+          + "\"last\":[52.3],\"openInterest\":[5000],\"volume\":[1500],"
+          + "\"inTheMoney\":[true],\"intrinsicValue\":[50.22],\"extrinsicValue\":[2.13],"
+          + "\"underlyingPrice\":[200.22],"
+          + "\"iv\":[0.3012],\"delta\":[0.89],\"gamma\":[0.012],\"theta\":[-0.05],\"vega\":[0.15]}";
+
+  @Test
+  void quoteHitsVersionedEndpointWithEncodedSymbol() {
+    CapturingClient client = okWith(CANNED_QUOTE_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options.quoteAsync(OptionsQuoteRequest.of("AAPL250117C00150000")).join();
+
+    String url = client.captured.get(0).uri().toString();
+    assertThat(url).isEqualTo("http://localhost/v1/options/quotes/AAPL250117C00150000/");
+  }
+
+  @Test
+  void quoteAttachesDateFilter() {
+    CapturingClient client = okWith(CANNED_QUOTE_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .quoteAsync(
+            OptionsQuoteRequest.builder("AAPL250117C00150000")
+                .date(LocalDate.of(2025, Month.JANUARY, 15))
+                .build())
+        .join();
+
+    String url = client.captured.get(0).uri().toString();
+    assertThat(url)
+        .isEqualTo("http://localhost/v1/options/quotes/AAPL250117C00150000/?date=2025-01-15");
+  }
+
+  @Test
+  void quoteAttachesFromToFilters() {
+    CapturingClient client = okWith(CANNED_QUOTE_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .quoteAsync(
+            OptionsQuoteRequest.builder("AAPL250117C00150000")
+                .from(LocalDate.of(2024, Month.DECEMBER, 1))
+                .to(LocalDate.of(2025, Month.JANUARY, 1))
+                .build())
+        .join();
+
+    String url = client.captured.get(0).uri().toString();
+    assertThat(url)
+        .isEqualTo(
+            "http://localhost/v1/options/quotes/AAPL250117C00150000/"
+                + "?from=2024-12-01&to=2025-01-01");
+  }
+
+  @Test
+  void quoteRequestRejectsDateAndFromToTogether() {
+    assertThatThrownBy(
+            () ->
+                OptionsQuoteRequest.builder("X")
+                    .date(LocalDate.of(2025, Month.JANUARY, 1))
+                    .from(LocalDate.of(2024, Month.DECEMBER, 1))
+                    .build())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("mutually exclusive");
+  }
+
+  // ---------- quote: response decoding ----------
+
+  @Test
+  void quoteDecodesAllFields() {
+    CapturingClient client = okWith(CANNED_QUOTE_BODY);
+    OptionsResource options = resourceWith(client);
+
+    OptionsQuotes response = options.quote(OptionsQuoteRequest.of("AAPL250117C00150000")).data();
+
+    assertThat(response.quotes()).hasSize(1);
+    OptionQuote q = response.quotes().get(0);
+    assertThat(q.optionSymbol()).isEqualTo("AAPL250117C00150000");
+    assertThat(q.underlying()).isEqualTo("AAPL");
+    assertThat(q.side()).isEqualTo("call");
+    assertThat(q.strike()).isEqualTo(150.0);
+    assertThat(q.dte()).isEqualTo(45);
+    assertThat(q.bid()).isEqualTo(52.1);
+    assertThat(q.bidSize()).isEqualTo(10L);
+    assertThat(q.mid()).isEqualTo(52.35);
+    assertThat(q.ask()).isEqualTo(52.6);
+    assertThat(q.askSize()).isEqualTo(15L);
+    assertThat(q.last()).isEqualTo(52.3);
+    assertThat(q.openInterest()).isEqualTo(5000L);
+    assertThat(q.volume()).isEqualTo(1500L);
+    assertThat(q.inTheMoney()).isTrue();
+    assertThat(q.intrinsicValue()).isEqualTo(50.22);
+    assertThat(q.extrinsicValue()).isEqualTo(2.13);
+    assertThat(q.underlyingPrice()).isEqualTo(200.22);
+    assertThat(q.iv()).isEqualTo(0.3012);
+    assertThat(q.delta()).isEqualTo(0.89);
+    assertThat(q.gamma()).isEqualTo(0.012);
+    assertThat(q.theta()).isEqualTo(-0.05);
+    assertThat(q.vega()).isEqualTo(0.15);
+    assertThat(q.expiration().getZone().getId()).isEqualTo("America/New_York");
+    assertThat(q.firstTraded().getZone().getId()).isEqualTo("America/New_York");
+    assertThat(q.updated().getZone().getId()).isEqualTo("America/New_York");
+  }
+
+  @Test
+  void quoteSyncMirrorsAsync() {
+    CapturingClient client = okWith(CANNED_QUOTE_BODY);
+    OptionsResource options = resourceWith(client);
+
+    OptionsQuotes data = options.quote(OptionsQuoteRequest.of("AAPL250117C00150000")).data();
+    assertThat(data.quotes()).hasSize(1);
+  }
+
+  @Test
+  void quoteErrorEnvelopeSurfacesAsParseError() {
+    CapturingClient client = okWith("{\"s\":\"error\",\"errmsg\":\"Unknown contract\"}");
+    OptionsResource options = resourceWith(client);
+
+    assertThatThrownBy(() -> options.quote(OptionsQuoteRequest.of("BOGUS")))
+        .isInstanceOf(ParseError.class)
+        .hasMessageContaining("Unknown contract");
+  }
+
+  // ---------- quotes (plural, multi-symbol) ----------
+
+  @Test
+  void quotesFansOutOnePerSymbolAndPreservesOrder() {
+    // Cancellable-but-canned client that responds based on the requested URL — lets us route each
+    // fan-out per symbol to a distinct body. Without this, all fan-outs would get the same canned
+    // bytes and the test wouldn't observe per-symbol responses.
+    SymbolRoutingClient client =
+        new SymbolRoutingClient(
+            Map.of(
+                "AAPL250117C00150000",
+                CANNED_QUOTE_BODY,
+                "AAPL250117P00150000",
+                CANNED_QUOTE_BODY
+                    .replace("AAPL250117C00150000", "AAPL250117P00150000")
+                    .replace("\"side\":[\"call\"]", "\"side\":[\"put\"]")));
+
+    OptionsResource options = resourceWith(client);
+
+    Map<String, Response<OptionsQuotes>> result =
+        options.quotes(
+            OptionsQuotesRequest.builder("AAPL250117C00150000", "AAPL250117P00150000").build());
+
+    // Insertion order preserved — first symbol in the builder is first in the iteration.
+    assertThat(result.keySet()).containsExactly("AAPL250117C00150000", "AAPL250117P00150000");
+    assertThat(result.get("AAPL250117C00150000").data().quotes().get(0).side()).isEqualTo("call");
+    assertThat(result.get("AAPL250117P00150000").data().quotes().get(0).side()).isEqualTo("put");
+
+    // Two HTTP requests were sent.
+    assertThat(client.captured).hasSize(2);
+  }
+
+  @Test
+  void quotesAttachesDateFilterToEachFanOut() {
+    SymbolRoutingClient client =
+        new SymbolRoutingClient(Map.of("X", CANNED_QUOTE_BODY, "Y", CANNED_QUOTE_BODY));
+    OptionsResource options = resourceWith(client);
+
+    options.quotes(
+        OptionsQuotesRequest.builder("X", "Y").date(LocalDate.of(2025, Month.JANUARY, 1)).build());
+
+    assertThat(client.captured).hasSize(2);
+    for (HttpRequest req : client.captured) {
+      assertThat(req.uri().toString()).endsWith("?date=2025-01-01");
+    }
+  }
+
+  @Test
+  void quotesRequestRequiresAtLeastOneSymbol() {
+    // The static factory takes the first symbol non-optionally, so there is no way to construct
+    // an empty Builder from public API. The internal Builder constructor is private; this test
+    // documents the public-API contract via the static factory.
+    assertThatThrownBy(() -> OptionsQuotesRequest.builder(""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("non-empty");
+  }
+
+  // ---------- chain: URL & filters ----------
+
+  /** Reuses the canned single-row body from quotes — same wire schema. */
+  private static final String CANNED_CHAIN_BODY = CANNED_QUOTE_BODY;
+
+  @Test
+  void chainHitsVersionedEndpointWithNoFilters() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options.chainAsync(OptionsChainRequest.of("AAPL")).join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/");
+  }
+
+  @Test
+  void chainExpirationFilterOnDateTranslatesToExpirationParam() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.onDate(LocalDate.of(2025, Month.JANUARY, 17)))
+                .build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?expiration=2025-01-17");
+  }
+
+  @Test
+  void chainExpirationFilterDteTranslatesToDteParam() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL").expirationFilter(ExpirationFilter.dte(30)).build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=30");
+  }
+
+  @Test
+  void chainExpirationFilterBetweenTranslatesToFromTo() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(
+                    ExpirationFilter.between(
+                        LocalDate.of(2025, Month.JANUARY, 1), LocalDate.of(2025, Month.MARCH, 31)))
+                .build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?from=2025-01-01&to=2025-03-31");
+  }
+
+  @Test
+  void chainExpirationFilterMonthYearTranslatesToMonthYear() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.monthYear(2025, 3))
+                .build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?month=3&year=2025");
+  }
+
+  @Test
+  void chainStrikeFilterExactRendersAsBareNumber() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL").strikeFilter(StrikeFilter.exact(150)).build())
+        .join();
+
+    // Integer-valued strikes render without decimal noise so the wire matches the API docs
+    // verbatim.
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?strike=150");
+  }
+
+  @Test
+  void chainStrikeFilterRangeRendersAsDashed() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL").strikeFilter(StrikeFilter.range(140, 160)).build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?strike=140-160");
+  }
+
+  @Test
+  void chainStrikeFilterComparisonRendersWithOperatorPrefix() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .strikeFilter(StrikeFilter.comparison(StrikeFilter.Operator.GTE, 150))
+                .build())
+        .join();
+
+    String url = client.captured.get(0).uri().toString();
+    // "%3E%3D" is the URL-encoded ">=" — the query encoder pushes reserved characters through.
+    assertThat(url).contains("strike=%3E%3D150");
+  }
+
+  @Test
+  void chainBooleanAdditiveFiltersStack() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .weekly(true)
+                .monthly(false)
+                .quarterly(true)
+                .nonstandard(false)
+                .build())
+        .join();
+
+    String url = client.captured.get(0).uri().toString();
+    assertThat(url).contains("weekly=true");
+    assertThat(url).contains("monthly=false");
+    assertThat(url).contains("quarterly=true");
+    assertThat(url).contains("nonstandard=false");
+  }
+
+  @Test
+  void chainSideEnumTranslatesToWireValue() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options.chainAsync(OptionsChainRequest.builder("AAPL").side(OptionSide.PUT).build()).join();
+
+    assertThat(client.captured.get(0).uri().toString()).endsWith("?side=put");
+  }
+
+  @Test
+  void chainStrikeLimitAndRangeTranslate() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL").strikeLimit(4).strikeRange(StrikeRange.OTM).build())
+        .join();
+
+    String url = client.captured.get(0).uri().toString();
+    assertThat(url).contains("strikeLimit=4");
+    assertThat(url).contains("range=otm");
+  }
+
+  @Test
+  void chainLiquidityFiltersTranslate() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .minOpenInterest(500)
+                .minVolume(100)
+                .maxBidAskSpread(0.5)
+                .maxBidAskSpreadPct(0.1)
+                .build())
+        .join();
+
+    String url = client.captured.get(0).uri().toString();
+    assertThat(url).contains("minOpenInterest=500");
+    assertThat(url).contains("minVolume=100");
+    assertThat(url).contains("maxBidAskSpread=0.5");
+    assertThat(url).contains("maxBidAskSpreadPct=0.1");
+  }
+
+  // ---------- chain: response decoding ----------
+
+  @Test
+  void chainDecodesSingleRowResponse() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    OptionsChain chain = options.chain(OptionsChainRequest.of("AAPL")).data();
+    assertThat(chain.chain()).hasSize(1);
+    OptionQuote q = chain.chain().get(0);
+    assertThat(q.optionSymbol()).isEqualTo("AAPL250117C00150000");
+    assertThat(q.delta()).isEqualTo(0.89);
+  }
+
+  @Test
+  void chainSyncMirrorsAsync() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    OptionsChain chain = options.chain(OptionsChainRequest.of("AAPL")).data();
+    assertThat(chain.chain()).hasSize(1);
+  }
+
+  // ---------- chain: builder validation ----------
+
+  @Test
+  void chainRequestRejectsMinBidGreaterThanMaxBid() {
+    assertThatThrownBy(() -> OptionsChainRequest.builder("AAPL").minBid(10.0).maxBid(5.0).build())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("minBid must be <= maxBid");
+  }
+
+  @Test
+  void chainRequestRejectsMinAskGreaterThanMaxAsk() {
+    assertThatThrownBy(() -> OptionsChainRequest.builder("AAPL").minAsk(10.0).maxAsk(5.0).build())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("minAsk must be <= maxAsk");
+  }
+
+  @Test
+  void chainRequestRejectsNegativeStrikeLimit() {
+    assertThatThrownBy(() -> OptionsChainRequest.builder("AAPL").strikeLimit(-1))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("strikeLimit must be positive");
+  }
+
+  @Test
+  void chainRequestRejectsNegativeMinOpenInterest() {
+    assertThatThrownBy(() -> OptionsChainRequest.builder("AAPL").minOpenInterest(-1))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("minOpenInterest must be non-negative");
+  }
+
+  // ---------- sealed type factory validation ----------
+
+  @Test
+  void expirationFilterDteRejectsNegative() {
+    assertThatThrownBy(() -> ExpirationFilter.dte(-1))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be non-negative");
+  }
+
+  @Test
+  void expirationFilterBetweenRejectsReversedDates() {
+    assertThatThrownBy(
+            () ->
+                ExpirationFilter.between(
+                    LocalDate.of(2025, Month.MARCH, 1), LocalDate.of(2025, Month.JANUARY, 1)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("from must be on or before to");
+  }
+
+  @Test
+  void expirationFilterMonthYearRejectsInvalidMonth() {
+    assertThatThrownBy(() -> ExpirationFilter.monthYear(2025, 13))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("month must be in 1..12");
+  }
+
+  @Test
+  void strikeFilterRangeRejectsMinGreaterThanMax() {
+    assertThatThrownBy(() -> StrikeFilter.range(160, 140))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("min must be <= max");
+  }
+
   // ---------- helpers ----------
 
   private static CapturingClient okWith(String body) {
     return new CapturingClient(200, body.getBytes(), EMPTY_HEADERS);
+  }
+
+  /**
+   * Test double that routes the request body based on the last non-empty path segment of the URL —
+   * lets a single test exercise multi-symbol fan-out where each fan-out should observe a distinct
+   * canned response. Falls back to a 200 OK with empty {@code "{}"} for an unmapped path.
+   */
+  private static final class SymbolRoutingClient extends TestHttpClients.StubHttpClient {
+    final List<HttpRequest> captured = new ArrayList<>();
+    final Map<String, String> bodies;
+
+    SymbolRoutingClient(Map<String, String> bodies) {
+      this.bodies = bodies;
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    @Override
+    public <T> CompletableFuture<HttpResponse<T>> sendAsync(
+        HttpRequest request, HttpResponse.BodyHandler<T> bh) {
+      captured.add(request);
+      String[] parts = request.uri().getPath().split("/");
+      String tail = "";
+      for (int i = parts.length - 1; i >= 0; i--) {
+        if (!parts[i].isEmpty()) {
+          tail = parts[i];
+          break;
+        }
+      }
+      String body = bodies.getOrDefault(tail, "{\"s\":\"no_data\"}");
+      HttpResponse<byte[]> resp =
+          TestHttpClients.response(
+              200, body.getBytes(), EMPTY_HEADERS, URI.create("http://localhost"));
+      return (CompletableFuture) CompletableFuture.completedFuture(resp);
+    }
   }
 
   private static final class CapturingClient extends TestHttpClients.StubHttpClient {
