@@ -33,7 +33,7 @@ terminal, then run a consumer demo in another (`make demo-config` etc. — see
 | `/user/` | GET | Default happy-path body when the script queue is empty (unversioned, mirrors the backend) |
 | `/headers/` | GET | Default happy-path body when the script queue is empty (unversioned, mirrors the backend) |
 | `/status/` | GET | Default happy-path body when the script queue is empty |
-| (anything else) | * | `404 {"s":"error","errmsg":"..."}` when no script step matches |
+| (anything else) | * | `404 {"s":"no_data"}` when no script step matches — mirrors the backend's `custom_404` |
 
 ## Scripted-step semantics
 
@@ -44,6 +44,12 @@ terminal, then run a consumer demo in another (`make demo-config` etc. — see
 - `cf-ray` is added to every response if you don't set it yourself — that's
   what the SDK reads for `requestId` on the response envelope and exception
   context, so populating it makes the demos' logs traceable.
+- The four `x-api-ratelimit-*` headers (`limit`, `remaining`, `reset`,
+  `consumed`) are added to **every** response — scripted, default, and 404 —
+  mirroring the backend's `update_user_quota`. They populate
+  `client.getRateLimits()`. To exercise the exhausted-credits / §10.3 preflight
+  path, script your own `x-api-ratelimit-remaining: 0` (plus a future `reset`);
+  your value wins via `setdefault`.
 - Once popped, a step is gone. Re-script if you need the same shape twice.
 
 ## Why this is separate from the SDK's tests

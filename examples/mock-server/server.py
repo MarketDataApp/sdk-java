@@ -85,6 +85,21 @@ _DEFAULT_HEADERS = json.dumps(
 )
 
 
+def _default_ratelimit_headers() -> dict[str, str]:
+    # Mirrors the backend's update_user_quota(): every response — including the
+    # 404 from custom_404 — carries the four x-api-ratelimit-* headers the SDK's
+    # RateLimitHeaders.parse() reads. Parse is all-or-nothing, so always emit all
+    # four. Scripts can override any of these (e.g. remaining=0 to drive the
+    # §10.3 preflight / exhausted-credits path) — see catch_all's setdefault.
+    reset_epoch = int(time.time()) + 24 * 3600  # next daily quota reset
+    return {
+        "x-api-ratelimit-limit": "100000",
+        "x-api-ratelimit-remaining": "99999",
+        "x-api-ratelimit-reset": str(reset_epoch),
+        "x-api-ratelimit-consumed": "1",
+    }
+
+
 def _default_status_body() -> str:
     now_epoch = int(time.time())
     return json.dumps(
@@ -185,6 +200,9 @@ async def catch_all(full_path: str, request: Request) -> Response:
             # unless the script explicitly overrode it.
             response_headers.setdefault("cf-ray", f"mock-{int(time.time() * 1000)}")
             response_headers.setdefault("Content-Type", "application/json")
+            # Rate-limit headers, unless the script set its own (e.g. remaining=0).
+            for _k, _v in _default_ratelimit_headers().items():
+                response_headers.setdefault(_k, _v)
             _request_log.append(
                 {"path": path, "method": method, "status": step.status, "scripted": True}
             )
@@ -206,6 +224,7 @@ async def catch_all(full_path: str, request: Request) -> Response:
             headers={
                 "Content-Type": "application/json",
                 "cf-ray": f"mock-{int(time.time() * 1000)}",
+                **_default_ratelimit_headers(),
             },
         )
 
@@ -223,4 +242,7 @@ def _default_response_for(path: str) -> tuple[str, int]:
         return _DEFAULT_HEADERS, 200
     if path in ("/status/", "/status"):
         return _default_status_body(), 200
-    return json.dumps({"s": "error", "errmsg": f"unknown endpoint {path}"}), 404
+    # Unknown routes mirror the backend's custom_404: {"s":"no_data"} at 404,
+    # NOT an error envelope. The SDK treats 404+no_data as a successful empty
+    # response (Response.isNoData()), so this keeps the mock faithful.
+    return json.dumps({"s": "no_data"}), 404
