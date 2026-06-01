@@ -19,11 +19,24 @@ public sealed interface ExpirationFilter
     permits ExpirationFilter.OnDate,
         ExpirationFilter.Dte,
         ExpirationFilter.Between,
-        ExpirationFilter.MonthYear {
+        ExpirationFilter.MonthYear,
+        ExpirationFilter.All {
 
   /** A specific expiration date — wire form {@code ?expiration=YYYY-MM-DD}. */
   static OnDate onDate(LocalDate date) {
     return new OnDate(date);
+  }
+
+  /**
+   * Every available expiration — wire form {@code ?expiration=all}.
+   *
+   * <p>This is <em>not</em> equivalent to leaving the expiration filter unset: with no filter the
+   * chain endpoint returns only the front-month (nearest) expiration, whereas {@code all()} returns
+   * the full chain across every expiration. The additive {@code weekly}/{@code monthly}/{@code
+   * quarterly} predicates still narrow the result on top of it.
+   */
+  static All all() {
+    return new All();
   }
 
   /** Days-to-expiration filter — wire form {@code ?dte=N}. */
@@ -69,4 +82,7 @@ public sealed interface ExpirationFilter
   record Between(LocalDate from, LocalDate to) implements ExpirationFilter {}
 
   record MonthYear(int year, int month) implements ExpirationFilter {}
+
+  /** The whole chain across every expiration — see {@link #all()}. Carries no data of its own. */
+  record All() implements ExpirationFilter {}
 }

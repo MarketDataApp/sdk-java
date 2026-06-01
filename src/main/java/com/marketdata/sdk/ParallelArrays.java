@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Helper for deserializing the API's parallel-arrays wire format. Almost every endpoint that
@@ -68,6 +69,28 @@ final class ParallelArrays {
    */
   static <T> List<T> zip(JsonParser p, JsonNode root, List<String> fields, RowBuilder<T> rowBuilder)
       throws IOException {
+    return zip(p, root, fields, List.of(), rowBuilder);
+  }
+
+  /**
+   * Same as {@link #zip(JsonParser, JsonNode, List, RowBuilder)} but with a set of
+   * <em>optional</em> columns layered on top of the required {@code fields}. An optional column
+   * that is absent, null, or non-array is simply skipped (no error); when present it is
+   * length-checked against the required columns like any other. The row builder reads optional
+   * cells through {@link Row#dblOrNull} (and future {@code …OrNull} accessors), which return {@code
+   * null} for an absent column or null cell instead of throwing — the strict-by-default accessors
+   * stay strict for required columns.
+   *
+   * <p>This is the escape hatch the class doc anticipates for "legitimately-nullable columns": e.g.
+   * the options {@code rho} greek, which several feeds omit entirely.
+   */
+  static <T> List<T> zip(
+      JsonParser p,
+      JsonNode root,
+      List<String> fields,
+      List<String> optionalFields,
+      RowBuilder<T> rowBuilder)
+      throws IOException {
 
     String envelopeStatus = root.path(ENVELOPE_STATUS).asText("");
     if (ENVELOPE_ERROR.equals(envelopeStatus)) {
@@ -99,6 +122,26 @@ final class ParallelArrays {
                 + " (from first column "
                 + fields.get(0)
                 + ")");
+      }
+      arrays.put(field, node);
+    }
+
+    for (String field : optionalFields) {
+      JsonNode node = root.get(field);
+      if (node == null || node.isNull() || !node.isArray()) {
+        continue; // absent optional column — Row.dblOrNull will yield null for every row
+      }
+      if (expected == -1) {
+        expected = node.size();
+      } else if (node.size() != expected) {
+        throw new JsonMappingException(
+            p,
+            "mismatched lengths: optional "
+                + field
+                + "="
+                + node.size()
+                + " vs expected="
+                + expected);
       }
       arrays.put(field, node);
     }
@@ -142,11 +185,25 @@ final class ParallelArrays {
    */
   static <ROW, T> JsonDeserializer<T> listDeserializer(
       List<String> fields, RowBuilder<ROW> rowBuilder, Function<List<ROW>, T> wrapper) {
+    return listDeserializer(fields, List.of(), rowBuilder, wrapper);
+  }
+
+  /**
+   * Same as {@link #listDeserializer(List, RowBuilder, Function)} but with a set of optional
+   * columns (see {@link #zip(JsonParser, JsonNode, List, List, RowBuilder)}). Use when the wire
+   * schema has a column that some feeds omit — the row builder reads it through {@link
+   * Row#dblOrNull}.
+   */
+  static <ROW, T> JsonDeserializer<T> listDeserializer(
+      List<String> fields,
+      List<String> optionalFields,
+      RowBuilder<ROW> rowBuilder,
+      Function<List<ROW>, T> wrapper) {
     return new JsonDeserializer<T>() {
       @Override
       public T deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
         JsonNode root = p.readValueAsTree();
-        List<ROW> rows = zip(p, root, fields, rowBuilder);
+        List<ROW> rows = zip(p, root, fields, optionalFields, rowBuilder);
         return wrapper.apply(rows);
       }
     };
@@ -177,6 +234,14 @@ final class ParallelArrays {
      * @throws JsonMappingException if the cell is null, missing, or not a JSON number.
      */
     long lng(String field) throws JsonMappingException;
+
+    /**
+     * Lenient numeric accessor for <em>optional</em> columns: returns {@code null} when the column
+     * was absent from the response (i.e. declared via the optional-fields list and not present) or
+     * the cell itself is null/missing. A present-but-wrong-type cell still raises {@link
+     * JsonMappingException} — leniency covers absence, not corruption.
+     */
+    @Nullable Double dblOrNull(String field) throws JsonMappingException;
 
     /**
      * Raw access for custom conversions (e.g. nested objects or non-trivial date parsing). Returns
@@ -228,6 +293,21 @@ final class ParallelArrays {
         throw typeMismatch(field, "number", cell);
       }
       return cell.asLong();
+    }
+
+    @Override
+    public @Nullable Double dblOrNull(String field) throws JsonMappingException {
+      if (!arrays.containsKey(field)) {
+        return null; // optional column absent from the response entirely
+      }
+      JsonNode cell = arrays.get(field).get(index);
+      if (cell == null || cell.isNull() || cell.isMissingNode()) {
+        return null;
+      }
+      if (!cell.isNumber()) {
+        throw typeMismatch(field, "number", cell);
+      }
+      return cell.asDouble();
     }
 
     @Override

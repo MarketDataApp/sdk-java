@@ -94,6 +94,14 @@ public final class OptionsResource {
           "vega");
 
   /**
+   * Optional columns on the option row. {@code rho} is part of the documented schema but several
+   * feeds omit it (the API's own fixtures don't carry it); declaring it optional lets a response
+   * without rho decode cleanly to {@link OptionQuote#rho()} == {@code null} instead of raising a
+   * {@link com.marketdata.sdk.exception.ParseError} on a missing required column.
+   */
+  private static final List<String> OPTION_OPTIONAL_ROW_FIELDS = List.of("rho");
+
+  /**
    * Shared parallel-arrays deserializer that maps the API's option row into {@link OptionQuote}.
    * Reused by both {@link OptionsQuotes} and {@link OptionsChain} since they emit the same
    * per-contract schema; only the container record (and the semantic of how many rows come back)
@@ -103,6 +111,7 @@ public final class OptionsResource {
       Function<List<OptionQuote>, T> wrapper) {
     return ParallelArrays.listDeserializer(
         OPTION_ROW_FIELDS,
+        OPTION_OPTIONAL_ROW_FIELDS,
         row ->
             new OptionQuote(
                 row.text("optionSymbol"),
@@ -129,7 +138,8 @@ public final class OptionsResource {
                 row.dbl("delta"),
                 row.dbl("gamma"),
                 row.dbl("theta"),
-                row.dbl("vega")),
+                row.dbl("vega"),
+                row.dblOrNull("rho")),
         wrapper);
   }
 
@@ -363,6 +373,8 @@ public final class OptionsResource {
     } else if (f instanceof ExpirationFilter.MonthYear v) {
       b.query("month", v.month());
       b.query("year", v.year());
+    } else if (f instanceof ExpirationFilter.All) {
+      b.query("expiration", "all");
     }
   }
 

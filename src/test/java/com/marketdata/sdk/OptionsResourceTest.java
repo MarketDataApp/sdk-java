@@ -614,9 +614,25 @@ class OptionsResourceTest {
     assertThat(q.gamma()).isEqualTo(0.012);
     assertThat(q.theta()).isEqualTo(-0.05);
     assertThat(q.vega()).isEqualTo(0.15);
+    // rho is an optional column absent from CANNED_QUOTE_BODY — it must decode to null, not 0.0,
+    // and the missing column must not trip the strict parallel-arrays parser.
+    assertThat(q.rho()).isNull();
     assertThat(q.expiration().getZone().getId()).isEqualTo("America/New_York");
     assertThat(q.firstTraded().getZone().getId()).isEqualTo("America/New_York");
     assertThat(q.updated().getZone().getId()).isEqualTo("America/New_York");
+  }
+
+  @Test
+  void quoteDecodesRhoWhenPresent() {
+    String bodyWithRho =
+        CANNED_QUOTE_BODY.replace("\"vega\":[0.15]}", "\"vega\":[0.15],\"rho\":[0.0456]}");
+    CapturingClient client = okWith(bodyWithRho);
+    OptionsResource options = resourceWith(client);
+
+    OptionQuote q =
+        options.quote(OptionsQuoteRequest.of("AAPL250117C00150000")).data().quotes().get(0);
+
+    assertThat(q.rho()).isEqualTo(0.0456);
   }
 
   @Test
@@ -757,6 +773,22 @@ class OptionsResourceTest {
 
     assertThat(client.captured.get(0).uri().toString())
         .isEqualTo("http://localhost/v1/options/chain/AAPL/?from=2025-01-01&to=2025-03-31");
+  }
+
+  @Test
+  void chainExpirationFilterAllTranslatesToExpirationAll() {
+    // expiration=all returns the full chain — distinct from omitting the filter, which the API
+    // narrows to the front-month expiration.
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL").expirationFilter(ExpirationFilter.all()).build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?expiration=all");
   }
 
   @Test
