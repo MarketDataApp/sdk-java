@@ -382,6 +382,11 @@ public final class OptionsResource {
       b.query("year", v.year());
     } else if (f instanceof ExpirationFilter.All) {
       b.query("expiration", "all");
+    } else {
+      // ExpirationFilter is sealed — this is unreachable today. It exists so that adding a new
+      // variant without a matching branch here fails loudly instead of silently dropping the
+      // filter. Mirrors strikeFilterWireValue's exhaustiveness guard.
+      throw new IllegalStateException("unhandled ExpirationFilter variant: " + f);
     }
   }
 

@@ -2,6 +2,7 @@ package com.marketdata.sdk;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.ExpirationStrikes;
 import com.marketdata.sdk.options.OptionQuote;
 import com.marketdata.sdk.options.OptionSide;
@@ -17,6 +18,7 @@ import com.marketdata.sdk.options.OptionsQuotesRequest;
 import com.marketdata.sdk.options.OptionsStrikes;
 import com.marketdata.sdk.options.OptionsStrikesRequest;
 import com.marketdata.sdk.options.StrikeRange;
+import java.time.LocalDate;
 import java.util.Map;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -110,6 +112,72 @@ class OptionsIntegrationTest {
     assertThat(first.optionSymbol()).startsWith(UNDERLYING);
     assertThat(first.side()).isEqualTo("call");
     assertThat(first.strike()).isGreaterThan(0.0);
+  }
+
+  @Test
+  void chainExpirationAllSpansMultipleExpirations() {
+    // expiration=all is the distinguishing case: omitting the filter returns only the front-month
+    // expiration, whereas all() returns the full chain. strikeLimit(1) keeps it to ~one contract
+    // per expiration so the payload stays small while still proving the span.
+    OptionsChain chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.all())
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .data();
+
+    long distinctExpirations =
+        chain.chain().stream().map(OptionQuote::expiration).distinct().count();
+    assertThat(distinctExpirations)
+        .as("expiration=all returns every expiration, not just the front-month")
+        .isGreaterThan(1);
+  }
+
+  @Test
+  void chainDecodesOptionalRhoColumn() {
+    // rho is an optional column: the live feed may or may not populate it. Assert the SDK decodes
+    // whatever comes back without error — every row's rho is either null (omitted) or a finite
+    // double, never a ParseError from a missing required column.
+    OptionsChain chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .side(OptionSide.CALL)
+                    .strikeLimit(3)
+                    .strikeRange(StrikeRange.ITM)
+                    .build())
+            .data();
+
+    assertThat(chain.chain()).isNotEmpty();
+    for (OptionQuote q : chain.chain()) {
+      Double rho = q.rho();
+      if (rho != null) {
+        assertThat(rho.doubleValue()).isFinite();
+      }
+    }
+  }
+
+  @Test
+  void quoteCountbackBoundsHistoricalSeries() {
+    // countback=N with to caps the EOD series to at most N rows. A front-month ITM AAPL call has
+    // ample recent history, so we expect between 1 and 5 rows — the upper bound is the real
+    // assertion that countback reached the wire.
+    String optionSymbol = sampleOptionSymbol();
+
+    Response<OptionsQuotes> resp =
+        client
+            .options()
+            .quote(
+                OptionsQuoteRequest.builder(optionSymbol).to(LocalDate.now()).countback(5).build());
+
+    assertThat(resp.data().quotes())
+        .as("countback caps the series to at most 5 rows")
+        .hasSizeBetween(1, 5);
   }
 
   @Test
