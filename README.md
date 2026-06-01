@@ -1,9 +1,9 @@
 # Market Data Java SDK
 
-Java SDK for the [Market Data API](https://www.marketdata.app/). **Pre-release
-scaffold** — endpoints are not yet implemented; this iteration sets up the
-build, package layout, configuration cascade, exception taxonomy, and
-Kotlin-interop foundations.
+Java SDK for the [Market Data API](https://www.marketdata.app/). **Pre-release**
+— the `utilities` and `options` resources are implemented; `stocks`, `funds`,
+and `markets` are forthcoming. The build, package layout, configuration cascade,
+exception taxonomy, and Kotlin-interop foundations are in place.
 
 ## Requirements
 
@@ -32,7 +32,9 @@ common path is two lines:
 
 ```java
 try (var client = new MarketDataClient()) {
-    // endpoint methods land in subsequent iterations
+    Response<OptionsExpirations> resp =
+        client.options().expirations(OptionsExpirationsRequest.of("AAPL"));
+    System.out.println(resp.data().expirations());
 }
 ```
 
@@ -40,8 +42,83 @@ try (var client = new MarketDataClient()) {
 
 ```kotlin
 MarketDataClient().use { client ->
-    // endpoint methods land in subsequent iterations
+    val resp = client.options().expirations(OptionsExpirationsRequest.of("AAPL"))
+    println(resp.data().expirations)
 }
+```
+
+## Options
+
+Reached via `client.options()`. Every endpoint has a synchronous method and an
+`…Async` variant returning `CompletableFuture`, and takes a Builder-based
+request object — there are no `String` convenience overloads, so the call shape
+is uniform across the SDK regardless of how many parameters an endpoint has.
+
+| Method | Purpose |
+|--------|---------|
+| `lookup` | Resolve a human description (`"AAPL 1/16/2026 $200 Call"`) to an OCC symbol |
+| `expirations` | Expiration dates for an underlying |
+| `strikes` | Strike ladder per expiration |
+| `quote` | Quote for a single OCC option symbol |
+| `quotes` | Quotes for many symbols — fans out concurrently, returns a per-symbol map |
+| `chain` | Full option chain with the rich filter surface |
+
+### Chain with filters
+
+The `chain` request exposes the API's full filter set. Mutually-exclusive groups
+(expiration, strike) are modeled as sealed types, so the compiler lets you pick
+only one variant per group:
+
+#### Java
+
+```java
+try (var client = new MarketDataClient()) {
+    Response<OptionsChain> resp = client.options().chain(
+        OptionsChainRequest.builder("AAPL")
+            .expirationFilter(ExpirationFilter.all())    // every expiration, not just front-month
+            .strikeFilter(StrikeFilter.range(150, 200))  // 150 <= strike <= 200
+            .side(OptionSide.CALL)
+            .strikeLimit(5)
+            .build());
+
+    for (OptionQuote q : resp.data().chain()) {
+        System.out.printf("%s  delta=%.3f  rho=%s%n",
+            q.optionSymbol(), q.delta(), q.rho()); // rho may be null (optional column)
+    }
+}
+```
+
+#### Kotlin
+
+```kotlin
+MarketDataClient().use { client ->
+    val resp = client.options().chain(
+        OptionsChainRequest.builder("AAPL")
+            .expirationFilter(ExpirationFilter.all())
+            .strikeFilter(StrikeFilter.range(150.0, 200.0))
+            .side(OptionSide.CALL)
+            .strikeLimit(5)
+            .build()
+    )
+    resp.data().chain.forEach { q ->
+        println("${q.optionSymbol}  delta=${q.delta}  rho=${q.rho}") // rho may be null
+    }
+}
+```
+
+### Multiple quotes
+
+`quotes` fans out one request per symbol concurrently and returns a
+`Map<String, Response<OptionsQuotes>>` keyed by the input symbol, so per-symbol
+status and errors stay observable. `countback` caps the historical series to the
+N most recent rows before `to`:
+
+```java
+Map<String, Response<OptionsQuotes>> bySymbol = client.options().quotes(
+    OptionsQuotesRequest.builder("AAPL250117C00150000", "AAPL250117P00150000")
+        .to(LocalDate.now())
+        .countback(5)   // at most 5 EOD rows per symbol, before `to`
+        .build());
 ```
 
 ## Configuration
@@ -136,9 +213,13 @@ isn't an exact match is rejected before any request is made.
 ## Package layout
 
 ```
-com.marketdata.sdk             # MarketDataClient + RateLimits (public);
-                               # Configuration, EnvVars, Tokens, Version
+com.marketdata.sdk             # MarketDataClient, RateLimits, and the resource
+                               # façades (UtilitiesResource, OptionsResource) —
+                               # public; Configuration, EnvVars, Tokens, Version
                                # are package-private and not part of the API
+com.marketdata.sdk.options     # Options request builders + response records
+                               # (OptionsChainRequest, OptionQuote, sealed
+                               # ExpirationFilter / StrikeFilter, …)
 com.marketdata.sdk.exception   # Sealed MarketDataException hierarchy + ErrorContext
 ```
 
