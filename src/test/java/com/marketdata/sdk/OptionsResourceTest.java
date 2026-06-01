@@ -686,6 +686,32 @@ class OptionsResourceTest {
   }
 
   @Test
+  void quoteDecodesNullModelValuesAsNull() {
+    // Historical / illiquid rows legitimately carry null iv + greeks (no model output that day).
+    // The columns are present, only the cell values are null — they must decode to null rather than
+    // tripping the strict parallel-arrays parser. Reproduces the live-API ParseError seen on a
+    // countback query for a thinly-traded contract.
+    String body =
+        CANNED_QUOTE_BODY.replace(
+            "\"iv\":[0.3012],\"delta\":[0.89],\"gamma\":[0.012],\"theta\":[-0.05],\"vega\":[0.15]}",
+            "\"iv\":[null],\"delta\":[null],\"gamma\":[null],\"theta\":[null],\"vega\":[null]}");
+    CapturingClient client = okWith(body);
+    OptionsResource options = resourceWith(client);
+
+    OptionQuote q =
+        options.quote(OptionsQuoteRequest.of("AAPL250117C00150000")).data().quotes().get(0);
+
+    assertThat(q.iv()).isNull();
+    assertThat(q.delta()).isNull();
+    assertThat(q.gamma()).isNull();
+    assertThat(q.theta()).isNull();
+    assertThat(q.vega()).isNull();
+    assertThat(q.rho()).isNull();
+    // Market-data fields on the same row stay populated and primitive.
+    assertThat(q.bid()).isEqualTo(52.1);
+  }
+
+  @Test
   void quoteSyncMirrorsAsync() {
     CapturingClient client = okWith(CANNED_QUOTE_BODY);
     OptionsResource options = resourceWith(client);

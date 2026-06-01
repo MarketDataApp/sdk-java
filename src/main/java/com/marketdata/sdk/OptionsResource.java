@@ -134,11 +134,11 @@ public final class OptionsResource {
                 row.dbl("intrinsicValue"),
                 row.dbl("extrinsicValue"),
                 row.dbl("underlyingPrice"),
-                row.dbl("iv"),
-                row.dbl("delta"),
-                row.dbl("gamma"),
-                row.dbl("theta"),
-                row.dbl("vega"),
+                row.dblOrNull("iv"),
+                row.dblOrNull("delta"),
+                row.dblOrNull("gamma"),
+                row.dblOrNull("theta"),
+                row.dblOrNull("vega"),
                 row.dblOrNull("rho")),
         wrapper);
   }

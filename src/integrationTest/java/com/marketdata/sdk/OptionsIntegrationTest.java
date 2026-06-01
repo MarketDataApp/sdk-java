@@ -35,6 +35,11 @@ import org.junit.jupiter.api.TestInstance;
  * carries finite greeks") rather than specific values, since the live data drifts daily. AAPL is
  * used as the underlying everywhere — it is the largest options market by volume so the response is
  * always non-empty during market hours and historical queries are well-populated outside them.
+ *
+ * <p>Status is asserted as {@code 200 || 203}: the API returns <strong>203 Non-Authoritative
+ * Information</strong> when it serves cached/delayed data (outside market hours, or on a
+ * cached/delayed plan), which the SDK surfaces as a normal success. Pinning to 200 would make these
+ * tests flap with market hours.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class OptionsIntegrationTest {
@@ -62,7 +67,7 @@ class OptionsIntegrationTest {
     Response<OptionsLookup> resp =
         client.options().lookup(OptionsLookupRequest.of("AAPL 1/16/2026 $200 Call"));
 
-    assertThat(resp.statusCode()).isEqualTo(200);
+    assertThat(resp.statusCode()).isIn(200, 203);
     assertThat(resp.data().optionSymbol())
         .as("OCC symbol shape: 4-6 letter root + YYMMDD + C/P + 8-digit strike")
         .matches("[A-Z]{1,6}\\d{6}[CP]\\d{8}");
@@ -73,7 +78,7 @@ class OptionsIntegrationTest {
     Response<OptionsExpirations> resp =
         client.options().expirations(OptionsExpirationsRequest.of(UNDERLYING));
 
-    assertThat(resp.statusCode()).isEqualTo(200);
+    assertThat(resp.statusCode()).isIn(200, 203);
     assertThat(resp.data().expirations())
         .as("AAPL has options expirations year-round")
         .isNotEmpty();
@@ -85,7 +90,7 @@ class OptionsIntegrationTest {
   void strikesReturnsStrikesPerExpiration() {
     Response<OptionsStrikes> resp = client.options().strikes(OptionsStrikesRequest.of(UNDERLYING));
 
-    assertThat(resp.statusCode()).isEqualTo(200);
+    assertThat(resp.statusCode()).isIn(200, 203);
     assertThat(resp.data().expirations()).isNotEmpty();
     ExpirationStrikes first = resp.data().expirations().get(0);
     assertThat(first.strikes()).as("first expiration's strike ladder is non-empty").isNotEmpty();
@@ -106,7 +111,7 @@ class OptionsIntegrationTest {
                     .strikeRange(StrikeRange.ITM)
                     .build());
 
-    assertThat(resp.statusCode()).isEqualTo(200);
+    assertThat(resp.statusCode()).isIn(200, 203);
     assertThat(resp.data().chain()).isNotEmpty();
     OptionQuote first = resp.data().chain().get(0);
     assertThat(first.optionSymbol()).startsWith(UNDERLYING);
@@ -189,7 +194,7 @@ class OptionsIntegrationTest {
 
     Response<OptionsQuotes> resp = client.options().quote(OptionsQuoteRequest.of(optionSymbol));
 
-    assertThat(resp.statusCode()).isEqualTo(200);
+    assertThat(resp.statusCode()).isIn(200, 203);
     assertThat(resp.data().quotes()).hasSize(1);
     OptionQuote q = resp.data().quotes().get(0);
     assertThat(q.optionSymbol()).isEqualTo(optionSymbol);

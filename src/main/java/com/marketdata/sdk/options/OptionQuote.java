@@ -14,9 +14,11 @@ import org.jspecify.annotations.Nullable;
  * America/New_York}; their wire-format may be unix, ISO-string, or spreadsheet serial per the §3
  * {@code dateformat} parameter, all of which are decoded uniformly by the deserializer.
  *
- * <p>{@code rho} is part of the API schema but is an <em>optional</em> column — several feeds omit
- * it entirely or emit null cells. It is therefore the one greek typed as a nullable {@link Double};
- * {@code null} means "the response carried no rho for this contract", not zero.
+ * <p>The model-derived values — implied volatility and the Black-Scholes greeks ({@code iv}, {@code
+ * delta}, {@code gamma}, {@code theta}, {@code vega}, {@code rho}) — are typed as nullable {@link
+ * Double}. On historical or illiquid rows the API legitimately returns {@code null} for them (no
+ * model output that day); {@code null} therefore means "not provided for this contract/row", not
+ * zero. The market-data fields (bid/ask/last/volume/…) stay primitive — they are always present.
  */
 public record OptionQuote(
     String optionSymbol,
@@ -39,9 +41,9 @@ public record OptionQuote(
     double intrinsicValue,
     double extrinsicValue,
     double underlyingPrice,
-    double iv,
-    double delta,
-    double gamma,
-    double theta,
-    double vega,
+    @Nullable Double iv,
+    @Nullable Double delta,
+    @Nullable Double gamma,
+    @Nullable Double theta,
+    @Nullable Double vega,
     @Nullable Double rho) {}
