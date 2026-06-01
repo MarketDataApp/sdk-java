@@ -5,10 +5,30 @@ import com.marketdata.sdk.MarketDataClient;
 import com.marketdata.sdk.Response;
 import com.marketdata.sdk.exception.AuthenticationError;
 import com.marketdata.sdk.exception.MarketDataException;
+import com.marketdata.sdk.options.ExpirationFilter;
+import com.marketdata.sdk.options.ExpirationStrikes;
+import com.marketdata.sdk.options.OptionQuote;
+import com.marketdata.sdk.options.OptionSide;
+import com.marketdata.sdk.options.OptionsChain;
+import com.marketdata.sdk.options.OptionsChainRequest;
+import com.marketdata.sdk.options.OptionsExpirations;
+import com.marketdata.sdk.options.OptionsExpirationsRequest;
+import com.marketdata.sdk.options.OptionsLookup;
+import com.marketdata.sdk.options.OptionsLookupRequest;
+import com.marketdata.sdk.options.OptionsQuoteRequest;
+import com.marketdata.sdk.options.OptionsQuotes;
+import com.marketdata.sdk.options.OptionsQuotesRequest;
+import com.marketdata.sdk.options.OptionsStrikes;
+import com.marketdata.sdk.options.OptionsStrikesRequest;
+import com.marketdata.sdk.options.StrikeFilter;
+import com.marketdata.sdk.options.StrikeRange;
 import com.marketdata.sdk.utilities.ApiStatus;
 import com.marketdata.sdk.utilities.RequestHeaders;
 import com.marketdata.sdk.utilities.ServiceStatus;
 import com.marketdata.sdk.utilities.User;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Idiomatic consumer-style examples — one short snippet per SDK resource showing
@@ -50,8 +70,8 @@ public final class QuickstartApp {
         return;
       }
       utilitiesExamples(client);
+      optionsExamples(client);
       // stocksExamples(client);    // ← add when client.stocks() lands
-      // optionsExamples(client);   // ← add when client.options() lands
       // fundsExamples(client);     // ← add when client.funds() lands
       // marketsExamples(client);   // ← add when client.markets() lands
     }
@@ -102,6 +122,158 @@ public final class QuickstartApp {
       Console.info("401 — needs a token (same reason as utilities().user()).");
     } catch (MarketDataException e) {
       Console.fail("headers() failed: " + e.getExceptionType() + " — " + e.getMessage());
+    }
+  }
+
+  // ---------- options ----------
+
+  /**
+   * One short snippet per options endpoint, in the order a consumer typically discovers them:
+   * lookup → expirations → strikes → chain → quote/quotes. The {@code chain} examples show the two
+   * sealed filter groups ({@link ExpirationFilter}, {@link StrikeFilter}), the {@code
+   * expiration=all} span, the optional nullable {@code rho} greek, and the {@code countback}
+   * window. Options data needs entitlements, so each step catches {@link AuthenticationError}
+   * separately and prints a hint — the tour stays runnable in demo mode.
+   */
+  private static void optionsExamples(MarketDataClient client) {
+    Console.header("options — lookup, expirations, strikes, chain, quote, quotes");
+    Console.info(
+        "Entry point is client.options(); every endpoint takes a Builder-based request object"
+            + " (no String overloads) and returns a Response<T>.");
+
+    // 1) lookup — turn a human description into a well-formed OCC symbol.
+    Console.step("client.options().lookup(...) — human description → OCC symbol");
+    try {
+      Response<OptionsLookup> r =
+          client.options().lookup(OptionsLookupRequest.of("AAPL 1/16/2026 $200 Call"));
+      Console.ok("resolved to " + r.data().optionSymbol());
+    } catch (AuthenticationError e) {
+      Console.info("401 — set MARKETDATA_TOKEN (env or .env) to exercise the options endpoints.");
+    } catch (MarketDataException e) {
+      Console.fail("lookup() failed: " + e.getExceptionType() + " — " + e.getMessage());
+    }
+
+    // 2) expirations — the expiration calendar for an underlying.
+    Console.step("client.options().expirations(\"AAPL\") — expiration dates");
+    try {
+      Response<OptionsExpirations> r =
+          client.options().expirations(OptionsExpirationsRequest.of("AAPL"));
+      Console.ok(
+          r.data().expirations().size() + " expirations; updated " + r.data().updated());
+    } catch (AuthenticationError e) {
+      Console.info("401 — needs a token.");
+    } catch (MarketDataException e) {
+      Console.fail("expirations() failed: " + e.getExceptionType() + " — " + e.getMessage());
+    }
+
+    // 3) strikes — the strike ladder, grouped per expiration.
+    Console.step("client.options().strikes(\"AAPL\") — strike ladder per expiration");
+    try {
+      Response<OptionsStrikes> r = client.options().strikes(OptionsStrikesRequest.of("AAPL"));
+      if (r.data().expirations().isEmpty()) {
+        Console.ok("no strikes returned");
+      } else {
+        ExpirationStrikes first = r.data().expirations().get(0);
+        Console.ok(
+            first.expiration().toLocalDate() + " has " + first.strikes().size() + " strikes");
+      }
+    } catch (AuthenticationError e) {
+      Console.info("401 — needs a token.");
+    } catch (MarketDataException e) {
+      Console.fail("strikes() failed: " + e.getExceptionType() + " — " + e.getMessage());
+    }
+
+    // 4) chain — the rich filter surface. The mutually-exclusive groups are sealed types: you pick
+    //    one ExpirationFilter and one StrikeFilter variant, enforced by the compiler. Here: ITM-ish
+    //    calls within 45 DTE, strikes 150–250, the 5 nearest the money.
+    Console.step(
+        "client.options().chain(...) — filtered chain via sealed ExpirationFilter / StrikeFilter");
+    try {
+      Response<OptionsChain> r =
+          client
+              .options()
+              .chain(
+                  OptionsChainRequest.builder("AAPL")
+                      .expirationFilter(ExpirationFilter.dte(45))
+                      .strikeFilter(StrikeFilter.range(150, 250))
+                      .side(OptionSide.CALL)
+                      .strikeLimit(5)
+                      .build());
+      Console.ok(r.data().chain().size() + " contracts");
+      if (!r.data().chain().isEmpty()) {
+        OptionQuote q = r.data().chain().get(0);
+        // rho is an optional column — may be null when the feed omits it.
+        Console.ok(q.optionSymbol() + " delta=" + q.delta() + " rho=" + q.rho());
+      }
+    } catch (AuthenticationError e) {
+      Console.info("401 — needs a token.");
+    } catch (MarketDataException e) {
+      Console.fail("chain() failed: " + e.getExceptionType() + " — " + e.getMessage());
+    }
+
+    // 5) chain with ExpirationFilter.all() — the whole chain across every expiration, distinct from
+    //    omitting the filter (which the API narrows to the front-month). strikeLimit(1) keeps it small.
+    Console.step("client.options().chain(... ExpirationFilter.all()) — every expiration at once");
+    try {
+      OptionsChain chain =
+          client
+              .options()
+              .chain(
+                  OptionsChainRequest.builder("AAPL")
+                      .expirationFilter(ExpirationFilter.all())
+                      .side(OptionSide.CALL)
+                      .strikeLimit(1)
+                      .build())
+              .data();
+      long distinct = chain.chain().stream().map(OptionQuote::expiration).distinct().count();
+      Console.ok("spans " + distinct + " distinct expirations (front-month-only would be 1)");
+    } catch (AuthenticationError e) {
+      Console.info("401 — needs a token.");
+    } catch (MarketDataException e) {
+      Console.fail("chain(all) failed: " + e.getExceptionType() + " — " + e.getMessage());
+    }
+
+    // 6) quote / quotes — single contract, then concurrent multi-contract fan-out. Real symbols are
+    //    pulled from a tiny chain query so the contracts are guaranteed to exist. quotes returns a
+    //    Map keyed by symbol; countback caps each per-symbol series to the N most recent rows.
+    Console.step(
+        "client.options().quote(...) / quotes(...) — single + concurrent multi-contract (countback)");
+    try {
+      List<OptionQuote> sample =
+          client
+              .options()
+              .chain(
+                  OptionsChainRequest.builder("AAPL")
+                      .side(OptionSide.CALL)
+                      .strikeRange(StrikeRange.ITM)
+                      .strikeLimit(2)
+                      .build())
+              .data()
+              .chain();
+      if (sample.size() < 2) {
+        Console.info("not enough contracts returned to demo quote/quotes — skipping");
+        return;
+      }
+      String s1 = sample.get(0).optionSymbol();
+      String s2 = sample.get(1).optionSymbol();
+
+      Response<OptionsQuotes> one = client.options().quote(OptionsQuoteRequest.of(s1));
+      Console.ok("quote(" + s1 + ") → " + one.data().quotes().size() + " row");
+
+      Map<String, Response<OptionsQuotes>> many =
+          client
+              .options()
+              .quotes(
+                  OptionsQuotesRequest.builder(s1, s2)
+                      .to(LocalDate.now())
+                      .countback(5)
+                      .build());
+      Console.ok(
+          "quotes(" + s1 + ", " + s2 + ") → " + many.size() + " symbols, <=5 rows each (countback)");
+    } catch (AuthenticationError e) {
+      Console.info("401 — needs a token.");
+    } catch (MarketDataException e) {
+      Console.fail("quote/quotes failed: " + e.getExceptionType() + " — " + e.getMessage());
     }
   }
 
