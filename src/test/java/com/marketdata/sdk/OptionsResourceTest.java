@@ -581,6 +581,56 @@ class OptionsResourceTest {
         .hasMessageContaining("mutually exclusive");
   }
 
+  @Test
+  void quoteAttachesCountbackWithTo() {
+    CapturingClient client = okWith(CANNED_QUOTE_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .quoteAsync(
+            OptionsQuoteRequest.builder("AAPL250117C00150000")
+                .to(LocalDate.of(2025, Month.JANUARY, 1))
+                .countback(5)
+                .build())
+        .join();
+
+    String url = client.captured.get(0).uri().toString();
+    assertThat(url)
+        .isEqualTo(
+            "http://localhost/v1/options/quotes/AAPL250117C00150000/?to=2025-01-01&countback=5");
+  }
+
+  @Test
+  void quoteRequestRejectsCountbackWithDate() {
+    assertThatThrownBy(
+            () ->
+                OptionsQuoteRequest.builder("X")
+                    .date(LocalDate.of(2025, Month.JANUARY, 1))
+                    .countback(5)
+                    .build())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("mutually exclusive");
+  }
+
+  @Test
+  void quoteRequestRejectsCountbackWithFrom() {
+    assertThatThrownBy(
+            () ->
+                OptionsQuoteRequest.builder("X")
+                    .from(LocalDate.of(2024, Month.DECEMBER, 1))
+                    .countback(5)
+                    .build())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("countback and from");
+  }
+
+  @Test
+  void quoteRequestRejectsNonPositiveCountback() {
+    assertThatThrownBy(() -> OptionsQuoteRequest.builder("X").countback(0).build())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("countback must be positive");
+  }
+
   // ---------- quote: response decoding ----------
 
   @Test
@@ -698,6 +748,24 @@ class OptionsResourceTest {
     assertThat(client.captured).hasSize(2);
     for (HttpRequest req : client.captured) {
       assertThat(req.uri().toString()).endsWith("?date=2025-01-01");
+    }
+  }
+
+  @Test
+  void quotesAttachesCountbackToEachFanOut() {
+    SymbolRoutingClient client =
+        new SymbolRoutingClient(Map.of("X", CANNED_QUOTE_BODY, "Y", CANNED_QUOTE_BODY));
+    OptionsResource options = resourceWith(client);
+
+    options.quotes(
+        OptionsQuotesRequest.builder("X", "Y")
+            .to(LocalDate.of(2025, Month.JANUARY, 1))
+            .countback(3)
+            .build());
+
+    assertThat(client.captured).hasSize(2);
+    for (HttpRequest req : client.captured) {
+      assertThat(req.uri().toString()).endsWith("?to=2025-01-01&countback=3");
     }
   }
 

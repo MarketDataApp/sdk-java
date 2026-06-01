@@ -226,7 +226,12 @@ public final class OptionsResource {
    */
   public CompletableFuture<Response<OptionsQuotes>> quoteAsync(OptionsQuoteRequest request) {
     return executeAndWrap(
-        buildQuoteSpec(request.optionSymbol(), request.date(), request.from(), request.to()),
+        buildQuoteSpec(
+            request.optionSymbol(),
+            request.date(),
+            request.from(),
+            request.to(),
+            request.countback()),
         OptionsQuotes.class);
   }
 
@@ -239,7 +244,8 @@ public final class OptionsResource {
    * Async: fetch quotes for multiple OCC option symbols concurrently. One HTTP request is fired per
    * symbol — the API path takes a single optionSymbol so comma-separated bulk isn't actually
    * supported by the backend regardless of what the docstring says (verified by reading the
-   * handler). All requests share the same optional {@code date}/{@code from}/{@code to} filters.
+   * handler). All requests share the same optional {@code date}/{@code from}/{@code to}/{@code
+   * countback} filters.
    *
    * <p>Returns a {@code Map<String, Response<OptionsQuotes>>} keyed by the original symbol input
    * (insertion order preserved) so the consumer sees per-symbol {@link Response} metadata — {@code
@@ -254,7 +260,8 @@ public final class OptionsResource {
     List<CompletableFuture<Map.Entry<String, Response<OptionsQuotes>>>> futures =
         new ArrayList<>(symbols.size());
     for (String symbol : symbols) {
-      RequestSpec spec = buildQuoteSpec(symbol, request.date(), request.from(), request.to());
+      RequestSpec spec =
+          buildQuoteSpec(symbol, request.date(), request.from(), request.to(), request.countback());
       futures.add(
           executeAndWrap(spec, OptionsQuotes.class).thenApply(resp -> Map.entry(symbol, resp)));
     }
@@ -404,7 +411,8 @@ public final class OptionsResource {
       String optionSymbol,
       @Nullable LocalDate date,
       @Nullable LocalDate from,
-      @Nullable LocalDate to) {
+      @Nullable LocalDate to,
+      @Nullable Integer countback) {
     RequestSpec.Builder b = RequestSpec.get("options/quotes/" + PathSegments.encode(optionSymbol));
     if (date != null) {
       b.query("date", DateTimeFormatter.ISO_LOCAL_DATE.format(date));
@@ -414,6 +422,9 @@ public final class OptionsResource {
     }
     if (to != null) {
       b.query("to", DateTimeFormatter.ISO_LOCAL_DATE.format(to));
+    }
+    if (countback != null) {
+      b.query("countback", countback);
     }
     return b.build();
   }
