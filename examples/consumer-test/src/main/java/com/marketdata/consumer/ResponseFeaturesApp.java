@@ -4,16 +4,15 @@ import com.marketdata.consumer.shared.Console;
 import com.marketdata.consumer.shared.MockServerControl;
 import com.marketdata.consumer.shared.MockServerControl.Step;
 import com.marketdata.sdk.MarketDataClient;
-import com.marketdata.sdk.Response;
 import com.marketdata.sdk.utilities.ApiStatus;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 
 /**
- * §13.5 {@code Response<T>} surface: format predicates ({@code isJson},
+ * §13.5 {@code MarketDataResponse<T>} surface: format predicates ({@code isJson},
  * {@code isCsv}, {@code isHtml}), the no-data envelope ({@code isNoData}
- * from a 404 + {@code s:no_data}), defensive copies on {@code rawBody()}, the
+ * from a 404 + {@code s:no_data}), the raw body via {@code json()}, the
  * {@code saveToFile} helper, and the redacted {@code toString} shape.
  *
  * <p>Run: {@code ./gradlew runResponse}
@@ -29,7 +28,7 @@ public final class ResponseFeaturesApp {
         new MarketDataClient("token", MockServerControl.BASE_URL, null, false)) {
       formatPredicates(mock, client);
       noDataEnvelope(mock, client);
-      rawBodyIsDefensiveCopy(mock, client);
+      jsonReturnsRawBody(mock, client);
       saveToFileWritesVerbatim(mock, client);
       toStringIsLogSafe(mock, client);
     }
@@ -42,7 +41,7 @@ public final class ResponseFeaturesApp {
     mock.reset();
     mock.script(Step.of(200, "{\"x-ratelimit-requests-remaining\":1,\"x-ratelimit-requests-limit\":1,\"x-options-data-permissions\":\"\"}"));
 
-    Response<?> resp = client.utilities().user();
+    var resp = client.utilities().user();
     Console.info("isJson(): " + resp.isJson());
     Console.info("isCsv():  " + resp.isCsv());
     Console.info("isHtml(): " + resp.isHtml());
@@ -65,13 +64,13 @@ public final class ResponseFeaturesApp {
     mock.script(Step.of(404, "{\"s\":\"no_data\"}"));
 
     try {
-      Response<ApiStatus> resp = client.utilities().status();
+      var resp = client.utilities().status();
       Console.ok(
           "no exception thrown; statusCode="
               + resp.statusCode()
               + ", isNoData="
               + resp.isNoData());
-      Console.info("data().services() = " + resp.data().services() + " (empty list as designed)");
+      Console.info("data().services() = " + resp.values() + " (empty list as designed)");
     } catch (Exception e) {
       Console.fail("404+no_data became an exception: " + e.getClass().getSimpleName());
     }
@@ -79,22 +78,18 @@ public final class ResponseFeaturesApp {
 
   // ---------- defensive rawBody copy ----------
 
-  private static void rawBodyIsDefensiveCopy(MockServerControl mock, MarketDataClient client) {
-    Console.header("rawBody() returns a defensive copy (mutations don't leak)");
+  private static void jsonReturnsRawBody(MockServerControl mock, MarketDataClient client) {
+    Console.header("json() returns the raw response body verbatim");
     mock.reset();
     String payload = "{\"x-ratelimit-requests-remaining\":1,\"x-ratelimit-requests-limit\":1,\"x-options-data-permissions\":\"\"}";
     mock.script(Step.of(200, payload));
 
-    Response<?> resp = client.utilities().user();
-    byte[] first = resp.rawBody();
-    Console.info("first rawBody() length: " + first.length);
-    first[0] = 'X'; // mutate the returned array — must not affect internal state
-
-    byte[] second = resp.rawBody();
-    if (Arrays.equals(second, payload.getBytes())) {
-      Console.ok("second rawBody() matches the original payload — defensive copy honored");
+    var resp = client.utilities().user();
+    String body = resp.json();
+    if (body.equals(payload)) {
+      Console.ok("json() matches the original payload (" + body.length() + " chars)");
     } else {
-      Console.fail("internal body state was mutated by the consumer");
+      Console.fail("json() differs from the original payload");
     }
   }
 
@@ -107,7 +102,7 @@ public final class ResponseFeaturesApp {
     String payload = "{\"x-ratelimit-requests-remaining\":1,\"x-ratelimit-requests-limit\":1,\"x-options-data-permissions\":\"\"}";
     mock.script(Step.of(200, payload));
 
-    Response<?> resp = client.utilities().user();
+    var resp = client.utilities().user();
     Path tmp = Files.createTempFile("sdk-consumer-", ".json");
     try {
       resp.saveToFile(tmp);
@@ -130,7 +125,7 @@ public final class ResponseFeaturesApp {
     String payload = "{\"x-ratelimit-requests-remaining\":1,\"x-ratelimit-requests-limit\":1,\"x-options-data-permissions\":\"\"}";
     mock.script(Step.of(200, payload));
 
-    Response<?> resp = client.utilities().user();
+    var resp = client.utilities().user();
     String repr = resp.toString();
     Console.info(repr);
     if (repr.contains("requestsRemaining")) {

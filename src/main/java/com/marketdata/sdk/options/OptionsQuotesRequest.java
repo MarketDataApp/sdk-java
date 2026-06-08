@@ -10,7 +10,7 @@ import org.jspecify.annotations.Nullable;
  * Parameters for the multi-contract form of {@code /v1/options/quotes/}. Carries a list of one or
  * more OCC option symbols plus the optional historical-window filters shared across them. The
  * resource fans out one HTTP request per symbol concurrently (via the SDK's 50-permit {@code
- * AsyncSemaphore}) and returns a {@code Map<String, Response<OptionsQuotes>>} so per-symbol status,
+ * AsyncSemaphore}) and returns a {@code Map<String, OptionsQuotesResponse>} so per-symbol status,
  * raw body, and error envelopes stay observable.
  *
  * <p>For a single contract, prefer {@link OptionsQuoteRequest} — clearer intent and one fewer map

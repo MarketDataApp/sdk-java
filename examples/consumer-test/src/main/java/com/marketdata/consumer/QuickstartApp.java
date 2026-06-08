@@ -2,7 +2,6 @@ package com.marketdata.consumer;
 
 import com.marketdata.consumer.shared.Console;
 import com.marketdata.sdk.MarketDataClient;
-import com.marketdata.sdk.Response;
 import com.marketdata.sdk.exception.AuthenticationError;
 import com.marketdata.sdk.exception.MarketDataException;
 import com.marketdata.sdk.options.ExpirationFilter;
@@ -85,9 +84,9 @@ public final class QuickstartApp {
     // 1) Public endpoint: no token required. Useful as a liveness check.
     Console.step("client.utilities().status() — per-service health snapshot");
     try {
-      Response<ApiStatus> health = client.utilities().status();
-      long online = health.data().services().stream().filter(ServiceStatus::online).count();
-      Console.ok(online + " of " + health.data().services().size() + " services online");
+      var health = client.utilities().status();
+      long online = health.values().stream().filter(ServiceStatus::online).count();
+      Console.ok(online + " of " + health.values().size() + " services online");
     } catch (MarketDataException e) {
       Console.fail("status() failed: " + e.getExceptionType() + " — " + e.getMessage());
     }
@@ -97,8 +96,8 @@ public final class QuickstartApp {
     // invalid" — surface a hint to the user rather than crashing.
     Console.step("client.utilities().user() — your quota & permissions");
     try {
-      Response<User> me = client.utilities().user();
-      User u = me.data();
+      var me = client.utilities().user();
+      User u = me.values();
       Console.ok(
           u.requestsRemaining() + " requests remaining of " + u.requestsLimit() + " (today)");
     } catch (AuthenticationError e) {
@@ -113,10 +112,10 @@ public final class QuickstartApp {
     // when debugging "is my Authorization header actually getting through?".
     Console.step("client.utilities().headers() — what the server saw on this call");
     try {
-      Response<RequestHeaders> echo = client.utilities().headers();
+      var echo = client.utilities().headers();
       Console.ok(
           "server received "
-              + echo.data().headers().size()
+              + echo.values().size()
               + " request headers (Authorization echoed back redacted)");
     } catch (AuthenticationError e) {
       Console.info("401 — needs a token (same reason as utilities().user()).");
@@ -139,14 +138,14 @@ public final class QuickstartApp {
     Console.header("options — lookup, expirations, strikes, chain, quote, quotes");
     Console.info(
         "Entry point is client.options(); every endpoint takes a Builder-based request object"
-            + " (no String overloads) and returns a Response<T>.");
+            + " (no String overloads) and returns a typed MarketDataResponse (access the payload via .values()).");
 
     // 1) lookup — turn a human description into a well-formed OCC symbol.
     Console.step("client.options().lookup(...) — human description → OCC symbol");
     try {
-      Response<OptionsLookup> r =
+      var r =
           client.options().lookup(OptionsLookupRequest.of("AAPL 1/16/2026 $200 Call"));
-      Console.ok("resolved to " + r.data().optionSymbol());
+      Console.ok("resolved to " + r.values());
     } catch (AuthenticationError e) {
       Console.info("401 — set MARKETDATA_TOKEN (env or .env) to exercise the options endpoints.");
     } catch (MarketDataException e) {
@@ -156,10 +155,10 @@ public final class QuickstartApp {
     // 2) expirations — the expiration calendar for an underlying.
     Console.step("client.options().expirations(\"AAPL\") — expiration dates");
     try {
-      Response<OptionsExpirations> r =
+      var r =
           client.options().expirations(OptionsExpirationsRequest.of("AAPL"));
       Console.ok(
-          r.data().expirations().size() + " expirations; updated " + r.data().updated());
+          r.values().size() + " expirations; updated " + r.updated());
     } catch (AuthenticationError e) {
       Console.info("401 — needs a token.");
     } catch (MarketDataException e) {
@@ -169,11 +168,11 @@ public final class QuickstartApp {
     // 3) strikes — the strike ladder, grouped per expiration.
     Console.step("client.options().strikes(\"AAPL\") — strike ladder per expiration");
     try {
-      Response<OptionsStrikes> r = client.options().strikes(OptionsStrikesRequest.of("AAPL"));
-      if (r.data().expirations().isEmpty()) {
+      var r = client.options().strikes(OptionsStrikesRequest.of("AAPL"));
+      if (r.values().isEmpty()) {
         Console.ok("no strikes returned");
       } else {
-        ExpirationStrikes first = r.data().expirations().get(0);
+        ExpirationStrikes first = r.values().get(0);
         Console.ok(
             first.expiration().toLocalDate() + " has " + first.strikes().size() + " strikes");
       }
@@ -189,7 +188,7 @@ public final class QuickstartApp {
     Console.step(
         "client.options().chain(...) — filtered chain via sealed ExpirationFilter / StrikeFilter");
     try {
-      Response<OptionsChain> r =
+      var r =
           client
               .options()
               .chain(
@@ -199,9 +198,9 @@ public final class QuickstartApp {
                       .side(OptionSide.CALL)
                       .strikeLimit(5)
                       .build());
-      Console.ok(r.data().chain().size() + " contracts");
-      if (!r.data().chain().isEmpty()) {
-        OptionQuote q = r.data().chain().get(0);
+      Console.ok(r.values().size() + " contracts");
+      if (!r.values().isEmpty()) {
+        OptionQuote q = r.values().get(0);
         // rho is an optional column — may be null when the feed omits it.
         Console.ok(q.optionSymbol() + " delta=" + q.delta() + " rho=" + q.rho());
       }
@@ -215,7 +214,7 @@ public final class QuickstartApp {
     //    omitting the filter (which the API narrows to the front-month). strikeLimit(1) keeps it small.
     Console.step("client.options().chain(... ExpirationFilter.all()) — every expiration at once");
     try {
-      OptionsChain chain =
+      var chain =
           client
               .options()
               .chain(
@@ -224,8 +223,8 @@ public final class QuickstartApp {
                       .side(OptionSide.CALL)
                       .strikeLimit(1)
                       .build())
-              .data();
-      long distinct = chain.chain().stream().map(OptionQuote::expiration).distinct().count();
+              .values();
+      long distinct = chain.stream().map(OptionQuote::expiration).distinct().count();
       Console.ok("spans " + distinct + " distinct expirations (front-month-only would be 1)");
     } catch (AuthenticationError e) {
       Console.info("401 — needs a token.");
@@ -248,8 +247,7 @@ public final class QuickstartApp {
                       .strikeRange(StrikeRange.ITM)
                       .strikeLimit(2)
                       .build())
-              .data()
-              .chain();
+              .values();
       if (sample.size() < 2) {
         Console.info("not enough contracts returned to demo quote/quotes — skipping");
         return;
@@ -257,10 +255,10 @@ public final class QuickstartApp {
       String s1 = sample.get(0).optionSymbol();
       String s2 = sample.get(1).optionSymbol();
 
-      Response<OptionsQuotes> one = client.options().quote(OptionsQuoteRequest.of(s1));
-      Console.ok("quote(" + s1 + ") → " + one.data().quotes().size() + " row");
+      var one = client.options().quote(OptionsQuoteRequest.of(s1));
+      Console.ok("quote(" + s1 + ") → " + one.values().size() + " row");
 
-      Map<String, Response<OptionsQuotes>> many =
+      var many =
           client
               .options()
               .quotes(
@@ -284,11 +282,11 @@ public final class QuickstartApp {
   //
   //   Console.step("client.stocks().quote(\"AAPL\") — latest quote");
   //   var q = client.stocks().quote("AAPL");
-  //   Console.ok("AAPL last=" + q.data().last() + " (asOf " + q.data().asOf() + ")");
+  //   Console.ok("AAPL last=" + q.values().last() + " (asOf " + q.values().asOf() + ")");
   //
   //   Console.step("client.stocks().candles(\"AAPL\", Resolution.D, from, to) — historical OHLCV");
   //   var c = client.stocks().candles("AAPL", Resolution.D, ...);
-  //   Console.ok(c.data().rows().size() + " daily candles fetched");
+  //   Console.ok(c.values().rows().size() + " daily candles fetched");
   // }
 
   // ---------- helpers ----------

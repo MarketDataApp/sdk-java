@@ -80,7 +80,7 @@ public final class ExceptionsApp {
     Console.info(
         "Spec §11: 404 + {\"s\":\"no_data\"} is a SUCCESSFUL response. The SDK returns a");
     Console.info(
-        "Response<T> with isNoData() = true. To see NotFoundError, we'd need a 404 that");
+        "a MarketDataResponse with isNoData() = true. To see NotFoundError, we'd need a 404 that");
     Console.info(
         "ISN'T the no-data envelope — but the current routing maps all 404s to a successful");
     Console.info(

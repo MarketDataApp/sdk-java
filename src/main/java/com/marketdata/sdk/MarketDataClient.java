@@ -1,5 +1,6 @@
 package com.marketdata.sdk;
 
+import com.marketdata.sdk.utilities.ApiStatus;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.util.ArrayList;
@@ -109,7 +110,8 @@ public final class MarketDataClient implements AutoCloseable {
       this.options = new OptionsResource(transport, parser);
       cacheRef.set(
           new StatusCache(
-              () -> utilities.statusAsync().thenApply(Response::data), Clock.systemUTC()));
+              () -> utilities.statusAsync().thenApply(r -> new ApiStatus(r.values())),
+              Clock.systemUTC()));
     } catch (Throwable t) {
       try {
         transport.close();

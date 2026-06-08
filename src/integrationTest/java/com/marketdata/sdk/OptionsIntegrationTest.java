@@ -6,19 +6,15 @@ import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.ExpirationStrikes;
 import com.marketdata.sdk.options.OptionQuote;
 import com.marketdata.sdk.options.OptionSide;
-import com.marketdata.sdk.options.OptionsChain;
 import com.marketdata.sdk.options.OptionsChainRequest;
-import com.marketdata.sdk.options.OptionsExpirations;
 import com.marketdata.sdk.options.OptionsExpirationsRequest;
-import com.marketdata.sdk.options.OptionsLookup;
 import com.marketdata.sdk.options.OptionsLookupRequest;
 import com.marketdata.sdk.options.OptionsQuoteRequest;
-import com.marketdata.sdk.options.OptionsQuotes;
 import com.marketdata.sdk.options.OptionsQuotesRequest;
-import com.marketdata.sdk.options.OptionsStrikes;
 import com.marketdata.sdk.options.OptionsStrikesRequest;
 import com.marketdata.sdk.options.StrikeRange;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -64,35 +60,33 @@ class OptionsIntegrationTest {
   void lookupConvertsHumanDescriptionToOccSymbol() {
     // A far-future date keeps the test stable against expiration drift — the endpoint converts
     // the description regardless of whether such a contract actually exists today.
-    Response<OptionsLookup> resp =
+    OptionsLookupResponse resp =
         client.options().lookup(OptionsLookupRequest.of("AAPL 1/16/2026 $200 Call"));
 
     assertThat(resp.statusCode()).isIn(200, 203);
-    assertThat(resp.data().optionSymbol())
+    assertThat(resp.values())
         .as("OCC symbol shape: 4-6 letter root + YYMMDD + C/P + 8-digit strike")
         .matches("[A-Z]{1,6}\\d{6}[CP]\\d{8}");
   }
 
   @Test
   void expirationsReturnsAtLeastOneFutureDate() {
-    Response<OptionsExpirations> resp =
+    OptionsExpirationsResponse resp =
         client.options().expirations(OptionsExpirationsRequest.of(UNDERLYING));
 
     assertThat(resp.statusCode()).isIn(200, 203);
-    assertThat(resp.data().expirations())
-        .as("AAPL has options expirations year-round")
-        .isNotEmpty();
-    assertThat(resp.data().updated()).isNotNull();
-    assertThat(resp.data().updated().getZone().getId()).isEqualTo("America/New_York");
+    assertThat(resp.values()).as("AAPL has options expirations year-round").isNotEmpty();
+    assertThat(resp.updated()).isNotNull();
+    assertThat(resp.updated().getZone().getId()).isEqualTo("America/New_York");
   }
 
   @Test
   void strikesReturnsStrikesPerExpiration() {
-    Response<OptionsStrikes> resp = client.options().strikes(OptionsStrikesRequest.of(UNDERLYING));
+    OptionsStrikesResponse resp = client.options().strikes(OptionsStrikesRequest.of(UNDERLYING));
 
     assertThat(resp.statusCode()).isIn(200, 203);
-    assertThat(resp.data().expirations()).isNotEmpty();
-    ExpirationStrikes first = resp.data().expirations().get(0);
+    assertThat(resp.values()).isNotEmpty();
+    ExpirationStrikes first = resp.values().get(0);
     assertThat(first.strikes()).as("first expiration's strike ladder is non-empty").isNotEmpty();
     assertThat(first.expiration().getZone().getId()).isEqualTo("America/New_York");
   }
@@ -101,7 +95,7 @@ class OptionsIntegrationTest {
   void chainReturnsFilteredContracts() {
     // Light filter: a narrow strike-limit window keeps the response small without depending on
     // a specific dte that might fall on a non-trading day.
-    Response<OptionsChain> resp =
+    OptionsChainResponse resp =
         client
             .options()
             .chain(
@@ -112,8 +106,8 @@ class OptionsIntegrationTest {
                     .build());
 
     assertThat(resp.statusCode()).isIn(200, 203);
-    assertThat(resp.data().chain()).isNotEmpty();
-    OptionQuote first = resp.data().chain().get(0);
+    assertThat(resp.values()).isNotEmpty();
+    OptionQuote first = resp.values().get(0);
     assertThat(first.optionSymbol()).startsWith(UNDERLYING);
     assertThat(first.side()).isEqualTo("call");
     assertThat(first.strike()).isGreaterThan(0.0);
@@ -124,7 +118,7 @@ class OptionsIntegrationTest {
     // expiration=all is the distinguishing case: omitting the filter returns only the front-month
     // expiration, whereas all() returns the full chain. strikeLimit(1) keeps it to ~one contract
     // per expiration so the payload stays small while still proving the span.
-    OptionsChain chain =
+    List<OptionQuote> chain =
         client
             .options()
             .chain(
@@ -133,10 +127,9 @@ class OptionsIntegrationTest {
                     .side(OptionSide.CALL)
                     .strikeLimit(1)
                     .build())
-            .data();
+            .values();
 
-    long distinctExpirations =
-        chain.chain().stream().map(OptionQuote::expiration).distinct().count();
+    long distinctExpirations = chain.stream().map(OptionQuote::expiration).distinct().count();
     assertThat(distinctExpirations)
         .as("expiration=all returns every expiration, not just the front-month")
         .isGreaterThan(1);
@@ -147,7 +140,7 @@ class OptionsIntegrationTest {
     // rho is an optional column: the live feed may or may not populate it. Assert the SDK decodes
     // whatever comes back without error — every row's rho is either null (omitted) or a finite
     // double, never a ParseError from a missing required column.
-    OptionsChain chain =
+    List<OptionQuote> chain =
         client
             .options()
             .chain(
@@ -156,10 +149,10 @@ class OptionsIntegrationTest {
                     .strikeLimit(3)
                     .strikeRange(StrikeRange.ITM)
                     .build())
-            .data();
+            .values();
 
-    assertThat(chain.chain()).isNotEmpty();
-    for (OptionQuote q : chain.chain()) {
+    assertThat(chain).isNotEmpty();
+    for (OptionQuote q : chain) {
       Double rho = q.rho();
       if (rho != null) {
         assertThat(rho.doubleValue()).isFinite();
@@ -174,13 +167,13 @@ class OptionsIntegrationTest {
     // assertion that countback reached the wire.
     String optionSymbol = sampleOptionSymbol();
 
-    Response<OptionsQuotes> resp =
+    OptionsQuotesResponse resp =
         client
             .options()
             .quote(
                 OptionsQuoteRequest.builder(optionSymbol).to(LocalDate.now()).countback(5).build());
 
-    assertThat(resp.data().quotes())
+    assertThat(resp.values())
         .as("countback caps the series to at most 5 rows")
         .hasSizeBetween(1, 5);
   }
@@ -192,11 +185,11 @@ class OptionsIntegrationTest {
     // data set.
     String optionSymbol = sampleOptionSymbol();
 
-    Response<OptionsQuotes> resp = client.options().quote(OptionsQuoteRequest.of(optionSymbol));
+    OptionsQuotesResponse resp = client.options().quote(OptionsQuoteRequest.of(optionSymbol));
 
     assertThat(resp.statusCode()).isIn(200, 203);
-    assertThat(resp.data().quotes()).hasSize(1);
-    OptionQuote q = resp.data().quotes().get(0);
+    assertThat(resp.values()).hasSize(1);
+    OptionQuote q = resp.values().get(0);
     assertThat(q.optionSymbol()).isEqualTo(optionSymbol);
     assertThat(q.underlying()).isEqualTo(UNDERLYING);
   }
@@ -204,7 +197,7 @@ class OptionsIntegrationTest {
   @Test
   void quotesFansOutToMultipleContracts() {
     // Use the first two contracts from the chain so both are guaranteed to exist.
-    OptionsChain chain =
+    List<OptionQuote> chain =
         client
             .options()
             .chain(
@@ -213,22 +206,24 @@ class OptionsIntegrationTest {
                     .strikeLimit(2)
                     .strikeRange(StrikeRange.ITM)
                     .build())
-            .data();
-    assertThat(chain.chain()).hasSizeGreaterThanOrEqualTo(2);
-    String first = chain.chain().get(0).optionSymbol();
-    String second = chain.chain().get(1).optionSymbol();
+            .values();
+    assertThat(chain).hasSizeGreaterThanOrEqualTo(2);
+    // optionSymbol is @Nullable on the row (every field is, to support columns projection); on a
+    // live chain it's always present, so assert that and keep the symbols non-null for the fan-out.
+    String first = java.util.Objects.requireNonNull(chain.get(0).optionSymbol());
+    String second = java.util.Objects.requireNonNull(chain.get(1).optionSymbol());
 
-    Map<String, Response<OptionsQuotes>> resp =
+    Map<String, OptionsQuotesResponse> resp =
         client.options().quotes(OptionsQuotesRequest.builder(first, second).build());
 
     assertThat(resp.keySet()).containsExactly(first, second);
-    assertThat(resp.get(first).data().quotes().get(0).optionSymbol()).isEqualTo(first);
-    assertThat(resp.get(second).data().quotes().get(0).optionSymbol()).isEqualTo(second);
+    assertThat(resp.get(first).values().get(0).optionSymbol()).isEqualTo(first);
+    assertThat(resp.get(second).values().get(0).optionSymbol()).isEqualTo(second);
   }
 
   /** Fetch one real option symbol — used by {@link #quoteFetchesSingleContract()}. */
   private String sampleOptionSymbol() {
-    OptionsChain chain =
+    List<OptionQuote> chain =
         client
             .options()
             .chain(
@@ -237,8 +232,8 @@ class OptionsIntegrationTest {
                     .strikeLimit(1)
                     .strikeRange(StrikeRange.ITM)
                     .build())
-            .data();
-    assertThat(chain.chain()).isNotEmpty();
-    return chain.chain().get(0).optionSymbol();
+            .values();
+    assertThat(chain).isNotEmpty();
+    return chain.get(0).optionSymbol();
   }
 }

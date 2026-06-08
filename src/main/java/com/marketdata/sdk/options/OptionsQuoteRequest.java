@@ -10,7 +10,7 @@ import org.jspecify.annotations.Nullable;
  * from}/{@code to}, or {@code to}/{@code countback}).
  *
  * <p>For multiple contracts use {@link OptionsQuotesRequest} — the multi-symbol API fans out one
- * request per symbol concurrently and returns a {@code Map<String, Response<OptionsQuotes>>}.
+ * request per symbol concurrently and returns a {@code Map<String, OptionsQuotesResponse>}.
  */
 public final class OptionsQuoteRequest {
 

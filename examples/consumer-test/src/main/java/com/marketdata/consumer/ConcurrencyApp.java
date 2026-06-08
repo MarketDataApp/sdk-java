@@ -4,7 +4,7 @@ import com.marketdata.consumer.shared.Console;
 import com.marketdata.consumer.shared.MockServerControl;
 import com.marketdata.consumer.shared.MockServerControl.Step;
 import com.marketdata.sdk.MarketDataClient;
-import com.marketdata.sdk.Response;
+import com.marketdata.sdk.UtilitiesStatusResponse;
 import com.marketdata.sdk.utilities.ApiStatus;
 import java.util.ArrayList;
 import java.util.List;
@@ -51,7 +51,7 @@ public final class ConcurrencyApp {
     try (var client =
         new MarketDataClient("token", MockServerControl.BASE_URL, null, false)) {
       long t0 = System.nanoTime();
-      List<CompletableFuture<Response<ApiStatus>>> futures = new ArrayList<>(fanout);
+      List<CompletableFuture<UtilitiesStatusResponse>> futures = new ArrayList<>(fanout);
       for (int i = 0; i < fanout; i++) {
         futures.add(client.utilities().statusAsync());
       }

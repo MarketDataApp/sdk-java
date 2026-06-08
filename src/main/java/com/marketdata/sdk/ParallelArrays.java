@@ -59,8 +59,9 @@ final class ParallelArrays {
    *       see {@code HttpTransport.routeAndEnvelope}) for "the query has no results"; the data
    *       arrays are deliberately omitted in that case. Returning an empty list lets the resource
    *       wrap it in its container type ({@code new ApiStatus(emptyList)}, etc.) so the consumer
-   *       reaches {@link Response#isNoData()} and {@link Response#data()} normally instead of
-   *       hitting a spurious {@code "missing field"} error from the field-validation loop.
+   *       reaches {@link MarketDataResponse#isNoData()} and {@link MarketDataResponse#values()}
+   *       normally instead of hitting a spurious {@code "missing field"} error from the
+   *       field-validation loop.
    *   <li>Any other status (typically {@code "ok"}) → normal field validation.
    * </ul>
    *
@@ -199,7 +200,7 @@ final class ParallelArrays {
       List<String> optionalFields,
       RowBuilder<ROW> rowBuilder,
       Function<List<ROW>, T> wrapper) {
-    return new JsonDeserializer<T>() {
+    return new JsonDeserializer<>() {
       @Override
       public T deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
         JsonNode root = p.readValueAsTree();
@@ -243,11 +244,23 @@ final class ParallelArrays {
      */
     @Nullable Double dblOrNull(String field) throws JsonMappingException;
 
+    /** Lenient string accessor: {@code null} when the column is absent or the cell is null. */
+    @Nullable String textOrNull(String field) throws JsonMappingException;
+
+    /** Lenient long accessor: {@code null} when the column is absent or the cell is null. */
+    @Nullable Long lngOrNull(String field) throws JsonMappingException;
+
+    /** Lenient boolean accessor: {@code null} when the column is absent or the cell is null. */
+    @Nullable Boolean boolOrNull(String field) throws JsonMappingException;
+
     /**
      * Raw access for custom conversions (e.g. nested objects or non-trivial date parsing). Returns
      * the node verbatim — the caller decides how to validate.
      */
     JsonNode node(String field);
+
+    /** Like {@link #node} but {@code null} when the column is absent or the cell is null. */
+    @Nullable JsonNode nodeOrNull(String field);
   }
 
   private static final class IndexedRow implements Row {
@@ -311,8 +324,63 @@ final class ParallelArrays {
     }
 
     @Override
+    public @Nullable String textOrNull(String field) throws JsonMappingException {
+      JsonNode cell = cellOrNull(field);
+      if (cell == null) {
+        return null;
+      }
+      if (!cell.isTextual()) {
+        throw typeMismatch(field, "string", cell);
+      }
+      return cell.asText();
+    }
+
+    @Override
+    public @Nullable Long lngOrNull(String field) throws JsonMappingException {
+      JsonNode cell = cellOrNull(field);
+      if (cell == null) {
+        return null;
+      }
+      if (!cell.isNumber()) {
+        throw typeMismatch(field, "number", cell);
+      }
+      return cell.asLong();
+    }
+
+    @Override
+    public @Nullable Boolean boolOrNull(String field) throws JsonMappingException {
+      JsonNode cell = cellOrNull(field);
+      if (cell == null) {
+        return null;
+      }
+      if (!cell.isBoolean()) {
+        throw typeMismatch(field, "boolean", cell);
+      }
+      return cell.asBoolean();
+    }
+
+    @Override
     public JsonNode node(String field) {
       return cell(field);
+    }
+
+    @Override
+    public @Nullable JsonNode nodeOrNull(String field) {
+      return cellOrNull(field);
+    }
+
+    /**
+     * The cell for {@code field}, or {@code null} when the column is absent or the cell is null.
+     */
+    private @Nullable JsonNode cellOrNull(String field) {
+      if (!arrays.containsKey(field)) {
+        return null;
+      }
+      JsonNode cell = arrays.get(field).get(index);
+      if (cell == null || cell.isNull() || cell.isMissingNode()) {
+        return null;
+      }
+      return cell;
     }
 
     private JsonNode cell(String field) {

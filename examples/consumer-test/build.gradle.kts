@@ -33,9 +33,11 @@ val demoApps = mapOf(
   "runRetry" to ("com.marketdata.consumer.RetryBehaviorApp" to
     "Retry policy, Retry-After header, preflight gate. Needs mock server."),
   "runResponse" to ("com.marketdata.consumer.ResponseFeaturesApp" to
-    "Response<T> surface: predicates, isNoData, rawBody, saveToFile, toString. Needs mock server."),
+    "MarketDataResponse surface: predicates, isNoData, json, saveToFile, toString. Needs mock server."),
   "runConcurrency" to ("com.marketdata.consumer.ConcurrencyApp" to
-    "§12 / ADR-007: 50-permit semaphore observed end-to-end. Needs mock server.")
+    "§12 / ADR-007: 50-permit semaphore observed end-to-end. Needs mock server."),
+  "runOptions" to ("com.marketdata.consumer.OptionsApp" to
+    "Full options surface: every endpoint + all params, CSV facet, columns projection, Option A. Needs mock server.")
 )
 
 demoApps.forEach { (taskName, app) ->

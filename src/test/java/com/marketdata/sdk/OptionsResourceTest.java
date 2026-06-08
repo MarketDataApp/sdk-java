@@ -6,18 +6,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.marketdata.sdk.exception.ParseError;
 import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.ExpirationStrikes;
+import com.marketdata.sdk.options.Greek;
 import com.marketdata.sdk.options.OptionQuote;
 import com.marketdata.sdk.options.OptionSide;
-import com.marketdata.sdk.options.OptionsChain;
 import com.marketdata.sdk.options.OptionsChainRequest;
-import com.marketdata.sdk.options.OptionsExpirations;
 import com.marketdata.sdk.options.OptionsExpirationsRequest;
-import com.marketdata.sdk.options.OptionsLookup;
 import com.marketdata.sdk.options.OptionsLookupRequest;
 import com.marketdata.sdk.options.OptionsQuoteRequest;
-import com.marketdata.sdk.options.OptionsQuotes;
 import com.marketdata.sdk.options.OptionsQuotesRequest;
-import com.marketdata.sdk.options.OptionsStrikes;
 import com.marketdata.sdk.options.OptionsStrikesRequest;
 import com.marketdata.sdk.options.StrikeFilter;
 import com.marketdata.sdk.options.StrikeRange;
@@ -31,6 +27,7 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.Month;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -96,9 +93,9 @@ class OptionsResourceTest {
     CapturingClient client = okWith("{\"s\":\"ok\",\"optionSymbol\":\"AAPL250117C00150000\"}");
     OptionsResource options = resourceWith(client);
 
-    OptionsLookup lookup = options.lookupAsync(OptionsLookupRequest.of("anything")).join().data();
+    String lookup = options.lookupAsync(OptionsLookupRequest.of("anything")).join().values();
 
-    assertThat(lookup.optionSymbol()).isEqualTo("AAPL250117C00150000");
+    assertThat(lookup).isEqualTo("AAPL250117C00150000");
   }
 
   @Test
@@ -106,8 +103,8 @@ class OptionsResourceTest {
     CapturingClient client = okWith("{\"s\":\"ok\",\"optionSymbol\":\"AAPL250117C00150000\"}");
     OptionsResource options = resourceWith(client);
 
-    OptionsLookup viaSync = options.lookup(OptionsLookupRequest.of("x")).data();
-    assertThat(viaSync.optionSymbol()).isEqualTo("AAPL250117C00150000");
+    String viaSync = options.lookup(OptionsLookupRequest.of("x")).values();
+    assertThat(viaSync).isEqualTo("AAPL250117C00150000");
   }
 
   @Test
@@ -115,7 +112,7 @@ class OptionsResourceTest {
     CapturingClient client = okWith("{\"s\":\"ok\",\"optionSymbol\":\"AAPL250117C00150000\"}");
     OptionsResource options = resourceWith(client);
 
-    Response<OptionsLookup> resp = options.lookup(OptionsLookupRequest.of("x"));
+    OptionsLookupResponse resp = options.lookup(OptionsLookupRequest.of("x"));
     assertThat(resp.isJson()).isTrue();
     assertThat(resp.isCsv()).isFalse();
     assertThat(resp.isHtml()).isFalse();
@@ -236,18 +233,19 @@ class OptionsResourceTest {
                 + "}");
     OptionsResource options = resourceWith(client);
 
-    OptionsExpirations exps = options.expirations(OptionsExpirationsRequest.of("AAPL")).data();
+    OptionsExpirationsResponse expResp = options.expirations(OptionsExpirationsRequest.of("AAPL"));
+    List<ZonedDateTime> exps = expResp.values();
 
-    assertThat(exps.expirations())
+    assertThat(exps)
         .containsExactly(
             LocalDate.of(2025, Month.JANUARY, 17).atStartOfDay(et),
             LocalDate.of(2025, Month.FEBRUARY, 21).atStartOfDay(et),
             LocalDate.of(2025, Month.MARCH, 21).atStartOfDay(et));
-    assertThat(exps.expirations().get(0).getZone().getId()).isEqualTo("America/New_York");
-    assertThat(exps.updated()).isNotNull();
-    assertThat(exps.updated().getZone().getId()).isEqualTo("America/New_York");
-    assertThat(exps.updated().toLocalDate()).isEqualTo(LocalDate.of(2025, Month.JANUARY, 16));
-    assertThat(exps.updated().getHour()).isEqualTo(19);
+    assertThat(exps.get(0).getZone().getId()).isEqualTo("America/New_York");
+    assertThat(expResp.updated()).isNotNull();
+    assertThat(expResp.updated().getZone().getId()).isEqualTo("America/New_York");
+    assertThat(expResp.updated().toLocalDate()).isEqualTo(LocalDate.of(2025, Month.JANUARY, 16));
+    assertThat(expResp.updated().getHour()).isEqualTo(19);
   }
 
   @Test
@@ -256,8 +254,9 @@ class OptionsResourceTest {
         okWith("{\"s\":\"ok\",\"expirations\":[1737072000],\"updated\":1705449600}");
     OptionsResource options = resourceWith(client);
 
-    OptionsExpirations exps = options.expirations(OptionsExpirationsRequest.of("AAPL")).data();
-    assertThat(exps.expirations()).hasSize(1);
+    OptionsExpirationsResponse expResp = options.expirations(OptionsExpirationsRequest.of("AAPL"));
+    List<ZonedDateTime> exps = expResp.values();
+    assertThat(exps).hasSize(1);
   }
 
   // ---------- expirations: envelope handling ----------
@@ -267,9 +266,10 @@ class OptionsResourceTest {
     CapturingClient client = okWith("{\"s\":\"no_data\"}");
     OptionsResource options = resourceWith(client);
 
-    OptionsExpirations exps = options.expirations(OptionsExpirationsRequest.of("NOPE")).data();
-    assertThat(exps.expirations()).isEmpty();
-    assertThat(exps.updated()).isNull();
+    OptionsExpirationsResponse expResp = options.expirations(OptionsExpirationsRequest.of("NOPE"));
+    List<ZonedDateTime> exps = expResp.values();
+    assertThat(exps).isEmpty();
+    assertThat(expResp.updated()).isNull();
   }
 
   @Test
@@ -303,15 +303,16 @@ class OptionsResourceTest {
                 + "\"updated\":\"2025-01-16 19:00:00 -05:00\"}");
     OptionsResource options = resourceWith(client);
 
-    OptionsExpirations exps = options.expirations(OptionsExpirationsRequest.of("AAPL")).data();
-    assertThat(exps.expirations())
+    OptionsExpirationsResponse expResp = options.expirations(OptionsExpirationsRequest.of("AAPL"));
+    List<ZonedDateTime> exps = expResp.values();
+    assertThat(exps)
         .containsExactly(
             LocalDate.of(2025, Month.JANUARY, 17).atStartOfDay(et),
             LocalDate.of(2025, Month.FEBRUARY, 21).atStartOfDay(et));
-    assertThat(exps.updated()).isNotNull();
-    assertThat(exps.updated().toLocalDate()).isEqualTo(LocalDate.of(2025, Month.JANUARY, 16));
-    assertThat(exps.updated().getHour()).isEqualTo(19);
-    assertThat(exps.updated().getZone().getId()).isEqualTo("America/New_York");
+    assertThat(expResp.updated()).isNotNull();
+    assertThat(expResp.updated().toLocalDate()).isEqualTo(LocalDate.of(2025, Month.JANUARY, 16));
+    assertThat(expResp.updated().getHour()).isEqualTo(19);
+    assertThat(expResp.updated().getZone().getId()).isEqualTo("America/New_York");
   }
 
   @Test
@@ -322,13 +323,14 @@ class OptionsResourceTest {
         okWith("{\"s\":\"ok\",\"expirations\":[45674,45709],\"updated\":45673.79166667}");
     OptionsResource options = resourceWith(client);
 
-    OptionsExpirations exps = options.expirations(OptionsExpirationsRequest.of("AAPL")).data();
-    assertThat(exps.expirations())
+    OptionsExpirationsResponse expResp = options.expirations(OptionsExpirationsRequest.of("AAPL"));
+    List<ZonedDateTime> exps = expResp.values();
+    assertThat(exps)
         .containsExactly(
             LocalDate.of(2025, Month.JANUARY, 17).atStartOfDay(et),
             LocalDate.of(2025, Month.FEBRUARY, 21).atStartOfDay(et));
-    assertThat(exps.updated()).isNotNull();
-    assertThat(exps.updated().getZone().getId()).isEqualTo("America/New_York");
+    assertThat(expResp.updated()).isNotNull();
+    assertThat(expResp.updated().getZone().getId()).isEqualTo("America/New_York");
   }
 
   @Test
@@ -398,19 +400,20 @@ class OptionsResourceTest {
                 + "\"2025-02-21\":[135.0,140.0,145.0,150.0]}");
     OptionsResource options = resourceWith(client);
 
-    OptionsStrikes strikes = options.strikes(OptionsStrikesRequest.of("AAPL")).data();
+    OptionsStrikesResponse resp = options.strikes(OptionsStrikesRequest.of("AAPL"));
+    List<ExpirationStrikes> strikes = resp.values();
 
-    assertThat(strikes.expirations()).hasSize(2);
-    ExpirationStrikes first = strikes.expirations().get(0);
+    assertThat(strikes).hasSize(2);
+    ExpirationStrikes first = strikes.get(0);
     assertThat(first.expiration())
         .isEqualTo(LocalDate.of(2025, Month.JANUARY, 17).atStartOfDay(et));
     assertThat(first.strikes()).containsExactly(140.0, 145.0, 150.0);
-    ExpirationStrikes second = strikes.expirations().get(1);
+    ExpirationStrikes second = strikes.get(1);
     assertThat(second.expiration())
         .isEqualTo(LocalDate.of(2025, Month.FEBRUARY, 21).atStartOfDay(et));
     assertThat(second.strikes()).containsExactly(135.0, 140.0, 145.0, 150.0);
-    assertThat(strikes.updated()).isNotNull();
-    assertThat(strikes.updated().getZone().getId()).isEqualTo("America/New_York");
+    assertThat(resp.updated()).isNotNull();
+    assertThat(resp.updated().getZone().getId()).isEqualTo("America/New_York");
   }
 
   @Test
@@ -421,10 +424,11 @@ class OptionsResourceTest {
         okWith("{\"s\":\"ok\",\"updated\":\"2025-01-16 19:00:00 -05:00\",\"2025-01-17\":[150.0]}");
     OptionsResource options = resourceWith(client);
 
-    OptionsStrikes strikes = options.strikes(OptionsStrikesRequest.of("AAPL")).data();
-    assertThat(strikes.expirations()).hasSize(1);
-    assertThat(strikes.updated()).isNotNull();
-    assertThat(strikes.updated().toLocalDate()).isEqualTo(LocalDate.of(2025, Month.JANUARY, 16));
+    OptionsStrikesResponse resp = options.strikes(OptionsStrikesRequest.of("AAPL"));
+    List<ExpirationStrikes> strikes = resp.values();
+    assertThat(strikes).hasSize(1);
+    assertThat(resp.updated()).isNotNull();
+    assertThat(resp.updated().toLocalDate()).isEqualTo(LocalDate.of(2025, Month.JANUARY, 16));
   }
 
   // ---------- strikes: envelope handling ----------
@@ -436,9 +440,10 @@ class OptionsResourceTest {
     CapturingClient client = okWith("{\"s\":\"no_data\",\"nextTime\":null,\"prevTime\":null}");
     OptionsResource options = resourceWith(client);
 
-    OptionsStrikes strikes = options.strikes(OptionsStrikesRequest.of("BOGUS")).data();
-    assertThat(strikes.expirations()).isEmpty();
-    assertThat(strikes.updated()).isNull();
+    OptionsStrikesResponse resp = options.strikes(OptionsStrikesRequest.of("BOGUS"));
+    List<ExpirationStrikes> strikes = resp.values();
+    assertThat(strikes).isEmpty();
+    assertThat(resp.updated()).isNull();
   }
 
   @Test
@@ -499,8 +504,8 @@ class OptionsResourceTest {
     CapturingClient client = okWith("{\"s\":\"ok\",\"updated\":1705449600,\"2025-01-17\":[150.0]}");
     OptionsResource options = resourceWith(client);
 
-    OptionsStrikes strikes = options.strikes(OptionsStrikesRequest.of("AAPL")).data();
-    assertThat(strikes.expirations()).hasSize(1);
+    List<ExpirationStrikes> strikes = options.strikes(OptionsStrikesRequest.of("AAPL")).values();
+    assertThat(strikes).hasSize(1);
   }
 
   // ---------- quote (singular): URL & params ----------
@@ -638,10 +643,11 @@ class OptionsResourceTest {
     CapturingClient client = okWith(CANNED_QUOTE_BODY);
     OptionsResource options = resourceWith(client);
 
-    OptionsQuotes response = options.quote(OptionsQuoteRequest.of("AAPL250117C00150000")).data();
+    List<OptionQuote> response =
+        options.quote(OptionsQuoteRequest.of("AAPL250117C00150000")).values();
 
-    assertThat(response.quotes()).hasSize(1);
-    OptionQuote q = response.quotes().get(0);
+    assertThat(response).hasSize(1);
+    OptionQuote q = response.get(0);
     assertThat(q.optionSymbol()).isEqualTo("AAPL250117C00150000");
     assertThat(q.underlying()).isEqualTo("AAPL");
     assertThat(q.side()).isEqualTo("call");
@@ -667,9 +673,12 @@ class OptionsResourceTest {
     // rho is an optional column absent from CANNED_QUOTE_BODY — it must decode to null, not 0.0,
     // and the missing column must not trip the strict parallel-arrays parser.
     assertThat(q.rho()).isNull();
-    assertThat(q.expiration().getZone().getId()).isEqualTo("America/New_York");
-    assertThat(q.firstTraded().getZone().getId()).isEqualTo("America/New_York");
-    assertThat(q.updated().getZone().getId()).isEqualTo("America/New_York");
+    assertThat(java.util.Objects.requireNonNull(q.expiration()).getZone().getId())
+        .isEqualTo("America/New_York");
+    assertThat(java.util.Objects.requireNonNull(q.firstTraded()).getZone().getId())
+        .isEqualTo("America/New_York");
+    assertThat(java.util.Objects.requireNonNull(q.updated()).getZone().getId())
+        .isEqualTo("America/New_York");
   }
 
   @Test
@@ -679,8 +688,7 @@ class OptionsResourceTest {
     CapturingClient client = okWith(bodyWithRho);
     OptionsResource options = resourceWith(client);
 
-    OptionQuote q =
-        options.quote(OptionsQuoteRequest.of("AAPL250117C00150000")).data().quotes().get(0);
+    OptionQuote q = options.quote(OptionsQuoteRequest.of("AAPL250117C00150000")).values().get(0);
 
     assertThat(q.rho()).isEqualTo(0.0456);
   }
@@ -698,8 +706,7 @@ class OptionsResourceTest {
     CapturingClient client = okWith(body);
     OptionsResource options = resourceWith(client);
 
-    OptionQuote q =
-        options.quote(OptionsQuoteRequest.of("AAPL250117C00150000")).data().quotes().get(0);
+    OptionQuote q = options.quote(OptionsQuoteRequest.of("AAPL250117C00150000")).values().get(0);
 
     assertThat(q.iv()).isNull();
     assertThat(q.delta()).isNull();
@@ -716,8 +723,8 @@ class OptionsResourceTest {
     CapturingClient client = okWith(CANNED_QUOTE_BODY);
     OptionsResource options = resourceWith(client);
 
-    OptionsQuotes data = options.quote(OptionsQuoteRequest.of("AAPL250117C00150000")).data();
-    assertThat(data.quotes()).hasSize(1);
+    List<OptionQuote> data = options.quote(OptionsQuoteRequest.of("AAPL250117C00150000")).values();
+    assertThat(data).hasSize(1);
   }
 
   @Test
@@ -728,6 +735,161 @@ class OptionsResourceTest {
     assertThatThrownBy(() -> options.quote(OptionsQuoteRequest.of("BOGUS")))
         .isInstanceOf(ParseError.class)
         .hasMessageContaining("Unknown contract");
+  }
+
+  // ---------- columns projection + Option A + greeks ----------
+
+  @Test
+  void columnsProjectionDecodesRequestedAndNullsTheRest() {
+    CapturingClient client =
+        okWith("{\"s\":\"ok\",\"optionSymbol\":[\"AAPL250117C00150000\"],\"strike\":[150]}");
+    OptionsResource options = resourceWith(client);
+
+    OptionQuote q =
+        options
+            .columns("optionSymbol", "strike")
+            .quote(OptionsQuoteRequest.of("AAPL250117C00150000"))
+            .values()
+            .get(0);
+
+    assertThat(q.optionSymbol()).isEqualTo("AAPL250117C00150000");
+    assertThat(q.strike()).isEqualTo(150.0);
+    // Projected away → null, no error.
+    assertThat(q.bid()).isNull();
+    assertThat(q.volume()).isNull();
+    // The columns param reached the wire (comma is URL-encoded, so decode before asserting).
+    String decodedUri =
+        java.net.URLDecoder.decode(
+            client.captured.get(0).uri().toString(), java.nio.charset.StandardCharsets.UTF_8);
+    assertThat(decodedUri).contains("columns=optionSymbol,strike");
+  }
+
+  @Test
+  void columnsRequestedButOmittedByApiThrowsParseError() {
+    // Option A: asked for bid via columns, but the API didn't return it → loud failure, not a null.
+    CapturingClient client =
+        okWith("{\"s\":\"ok\",\"optionSymbol\":[\"AAPL250117C00150000\"],\"strike\":[150]}");
+    OptionsResource options = resourceWith(client);
+
+    assertThatThrownBy(
+            () ->
+                options
+                    .columns("optionSymbol", "strike", "bid")
+                    .quote(OptionsQuoteRequest.of("AAPL250117C00150000")))
+        .isInstanceOf(ParseError.class)
+        .hasMessageContaining("bid");
+  }
+
+  @Test
+  void noColumnsFilterStillRequiresAllStructuralColumns() {
+    // With no columns projection every required column is implicitly requested, so a missing one is
+    // still a ParseError (the strict-by-default guarantee survives the nullable fields).
+    CapturingClient client =
+        okWith("{\"s\":\"ok\",\"optionSymbol\":[\"AAPL250117C00150000\"],\"strike\":[150]}");
+    OptionsResource options = resourceWith(client);
+
+    assertThatThrownBy(() -> options.quote(OptionsQuoteRequest.of("AAPL250117C00150000")))
+        .isInstanceOf(ParseError.class);
+  }
+
+  @Test
+  void presentGreeksReportsNonNullGreeks() {
+    // CANNED_QUOTE_BODY carries delta/gamma/theta/vega but not rho.
+    CapturingClient client = okWith(CANNED_QUOTE_BODY);
+    OptionsResource options = resourceWith(client);
+
+    OptionQuote q = options.quote(OptionsQuoteRequest.of("AAPL250117C00150000")).values().get(0);
+
+    assertThat(q.presentGreeks())
+        .containsExactlyInAnyOrder(Greek.DELTA, Greek.GAMMA, Greek.THETA, Greek.VEGA);
+    assertThat(q.greek(Greek.DELTA)).isEqualTo(0.89);
+    assertThat(q.greek(Greek.RHO)).isNull();
+  }
+
+  // ---------- CSV / HTML facets ----------
+
+  @Test
+  void asCsvSendsFormatCsvAndReturnsRawText() {
+    CapturingClient client = okWith("optionSymbol,strike\nAAPL250117C00150000,150");
+    OptionsResource options = resourceWith(client);
+
+    CsvResponse csv = options.asCsv().chain(OptionsChainRequest.of("AAPL"));
+
+    assertThat(csv.csv()).contains("optionSymbol,strike");
+    assertThat(csv.values()).isEqualTo(csv.csv());
+    assertThat(csv.isCsv()).isTrue();
+    assertThat(client.captured.get(0).uri().toString()).contains("format=csv");
+  }
+
+  @Test
+  void asHtmlFacetSendsFormatHtml() {
+    // asHtml() is package-private (built, not exposed) — exercised here from the same package.
+    CapturingClient client = okWith("<html><body>chain</body></html>");
+    OptionsResource options = resourceWith(client);
+
+    HtmlResponse html = options.asHtml().chain(OptionsChainRequest.of("AAPL"));
+
+    assertThat(html.html()).contains("<html>");
+    assertThat(client.captured.get(0).uri().toString()).contains("format=html");
+  }
+
+  // ---------- response metadata (§13.5 / §16) ----------
+
+  @Test
+  void responseToStringRedactsQueryString() {
+    CapturingClient client = okWith(CANNED_QUOTE_BODY);
+    OptionsResource options = resourceWith(client);
+
+    OptionsQuotesResponse resp =
+        options.quote(OptionsQuoteRequest.builder("AAPL250117C00150000").countback(5).build());
+
+    // §16: the query string is redacted in toString (logged as /path?…) so params never persist.
+    assertThat(resp.toString()).contains("?…").doesNotContain("countback");
+  }
+
+  @Test
+  void responseSaveToFileWritesRawBodyVerbatim(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws java.io.IOException {
+    CapturingClient client = okWith(CANNED_QUOTE_BODY);
+    OptionsResource options = resourceWith(client);
+
+    OptionsQuotesResponse resp = options.quote(OptionsQuoteRequest.of("AAPL250117C00150000"));
+    java.nio.file.Path out = dir.resolve("quote.json");
+    resp.saveToFile(out);
+
+    assertThat(java.nio.file.Files.readString(out))
+        .isEqualTo(CANNED_QUOTE_BODY)
+        .isEqualTo(resp.json());
+  }
+
+  @Test
+  void universalParamsReachTheWire() {
+    CapturingClient client = okWith(CANNED_QUOTE_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .dateFormat(DateFormat.TIMESTAMP)
+        .mode(Mode.DELAYED)
+        .limit(50)
+        .offset(10)
+        .quote(OptionsQuoteRequest.of("AAPL250117C00150000"));
+
+    String url = client.captured.get(0).uri().toString();
+    assertThat(url)
+        .contains("dateformat=timestamp")
+        .contains("mode=delayed")
+        .contains("limit=50")
+        .contains("offset=10");
+  }
+
+  @Test
+  void responseExposesRequestIdAndUrlMetadata() {
+    CapturingClient client = okWith(CANNED_QUOTE_BODY);
+    OptionsResource options = resourceWith(client);
+
+    OptionsQuotesResponse resp = options.quote(OptionsQuoteRequest.of("AAPL250117C00150000"));
+    assertThat(resp.requestId()).isNull(); // the mock sends no cf-ray header
+    assertThat(resp.requestUrl().toString()).contains("/v1/options/quotes/");
   }
 
   // ---------- quotes (plural, multi-symbol) ----------
@@ -749,14 +911,14 @@ class OptionsResourceTest {
 
     OptionsResource options = resourceWith(client);
 
-    Map<String, Response<OptionsQuotes>> result =
+    Map<String, OptionsQuotesResponse> result =
         options.quotes(
             OptionsQuotesRequest.builder("AAPL250117C00150000", "AAPL250117P00150000").build());
 
     // Insertion order preserved — first symbol in the builder is first in the iteration.
     assertThat(result.keySet()).containsExactly("AAPL250117C00150000", "AAPL250117P00150000");
-    assertThat(result.get("AAPL250117C00150000").data().quotes().get(0).side()).isEqualTo("call");
-    assertThat(result.get("AAPL250117P00150000").data().quotes().get(0).side()).isEqualTo("put");
+    assertThat(result.get("AAPL250117C00150000").values().get(0).side()).isEqualTo("call");
+    assertThat(result.get("AAPL250117P00150000").values().get(0).side()).isEqualTo("put");
 
     // Two HTTP requests were sent.
     assertThat(client.captured).hasSize(2);
@@ -1024,9 +1186,9 @@ class OptionsResourceTest {
     CapturingClient client = okWith(CANNED_CHAIN_BODY);
     OptionsResource options = resourceWith(client);
 
-    OptionsChain chain = options.chain(OptionsChainRequest.of("AAPL")).data();
-    assertThat(chain.chain()).hasSize(1);
-    OptionQuote q = chain.chain().get(0);
+    List<OptionQuote> chain = options.chain(OptionsChainRequest.of("AAPL")).values();
+    assertThat(chain).hasSize(1);
+    OptionQuote q = chain.get(0);
     assertThat(q.optionSymbol()).isEqualTo("AAPL250117C00150000");
     assertThat(q.delta()).isEqualTo(0.89);
   }
@@ -1036,8 +1198,8 @@ class OptionsResourceTest {
     CapturingClient client = okWith(CANNED_CHAIN_BODY);
     OptionsResource options = resourceWith(client);
 
-    OptionsChain chain = options.chain(OptionsChainRequest.of("AAPL")).data();
-    assertThat(chain.chain()).hasSize(1);
+    List<OptionQuote> chain = options.chain(OptionsChainRequest.of("AAPL")).values();
+    assertThat(chain).hasSize(1);
   }
 
   // ---------- chain: builder validation ----------
