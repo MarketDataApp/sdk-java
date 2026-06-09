@@ -2,7 +2,11 @@ package com.marketdata.consumer;
 
 import com.marketdata.consumer.shared.Console;
 import com.marketdata.sdk.MarketDataClient;
-import com.marketdata.sdk.Response;
+import com.marketdata.sdk.MarketDataResponse;
+import com.marketdata.sdk.UtilitiesHeadersResponse;
+import com.marketdata.sdk.UtilitiesStatusResponse;
+import com.marketdata.sdk.UtilitiesUserResponse;
+import java.util.Map;
 import com.marketdata.sdk.utilities.ApiStatus;
 import com.marketdata.sdk.utilities.RequestHeaders;
 import com.marketdata.sdk.utilities.ServiceStatus;
@@ -38,18 +42,18 @@ public final class LiveSmokeApp {
       Console.header("/status/ (sync) — unversioned, no token required");
       Console.run(
           () -> client.utilities().status(),
-          r -> "data() has " + r.data().services().size() + " services; " + describe(r));
+          r -> "data() has " + r.values().size() + " services; " + describe(r));
 
       Console.header("/status/ (async) — same call via the async surface");
       Console.run(
           () -> joinResponse(client.utilities().statusAsync()),
-          r -> "data() has " + r.data().services().size() + " services; " + describe(r));
+          r -> "data() has " + r.values().size() + " services; " + describe(r));
 
       Console.header("/user/ (sync) — needs a token");
       Console.run(
           () -> client.utilities().user(),
           r -> {
-            User u = r.data();
+            User u = r.values();
             return "requestsRemaining="
                 + u.requestsRemaining()
                 + ", requestsLimit="
@@ -64,10 +68,10 @@ public final class LiveSmokeApp {
       Console.run(
           () -> client.utilities().headers(),
           r -> {
-            RequestHeaders rh = r.data();
-            String auth = rh.headers().getOrDefault("authorization", "(absent)");
+            Map<String, String> rh = r.values();
+            String auth = rh.getOrDefault("authorization", "(absent)");
             return "headers="
-                + rh.headers().size()
+                + rh.size()
                 + " entries (authorization echoed back: "
                 + auth
                 + "); "
@@ -76,9 +80,9 @@ public final class LiveSmokeApp {
 
       Console.header("Parallel async — fan out 3 calls, await all");
       long t0 = System.nanoTime();
-      CompletableFuture<Response<ApiStatus>> a = client.utilities().statusAsync();
-      CompletableFuture<Response<User>> b = client.utilities().userAsync();
-      CompletableFuture<Response<RequestHeaders>> c = client.utilities().headersAsync();
+      CompletableFuture<UtilitiesStatusResponse> a = client.utilities().statusAsync();
+      CompletableFuture<UtilitiesUserResponse> b = client.utilities().userAsync();
+      CompletableFuture<UtilitiesHeadersResponse> c = client.utilities().headersAsync();
       // exceptionally() turns a failure into a null sentinel so allOf doesn't short-circuit on
       // the first failing call — we still want to see whether the others succeeded.
       CompletableFuture<Object> aSafe = a.thenApply(r -> (Object) r).exceptionally(t -> t);
@@ -91,11 +95,11 @@ public final class LiveSmokeApp {
               + elapsedMs
               + " ms (≈ slowest single call, not sum — proves true parallelism)");
       describeResult("status", aSafe.join(), r -> {
-        List<ServiceStatus> services = ((Response<ApiStatus>) r).data().services();
+        List<ServiceStatus> services = ((UtilitiesStatusResponse) r).values();
         return services.size() + " services; first: " + services.get(0).service();
       });
-      describeResult("user", bSafe.join(), r -> "remaining=" + ((Response<User>) r).data().requestsRemaining());
-      describeResult("headers", cSafe.join(), r -> ((Response<RequestHeaders>) r).data().headers().size() + " entries");
+      describeResult("user", bSafe.join(), r -> "remaining=" + ((UtilitiesUserResponse) r).values().requestsRemaining());
+      describeResult("headers", cSafe.join(), r -> ((UtilitiesHeadersResponse) r).values().size() + " entries");
 
       Console.header("Final rate-limit snapshot");
       Console.info("rateLimits after the calls: " + client.getRateLimits());
@@ -112,11 +116,11 @@ public final class LiveSmokeApp {
     }
   }
 
-  private static String describe(Response<?> r) {
+  private static String describe(MarketDataResponse<?> r) {
     return "status=" + r.statusCode() + ", requestId=" + r.requestId() + ", url=" + r.requestUrl();
   }
 
-  private static <T> Response<T> joinResponse(CompletableFuture<Response<T>> f) {
+  private static <R> R joinResponse(CompletableFuture<R> f) {
     // CompletableFuture.join wraps the cause in CompletionException, but the SDK's joinSync
     // contract is to surface MarketDataException directly. We mimic that here so the demo's
     // exception output matches what a sync caller would see.

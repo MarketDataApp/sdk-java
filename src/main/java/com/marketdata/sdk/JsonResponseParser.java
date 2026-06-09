@@ -6,6 +6,7 @@ import com.marketdata.sdk.exception.ErrorContext;
 import com.marketdata.sdk.exception.ParseError;
 import java.io.IOException;
 import java.time.Clock;
+import java.util.List;
 
 /**
  * Decodes {@link HttpResponseEnvelope} bodies into typed records.
@@ -52,7 +53,20 @@ final class JsonResponseParser {
    * cannot read the body — the error context carries the envelope's url, status, and request id for
    * the consumer's diagnostics.
    */
+  /** Attribute key under which the requested {@code columns} (§3) travel into deserializers. */
+  static final String REQUESTED_COLUMNS_ATTR = "marketdata.requestedColumns";
+
   <T> T parse(HttpResponseEnvelope env, Class<T> type) {
+    return parse(env, type, List.of());
+  }
+
+  /**
+   * Decode like {@link #parse(HttpResponseEnvelope, Class)} but additionally make the consumer's
+   * requested {@code columns} available to deserializers (via a Jackson context attribute) so they
+   * can enforce Option A: a required column that was requested but the API omitted surfaces as a
+   * {@link ParseError}, never a silent null. {@code requestedColumns} empty means "all columns".
+   */
+  <T> T parse(HttpResponseEnvelope env, Class<T> type, List<String> requestedColumns) {
     // Issue #29: a zero-length body surfaces from Jackson as a generic "No content to map"
     // MismatchedInputException — diagnostically thin, often confusing in the presence of a
     // body-stripping proxy. Pre-check so the failure carries a precise, actionable message that
@@ -69,7 +83,10 @@ final class JsonResponseParser {
           context);
     }
     try {
-      return mapper.readValue(env.body(), type);
+      return mapper
+          .readerFor(type)
+          .withAttribute(REQUESTED_COLUMNS_ATTR, requestedColumns)
+          .readValue(env.body());
     } catch (IOException e) {
       ErrorContext context =
           ErrorContext.forResponse(

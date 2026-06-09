@@ -15,9 +15,10 @@ import java.util.concurrent.CompletableFuture;
  * <p>Constructed once per {@link MarketDataClient}; the consumer reaches it through {@code
  * client.utilities()}. Constructor is package-private (ADR-007) — consumers cannot instantiate.
  *
- * <p>Every endpoint returns a {@link Response} carrying both the typed model and the raw body so
- * consumers can access §13.5 response features ({@code isCsv()}, {@code saveToFile()}, …) without
- * the resource caring about format choice.
+ * <p>Every endpoint returns a named {@link MarketDataResponse} whose {@link
+ * MarketDataResponse#values()} is the flat payload (the service list for {@code status}, the header
+ * map for {@code headers}, the {@link User} for {@code user}). These diagnostic endpoints take no
+ * universal parameters and have no CSV/HTML facet.
  */
 public final class UtilitiesResource {
 
@@ -69,13 +70,16 @@ public final class UtilitiesResource {
    * {@code Authorization}) redacted server-side. Useful for diagnosing auth issues from a deployed
    * consumer.
    */
-  public CompletableFuture<Response<RequestHeaders>> headersAsync() {
+  public CompletableFuture<UtilitiesHeadersResponse> headersAsync() {
     RequestSpec spec = RequestSpec.get("headers").unversioned().build();
-    return executeAndWrap(spec, RequestHeaders.class);
+    return execute(
+        spec,
+        RequestHeaders.class,
+        (d, env, fmt) -> new UtilitiesHeadersResponse(d.headers(), env, fmt));
   }
 
   /** Sync wrapper for {@link #headersAsync()}; see {@link HttpTransport#joinSync} for semantics. */
-  public Response<RequestHeaders> headers() {
+  public UtilitiesHeadersResponse headers() {
     return transport.joinSync(headersAsync());
   }
 
@@ -88,12 +92,13 @@ public final class UtilitiesResource {
    * prefix), same as {@code /status/} and {@code /headers/}. Hitting {@code /v1/user/} falls
    * through to the global 404 handler.
    */
-  public CompletableFuture<Response<User>> userAsync() {
-    return executeAndWrap(RequestSpec.get("user").unversioned().build(), User.class);
+  public CompletableFuture<UtilitiesUserResponse> userAsync() {
+    return execute(
+        RequestSpec.get("user").unversioned().build(), User.class, UtilitiesUserResponse::new);
   }
 
   /** Sync wrapper for {@link #userAsync()}. */
-  public Response<User> user() {
+  public UtilitiesUserResponse user() {
     return transport.joinSync(userAsync());
   }
 
@@ -113,8 +118,11 @@ public final class UtilitiesResource {
    */
   void validateAuth() {
     transport.joinSync(
-        executeAndWrap(
-            RequestSpec.get("user").unversioned().build(), RetryPolicy.noRetry(), User.class));
+        execute(
+            RequestSpec.get("user").unversioned().build(),
+            RetryPolicy.noRetry(),
+            User.class,
+            UtilitiesUserResponse::new));
   }
 
   /**
@@ -122,28 +130,37 @@ public final class UtilitiesResource {
    * the API root) and public — works without a token. The server refreshes the snapshot every five
    * minutes; polling more often than that is wasted work.
    */
-  public CompletableFuture<Response<ApiStatus>> statusAsync() {
+  public CompletableFuture<UtilitiesStatusResponse> statusAsync() {
     RequestSpec spec = RequestSpec.get("status").unversioned().build();
-    return executeAndWrap(spec, ApiStatus.class);
+    return execute(
+        spec,
+        ApiStatus.class,
+        (d, env, fmt) -> new UtilitiesStatusResponse(d.services(), env, fmt));
   }
 
   /** Sync wrapper for {@link #statusAsync()}. */
-  public Response<ApiStatus> status() {
+  public UtilitiesStatusResponse status() {
     return transport.joinSync(statusAsync());
   }
 
   // ---------- internal helpers ----------
 
-  private <T> CompletableFuture<Response<T>> executeAndWrap(RequestSpec spec, Class<T> type) {
+  private <D, R> CompletableFuture<R> execute(
+      RequestSpec spec, Class<D> decodeType, ResponseFactory<D, R> factory) {
     return transport
         .executeAsync(spec)
-        .thenApply(env -> Response.wrap(parser.parse(env, type), env, spec.format()));
+        .thenApply(env -> factory.create(parser.parse(env, decodeType), env, spec.format()));
   }
 
-  private <T> CompletableFuture<Response<T>> executeAndWrap(
-      RequestSpec spec, RetryPolicy policy, Class<T> type) {
+  private <D, R> CompletableFuture<R> execute(
+      RequestSpec spec, RetryPolicy policy, Class<D> decodeType, ResponseFactory<D, R> factory) {
     return transport
         .executeAsync(spec, policy)
-        .thenApply(env -> Response.wrap(parser.parse(env, type), env, spec.format()));
+        .thenApply(env -> factory.create(parser.parse(env, decodeType), env, spec.format()));
+  }
+
+  @FunctionalInterface
+  interface ResponseFactory<D, R> {
+    R create(D decoded, HttpResponseEnvelope envelope, Format format);
   }
 }

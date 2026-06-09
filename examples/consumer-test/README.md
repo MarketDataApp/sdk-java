@@ -59,7 +59,7 @@ Without it the demo fails fast with a clear "server not reachable" message.
 
 | App | Scenario | What you should see |
 |---|---|---|
-| **QuickstartApp** | Idiomatic per-resource usage. Designed to **grow** — each new SDK resource adds a section. Start here. | For each wired resource, one short snippet per typical call + console output of the typed data the consumer would actually use. Today: `utilities` (status / user / headers). |
+| **QuickstartApp** | Idiomatic per-resource usage. Designed to **grow** — each new SDK resource adds a section. Start here. | For each wired resource, one short snippet per typical call + console output of the typed data the consumer would actually use. Today: `utilities` (status / user / headers) and `options` (lookup / expirations / strikes / chain incl. sealed filters + `expiration=all` + `rho` / quote / quotes with `countback`). |
 | **LiveSmokeApp** | The happy path against the real API | client.toString redacted; sync + async parity on status/user/headers; parallel calls completing in ≈ slowest-single-call wall-time; final rate-limit snapshot populated |
 | **DemoAndConfigApp** | Construction-time behavior | demo-mode skip; §16 token redaction (short ≤8 → full; >8 → ***…***ABCD); cascade (explicit wins); IAE on invalid baseUrl / CRLF API key; validateOnStartup 200 vs 401 paths |
 | **ExceptionsApp** | Every sealed exception subtype | 401 → AuthenticationError; 400 → BadRequestError; 429 → RateLimitError (+ Retry-After); 500 → ServerError (no retry); 503×4 → ServerError after ≈7s; malformed JSON → ParseError; empty body → ParseError (§29 fix message); connection refused → NetworkError after retries; ADR-002 sealed routing via instanceof |

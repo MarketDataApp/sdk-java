@@ -26,6 +26,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   down the call stack.
 
 ### Added
+- **Options resource** (`client.options()`) — all six endpoints, each in sync +
+  async form: `lookup`, `expirations`, `strikes`, `quote` (single contract),
+  `quotes` (multi-contract fan-out returning
+  `Map<String, Response<OptionsQuotes>>`), and `chain`. Every endpoint takes a
+  Builder-based per-endpoint request object (no `String` convenience overloads).
+  The `chain` request models its mutually-exclusive expiration and strike groups
+  as sealed types (`ExpirationFilter`, `StrikeFilter`) so the exclusivity is
+  compiler-enforced. Covers the `rho` greek (decoded as an optional, nullable
+  column — absent on some feeds), the `expiration=all` filter (the full chain
+  vs. the default front-month), and the `countback` historical-window parameter
+  (validated: positive, and mutually exclusive with `date`/`from`).
 - Project scaffold per ADRs 001–007: Gradle Kotlin DSL build, JDK 17 toolchain,
   `integrationTest` source set, Spotless + JaCoCo, Vanniktech Maven Publish.
 - `MarketDataClient` skeleton with two public constructors — a no-arg one

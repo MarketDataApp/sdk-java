@@ -54,7 +54,7 @@ public final class RetryBehaviorApp {
       long elapsed = (System.nanoTime() - t0) / 1_000_000;
       Console.ok(
           "succeeded after retries; data.services()="
-              + resp.data().services().size()
+              + resp.values().size()
               + ", wall-time="
               + elapsed
               + " ms");

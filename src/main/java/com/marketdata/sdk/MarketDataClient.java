@@ -1,5 +1,6 @@
 package com.marketdata.sdk;
 
+import com.marketdata.sdk.utilities.ApiStatus;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.util.ArrayList;
@@ -20,6 +21,7 @@ public final class MarketDataClient implements AutoCloseable {
   private final Configuration config;
   private final HttpTransport transport;
   private final UtilitiesResource utilities;
+  private final OptionsResource options;
 
   public MarketDataClient() {
     this(null, null, null, true);
@@ -105,9 +107,11 @@ public final class MarketDataClient implements AutoCloseable {
     try {
       JsonResponseParser parser = new JsonResponseParser();
       this.utilities = new UtilitiesResource(transport, parser);
+      this.options = new OptionsResource(transport, parser);
       cacheRef.set(
           new StatusCache(
-              () -> utilities.statusAsync().thenApply(Response::data), Clock.systemUTC()));
+              () -> utilities.statusAsync().thenApply(r -> new ApiStatus(r.values())),
+              Clock.systemUTC()));
     } catch (Throwable t) {
       try {
         transport.close();
@@ -140,6 +144,14 @@ public final class MarketDataClient implements AutoCloseable {
   /** System endpoints documented at the API root: {@code /headers/} (and more to come). */
   public UtilitiesResource utilities() {
     return utilities;
+  }
+
+  /**
+   * Options endpoints: {@code lookup}, {@code expirations}, {@code strikes}, {@code quotes}, {@code
+   * chain}.
+   */
+  public OptionsResource options() {
+    return options;
   }
 
   /**

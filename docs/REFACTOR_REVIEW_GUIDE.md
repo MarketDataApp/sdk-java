@@ -6,6 +6,8 @@ If you've never read this codebase, start with §1 (topology) → §2 (sync requ
 
 All file:line citations target `HEAD` on this branch. Line numbers drift; if a citation looks off, search for the symbol it names.
 
+> **Superseded since this branch:** the generic `Response<T>` wrapper this guide describes (`data()`, `rawBody()`, §7) was **replaced** in the `options` PR (`10_options_resource`) by `MarketDataResponse<T>` + named per-endpoint response types, with a uniform `values()` accessor (and `json()` in place of `rawBody()`). The mechanics here — transport, retry, rate-limit, the parser / `ParallelArrays` decode path — are unchanged; only the response *carrier* changed. For the current model see [`OPTIONS_REVIEW_GUIDE.md`](OPTIONS_REVIEW_GUIDE.md). This guide is left as the historical record of the foundation PR.
+
 ## Table of contents
 
 - [Running it locally](#running-it-locally)
@@ -1113,6 +1115,12 @@ make demo-concurrency   # terminal 3
 ---
 
 ## 7. `Response<T>` + JSON parsing
+
+> **Note:** `Response<T>` was replaced after this branch by `MarketDataResponse<T>` + named
+> per-endpoint types (`values()` instead of `data()`, `json()` instead of `rawBody()`). The
+> **JSON parsing** half of this section (`JsonResponseParser`, `ParallelArrays`, the
+> `s:"no_data"`/envelope handling) is still current — only the *carrier* changed. See
+> [`OPTIONS_REVIEW_GUIDE.md`](OPTIONS_REVIEW_GUIDE.md) §2 / §5.
 
 ### 7.1 `Response<T>` surface
 
