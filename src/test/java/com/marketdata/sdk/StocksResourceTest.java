@@ -572,6 +572,143 @@ class StocksResourceTest {
     assertThat(java.nio.file.Files.readString(out)).isEqualTo(CANDLES_BODY).isEqualTo(resp.json());
   }
 
+  // ---------- §12 candle auto-chunking ----------
+
+  @Test
+  void candlesIntradayLongRangeSplitsIntoYearChunksAndMerges() {
+    // ~3-year intraday range → split into 4 contiguous ≤365-day requests, dispatched concurrently
+    // and merged into one response (each canned chunk returns 2 rows → 8 merged).
+    CapturingClient client = okWith(CANDLES_BODY);
+    StocksResource stocks = resourceWith(client);
+
+    StockCandlesResponse resp =
+        stocks.candles(
+            StockCandlesRequest.builder(StockResolution.hours(1), "AAPL")
+                .from(LocalDate.of(2020, Month.JANUARY, 1))
+                .to(LocalDate.of(2023, Month.JANUARY, 1))
+                .build());
+
+    assertThat(client.captured).hasSize(4);
+    assertThat(resp.values()).hasSize(8);
+    // first slice starts at the request's `from`; last slice ends at the request's `to`.
+    assertThat(client.captured.get(0).uri().toString()).contains("from=2020-01-01");
+    assertThat(client.captured.get(3).uri().toString()).contains("to=2023-01-01");
+    // slices are contiguous and non-overlapping: chunk 1's `to` is chunk 2's `from`.
+    assertThat(client.captured.get(0).uri().toString()).contains("to=2020-12-31");
+    assertThat(client.captured.get(1).uri().toString()).contains("from=2020-12-31");
+  }
+
+  @Test
+  void candlesDailyLongRangeDoesNotSplit() {
+    // Non-intraday resolutions are never chunked, regardless of span.
+    CapturingClient client = okWith(CANDLES_BODY);
+    StocksResource stocks = resourceWith(client);
+
+    stocks.candles(
+        StockCandlesRequest.builder(StockResolution.DAILY, "AAPL")
+            .from(LocalDate.of(2016, Month.JANUARY, 1))
+            .to(LocalDate.of(2024, Month.JANUARY, 1))
+            .build());
+
+    assertThat(client.captured).hasSize(1);
+  }
+
+  @Test
+  void candlesIntradayShortRangeIsASingleRequest() {
+    CapturingClient client = okWith(CANDLES_BODY);
+    StocksResource stocks = resourceWith(client);
+
+    stocks.candles(
+        StockCandlesRequest.builder(StockResolution.minutes(15), "AAPL")
+            .from(LocalDate.of(2024, Month.JANUARY, 1))
+            .to(LocalDate.of(2024, Month.MARCH, 1))
+            .build());
+
+    assertThat(client.captured).hasSize(1);
+  }
+
+  @Test
+  void candlesIntradayWithoutFromIsNotChunked() {
+    CapturingClient client = okWith(CANDLES_BODY);
+    StocksResource stocks = resourceWith(client);
+
+    stocks.candles(StockCandlesRequest.of(StockResolution.hours(1), "AAPL"));
+
+    assertThat(client.captured).hasSize(1);
+    assertThat(client.captured.get(0).uri().toString()).doesNotContain("from=");
+  }
+
+  @Test
+  void csvFacetCandlesLongRangeMergesChunksAndDedupesHeader() {
+    CapturingClient client = okWith("t,o,h,l,c,v\n1705276800,216.5,218.55,215.78,217.83,62130000");
+    StocksResource stocks = resourceWith(client);
+
+    CsvResponse csv =
+        stocks
+            .asCsv()
+            .candles(
+                StockCandlesRequest.builder(StockResolution.hours(1), "AAPL")
+                    .from(LocalDate.of(2020, Month.JANUARY, 1))
+                    .to(LocalDate.of(2023, Month.JANUARY, 1))
+                    .build());
+
+    assertThat(client.captured).hasSize(4);
+    long headerRows = csv.csv().lines().filter(l -> l.startsWith("t,o,h")).count();
+    long dataRows = csv.csv().lines().filter(l -> l.startsWith("1705276800")).count();
+    assertThat(headerRows).as("header deduped to one").isEqualTo(1);
+    assertThat(dataRows).as("one data row per slice").isEqualTo(4);
+  }
+
+  @Test
+  void mergeCsvBodiesDropsRepeatedHeaderWhenEnabled() {
+    List<String> bodies = List.of("h1,h2\n1,2", "h1,h2\n3,4", "h1,h2\n5,6");
+    assertThat(StocksCsvResource.mergeCsvBodies(bodies, true)).isEqualTo("h1,h2\n1,2\n3,4\n5,6");
+    // headers off → straight concatenation (no line is treated as a header).
+    assertThat(StocksCsvResource.mergeCsvBodies(bodies, false))
+        .isEqualTo("h1,h2\n1,2\nh1,h2\n3,4\nh1,h2\n5,6");
+  }
+
+  @Test
+  void resolutionIsIntradayClassifier() {
+    assertThat(StockResolution.minutes(15).isIntraday()).isTrue();
+    assertThat(StockResolution.hours(1).isIntraday()).isTrue();
+    assertThat(StockResolution.of("H").isIntraday()).isTrue();
+    assertThat(StockResolution.DAILY.isIntraday()).isFalse();
+    assertThat(StockResolution.WEEKLY.isIntraday()).isFalse();
+    assertThat(StockResolution.of("1D").isIntraday()).isFalse();
+    assertThat(StockResolution.of("daily").isIntraday()).isFalse();
+  }
+
+  // ---------- §8.2 per-response rate-limit snapshot ----------
+
+  @Test
+  void responseExposesPerResponseRateLimitSnapshot() {
+    HttpHeaders rl =
+        TestHttpClients.headersOf(
+            Map.of(
+                "x-api-ratelimit-limit", "100",
+                "x-api-ratelimit-remaining", "95",
+                "x-api-ratelimit-reset", "1705500000",
+                "x-api-ratelimit-consumed", "5"));
+    CapturingClient client =
+        new CapturingClient(200, QUOTE_BODY.getBytes(StandardCharsets.UTF_8), rl);
+    StocksResource stocks = resourceWith(client);
+
+    RateLimitSnapshot snap = stocks.quote(StockQuoteRequest.of("AAPL")).rateLimit();
+    assertThat(snap).isNotNull();
+    assertThat(snap.limit()).isEqualTo(100);
+    assertThat(snap.remaining()).isEqualTo(95);
+    assertThat(snap.consumed()).isEqualTo(5);
+    assertThat(snap.reset()).isNotNull();
+  }
+
+  @Test
+  void responseRateLimitIsNullWhenHeadersAbsent() {
+    CapturingClient client = okWith(QUOTE_BODY);
+    StocksResource stocks = resourceWith(client);
+    assertThat(stocks.quote(StockQuoteRequest.of("AAPL")).rateLimit()).isNull();
+  }
+
   // ---------- request / resolution validation ----------
 
   @Test

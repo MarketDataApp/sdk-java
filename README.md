@@ -48,8 +48,10 @@ MarketDataClient().use { client ->
 
 Every response implements `MarketDataResponse<T>`: `values()` returns the typed payload
 (typed per endpoint — a `List`, a scalar `String`, …), and the same metadata accessors
-(`statusCode()`, `isNoData()`, `requestId()`, `json()`, `saveToFile(path)`) are available on
-every response, on every resource.
+(`statusCode()`, `isNoData()`, `requestId()`, `rateLimit()`, `json()`, `saveToFile(path)`) are
+available on every response, on every resource. `rateLimit()` returns the rate-limit snapshot
+parsed from *that* response's headers (request-scoped), distinct from the client-level
+`client.getRateLimits()`.
 
 ## Options
 
@@ -172,7 +174,9 @@ a typed `MarketDataResponse` (payload via `values()`). The universal-parameter s
 ### Candles
 
 `StockResolution` is a value type, not an enum — the API accepts an open-ended family of
-resolutions, so use the factories (`DAILY`, `minutes(15)`, `hours(1)`, `days(2)`, …):
+resolutions, so use the factories (`DAILY`, `minutes(15)`, `hours(1)`, `days(2)`, …). An
+**intraday** request spanning more than ~one year is automatically split into year-sized
+sub-requests, fetched concurrently and merged into one response — transparent to the caller:
 
 #### Java
 

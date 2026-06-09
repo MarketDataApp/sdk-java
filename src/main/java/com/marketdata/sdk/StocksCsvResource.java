@@ -7,6 +7,8 @@ import com.marketdata.sdk.stocks.StockPricesRequest;
 import com.marketdata.sdk.stocks.StockQuoteRequest;
 import com.marketdata.sdk.stocks.StockQuotesRequest;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -61,7 +63,65 @@ public final class StocksCsvResource {
   // ---------- endpoints ----------
 
   public CompletableFuture<CsvResponse> candlesAsync(StockCandlesRequest request) {
-    return executeCsv(StocksResource.candlesSpec(request));
+    List<StocksResource.DateRange> chunks = StocksResource.candleChunks(request);
+    if (chunks.size() == 1) {
+      StocksResource.DateRange only = chunks.get(0);
+      return executeCsv(StocksResource.candlesSpec(request, only.from(), only.to()));
+    }
+    // §12 auto-chunking on the CSV facet: fan out a CSV sub-request per year-sized slice and merge
+    // the texts (dropping the repeated header row from every slice after the first when headers are
+    // on), so the consumer gets one continuous CSV instead of a silently truncated first year.
+    boolean headersIncluded = !Boolean.FALSE.equals(config.headers());
+    List<CompletableFuture<EnvBody>> futures = new ArrayList<>(chunks.size());
+    for (StocksResource.DateRange range : chunks) {
+      RequestSpec.Builder b = StocksResource.candlesSpec(request, range.from(), range.to());
+      config.applyTo(b);
+      b.format(Format.CSV);
+      RequestSpec spec = b.build();
+      futures.add(
+          transport
+              .executeAsync(spec)
+              .thenApply(
+                  env ->
+                      new EnvBody(
+                          new String(env.body(), StandardCharsets.UTF_8), env, spec.format())));
+    }
+    return CompletableFuture.allOf(futures.toArray(new CompletableFuture<?>[0]))
+        .thenApply(
+            unused -> {
+              EnvBody last = futures.get(futures.size() - 1).join();
+              List<String> bodies = new ArrayList<>(futures.size());
+              for (CompletableFuture<EnvBody> f : futures) {
+                bodies.add(f.join().body());
+              }
+              return new CsvResponse(
+                  mergeCsvBodies(bodies, headersIncluded), last.envelope(), last.format());
+            });
+  }
+
+  private record EnvBody(String body, HttpResponseEnvelope envelope, Format format) {}
+
+  /**
+   * Concatenates CSV slice bodies in order. When {@code headersIncluded}, the leading header line
+   * of every slice after the first is dropped so the merged text has a single header.
+   */
+  static String mergeCsvBodies(List<String> bodies, boolean headersIncluded) {
+    StringBuilder sb = new StringBuilder();
+    for (int i = 0; i < bodies.size(); i++) {
+      String body = bodies.get(i);
+      if (i > 0 && headersIncluded) {
+        int nl = body.indexOf('\n');
+        body = nl >= 0 ? body.substring(nl + 1) : ""; // drop the repeated header row
+      }
+      if (body.isEmpty()) {
+        continue;
+      }
+      if (sb.length() > 0 && sb.charAt(sb.length() - 1) != '\n') {
+        sb.append('\n');
+      }
+      sb.append(body);
+    }
+    return sb.toString();
   }
 
   public CsvResponse candles(StockCandlesRequest request) {

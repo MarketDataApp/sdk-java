@@ -309,6 +309,15 @@ public final class QuickstartApp {
                       .to(LocalDate.now())
                       .build());
       Console.ok(r.values().size() + " daily candles fetched");
+      // §8.2: each response carries its own rate-limit snapshot (request-scoped).
+      if (r.rateLimit() != null) {
+        Console.info(
+            "rate limit (from this response): "
+                + r.rateLimit().remaining()
+                + "/"
+                + r.rateLimit().limit()
+                + " remaining");
+      }
     } catch (AuthenticationError e) {
       Console.info("401 — set MARKETDATA_TOKEN (env or .env) to exercise the stocks endpoints.");
     } catch (MarketDataException e) {

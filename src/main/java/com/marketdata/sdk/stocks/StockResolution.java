@@ -1,6 +1,7 @@
 package com.marketdata.sdk.stocks;
 
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 /**
  * Candle resolution for {@code GET /v1/stocks/candles/{resolution}/{symbol}/}. A value type rather
@@ -79,9 +80,24 @@ public final class StockResolution {
     return n;
   }
 
+  // Minutely (a bare positive integer) or hourly (optional count + "H", or descriptive). Matches
+  // the
+  // Python SDK's is_intraday classifier — the trigger for auto-chunking large candle date ranges.
+  private static final Pattern INTRADAY =
+      Pattern.compile("^(?:[1-9]\\d*H?|H|minutely|hourly)$", Pattern.CASE_INSENSITIVE);
+
   /** The value placed in the {@code {resolution}} path segment. */
   public String wireValue() {
     return wireValue;
+  }
+
+  /**
+   * Whether this is an intraday resolution (minutely or hourly). Daily/weekly/monthly/yearly are
+   * not. Intraday resolutions over a multi-year date range are auto-split into year-sized chunks
+   * and fetched concurrently (SDK requirements §12) — this predicate is the trigger.
+   */
+  public boolean isIntraday() {
+    return INTRADAY.matcher(wireValue).matches();
   }
 
   @Override

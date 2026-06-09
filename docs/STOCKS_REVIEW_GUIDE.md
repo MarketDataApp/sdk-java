@@ -2,7 +2,7 @@
 
 This guide walks a reviewer through the `stocks` resource added on the `11_stocks_resource` branch. It is organized by **flow**, not by file.
 
-This PR **adopts the conventions the [`options` PR](OPTIONS_REVIEW_GUIDE.md) established** — the `MarketDataResponse<T>` + named-response model, the Builder-based per-endpoint request, nullable fields + `columns` + Option A, and the CSV/HTML facets — and applies them to stocks. The shared layers (transport, retry, rate-limit, response model, `ParallelArrays`, `JsonResponseParser`) are reused **unchanged**; the only shared-layer addition is one tolerant date parser (`MarketDataDates.parseDateOrTimestampField`). If you reviewed the options PR, the load-bearing shape will be familiar — focus your time on §4 (per-endpoint query translation), §5 (the per-endpoint required-column sets + the `news` deserializer) and §7–§8 (batch vs. fan-out, news/earnings specifics).
+This PR **adopts the conventions the [`options` PR](OPTIONS_REVIEW_GUIDE.md) established** — the `MarketDataResponse<T>` + named-response model, the Builder-based per-endpoint request, nullable fields + `columns` + Option A, and the CSV/HTML facets — and applies them to stocks. The shared layers (transport, retry, rate-limit parsing, `ParallelArrays`, `JsonResponseParser`) are reused unchanged; there are **two additive shared-layer changes** — a tolerant date parser (`MarketDataDates.parseDateOrTimestampField`) and a per-response rate-limit accessor (`MarketDataResponse.rateLimit()`, §8.2). If you reviewed the options PR, the load-bearing shape will be familiar — focus your time on §4 (per-endpoint query translation), §5 (the per-endpoint required-column sets + the `news` deserializer), §7–§8 (batch vs. fan-out, news/earnings specifics), and the two stocks-/SDK-specific additions: **§12 candle auto-chunking** (§9.9) and **§8.2 per-response rate limits** (§9.10).
 
 Suggested reading order: §1 (what's here) → §5 (deserializers: nullable + columns + Option A) → §3/§4 (requests + query translation) → §7 (batch) → §8 (news/earnings) → §9 (subtle corners). ~30 minutes.
 
@@ -65,24 +65,29 @@ com.marketdata.sdk.stocks.StockResolution      (candle-resolution value type)
 |---|---|---|
 | Resource façade | `StocksResource.java` | universal-param config, per-endpoint `*Spec` builders, the generic row deserializer + Option A, `asCsv()`/`asHtml()` |
 | CSV/HTML facets | `StocksCsvResource.java`, `StocksHtmlResource.java` | reuse of the static `*Spec` builders, `format=csv/html` |
-| Responses | `Stock*Response.java` | `values()` payload typing; `StockNewsResponse.updated()` scalar accessor |
+| Responses | `Stock*Response.java`, `MarketDataResponse.java`, `AbstractMarketDataResponse.java` | `values()` payload typing; `StockNewsResponse.updated()` scalar accessor; the new `rateLimit()` (§8.2) on the interface + base |
+| Candle chunking | `StocksResource.candleChunks`/`candlesAsync`, `StockResolution.isIntraday`, `StocksCsvResource.mergeCsvBodies` | §12 intraday split → concurrent fetch → merge |
 | Requests | `stocks/Stock*Request.java`, `StockRequests.java`, `StockResolution.java` | Builder validation, shared `validateWindow`, the value-type resolution |
 | Row records | `stocks/StockCandle/StockQuote/StockPrice/StockNewsArticle/StockEarning.java` | `@Nullable` fields; `StockNewsArticle` non-null (always emitted) |
 | News deserializer | `StockNewsDeserializer.java` | per-row arrays + scalar `updated`; envelope handling |
-| Reused infra (changed) | `MarketDataDates.java` | the new `parseDateOrTimestampField` only |
+| Reused infra (changed) | `MarketDataDates.java`, `MarketDataResponse.java`, `AbstractMarketDataResponse.java` | additive only: `parseDateOrTimestampField`; `rateLimit()` |
 | Wiring | `MarketDataClient.java` | `client.stocks()` |
 
-### 1.3 What changed in shared layers (vs. "unchanged")
+### 1.3 What changed in shared layers (additive only)
 
-- **`MarketDataDates`** gained `parseDateOrTimestampField` — additive; the existing `parseDateField` / `parseTimestampField` are untouched. Everything else (`ParallelArrays`, `JsonResponseParser`, `RequestConfig`, `MarketDataResponse`, transport/retry/rate-limit/status-cache/exceptions) is reused exactly as the options PR left it. Confirm no existing parser was modified.
+- **`MarketDataDates`** gained `parseDateOrTimestampField` — the existing `parseDateField` / `parseTimestampField` are untouched. Confirm no existing parser was modified.
+- **`MarketDataResponse`** gained `rateLimit()` (§8.2), implemented once in `AbstractMarketDataResponse` (it parses `RateLimitHeaders.parse(envelope.headers())` in the constructor). Since that base is the **only** implementor of the interface, every existing response type — options, utilities, `CsvResponse`, `HtmlResponse` — gets it with no per-type change. Confirm the interface addition didn't miss an implementor and that options/utilities tests still pass.
+- Everything else (`ParallelArrays`, `JsonResponseParser`, `RequestConfig`, `RateLimitHeaders`, transport/retry/status-cache/exceptions) is reused exactly as the options PR left it.
 
 ---
 
 ## 2. The response model (reused)
 
-No new model concepts — `Stock*Response` are thin subclasses of `AbstractMarketDataResponse<T>` (see [Options guide §2](OPTIONS_REVIEW_GUIDE.md#2-the-response-model) for the full shape). `values()` is the flat payload per endpoint (`List<StockCandle>`, `List<StockQuote>`, …). The one extra: `StockNewsResponse.updated()` exposes the feed's scalar update time (it sits at the response root, not on each row).
+No new model concepts — `Stock*Response` are thin subclasses of `AbstractMarketDataResponse<T>` (see [Options guide §2](OPTIONS_REVIEW_GUIDE.md#2-the-response-model) for the full shape). `values()` is the flat payload per endpoint (`List<StockCandle>`, `List<StockQuote>`, …). The one endpoint extra: `StockNewsResponse.updated()` exposes the feed's scalar update time (it sits at the response root, not on each row).
 
-What to check: `values()` return types match the wire shape per endpoint; `updated()` is only on `StockNewsResponse`.
+**New SDK-wide accessor:** `MarketDataResponse.rateLimit()` returns the `RateLimitSnapshot` parsed from this response's own `x-api-ratelimit-*` headers (§8.2) — request-scoped, distinct from the client-level `client.getRateLimits()`. `null` when the four headers weren't all present. §9.10.
+
+What to check: `values()` return types match the wire shape per endpoint; `updated()` is only on `StockNewsResponse`; `rateLimit()` is populated from the per-response headers (the merged-chunk candle response reflects the final slice's headers, §9.9).
 
 ---
 
@@ -194,6 +199,8 @@ Verify: `quotesBatchesSymbolsInOneRequest` / `pricesBatchesSymbolsInOneRequest` 
 | 9.6 | **`StockResolution` is a value type** | Not an enum — the API's resolution family is open-ended. Factories validate positivity; `of(String)` passes an arbitrary token through. |
 | 9.7 | **wire vs. Java names** | Builder `week52(...)` → wire `52week`; builder `candle(...)` → wire `candle`; `adjustSplits`/`adjustDividends` → wire `adjustsplits`/`adjustdividends`. |
 | 9.8 | **`mode=cached` is quote-only** | The backend rejects `cached` on list endpoints (candles/news/earnings) — a consumer concern, not enforced by the SDK. |
+| 9.9 | **Candle auto-chunking (§12)** | An intraday request with a `from` bound spanning > ~1 year is split into year-sized sub-requests (`candleChunks`), fanned out through the 50-permit pool and merged (`candlesAsync` typed; `StocksCsvResource.mergeCsvBodies` for CSV). `StockResolution.isIntraday()` is the trigger. When split, the merged response's metadata (status/json/`rateLimit`) reflects the final slice. |
+| 9.10 | **Per-response rate limit (§8.2)** | `MarketDataResponse.rateLimit()` is parsed from each response's own `x-api-ratelimit-*` headers (in `AbstractMarketDataResponse`, SDK-wide) — request-scoped, distinct from client-level `getRateLimits()`. |
 
 ---
 
@@ -204,14 +211,14 @@ Do **not** flag as missing — deferred, documented in [`PR.md`](../PR.md):
 - **ADR-008 accept + ADR-009**, and the `docs/java-sdk-requirements.md` per-resource section that depends on an accepted source ADR.
 - **HTML facet exposure** — package-private until the backend serves `format=html`.
 - **SDK-wide setter de-duplication** — the universal-param setters are copy-pasted per resource; a self-typed-base refactor is tracked for before v1.
-- **§13 JaCoCo 100% threshold**, **§8 per-response rate-limit snapshot** — unchanged from the options PR.
+- **§13 JaCoCo 100% threshold** — unchanged from the options PR.
 - **`funds`/`markets`** — adopt this convention next.
 
 ---
 
 ## Reviewer checklist
 
-- [ ] Shared layers untouched except the additive `MarketDataDates.parseDateOrTimestampField`; no existing parser modified.
+- [ ] Shared layers changed only additively: `MarketDataDates.parseDateOrTimestampField` and `MarketDataResponse.rateLimit()` (implemented once in `AbstractMarketDataResponse`); no existing parser modified; options/utilities responses inherit `rateLimit()` with no per-type change.
 - [ ] Requests: Builder per endpoint, no `String` overloads; `StockResolution` value-type factories validate; shared `validateWindow` (date XOR range, countback pairs with `to`).
 - [ ] Query translation: every `*Spec` reads every getter; wire names correct (`52week`, `candle`, `adjustsplits`, …); `symbols` comma-joined; paths encoded.
 - [ ] Nullable + Option A: every row field `@Nullable`; row builders lenient; per-endpoint **required-column sets** are right (quote 11-standard required, OHLC/52-week optional; earnings only symbol/date/updated required); strict-by-default preserved.
@@ -219,5 +226,7 @@ Do **not** flag as missing — deferred, documented in [`PR.md`](../PR.md):
 - [ ] `quotes`/`prices` are a single batched request (one response, N rows) — not a fan-out map.
 - [ ] Facets: `asCsv()` covers every endpoint, returns `CsvResponse`, adds `human`/`headers`; `asHtml()` package-private.
 - [ ] Date handling: daily date-only vs. intraday full timestamp both decode; `updated` uses the plain timestamp parser.
-- [ ] Unit (`./gradlew build`, 719 tests) and integration (`MARKETDATA_RUN_INTEGRATION_TESTS=true ./gradlew integrationTest`) green; `make demo-stocks` runs against the mock server.
+- [ ] §12 candle chunking: `isIntraday()` classifier correct; only intraday + `from`-bounded ranges split; slices contiguous/non-overlapping (`to` exclusive); concurrent via the 50-permit pool; merged in chronological order; non-intraday / no-`from` stay single-request; CSV path merges with header dedup.
+- [ ] §8.2 per-response rate limit: `rateLimit()` parsed from each response's headers; `null` when absent; request-scoped (distinct from `getRateLimits()`).
+- [ ] Unit (`./gradlew build`, 728 tests) and integration (`MARKETDATA_RUN_INTEGRATION_TESTS=true ./gradlew integrationTest`) green; `make demo-stocks` runs against the mock server.
 - [ ] Deferred items (§10) understood and not blocking.

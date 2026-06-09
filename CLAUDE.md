@@ -85,7 +85,7 @@ The Java SDK must also satisfy the canonical, cross-language [SDK Requirements](
 **Deliberately deferred (require the per-resource layer to land first):**
 - §1.2 resource groupings — `client.utilities()`, `client.options()`, and `client.stocks()` are wired today; `client.funds`, `client.markets` still to come.
 - §2 endpoint method coverage; §3 universal parameters; §11 wire-format decoding for the remaining resources (funds, markets). The plumbing (`ParallelArrays.zip` helper for the parallel-arrays shape, `JsonResponseParser`, the `MarketDataResponse<T>` named-response types) is in place — each new endpoint just declares its fields and row builder.
-- §8 request-scoped rate-limit attachment — today the snapshot is client-level (via `client.getRateLimits()`); attaching a per-response snapshot to `Response<T>` is a small follow-up when a consumer needs it.
+- ~~§8 request-scoped rate-limit attachment~~ **DONE** — every `MarketDataResponse` now exposes `rateLimit()`, parsed from that response's own `x-api-ratelimit-*` headers (request-scoped), alongside the client-level `client.getRateLimits()`.
 - §13 100% coverage threshold via JaCoCo `violationRules`; deferred until the resource layer lands so the threshold meaningfully ratchets functional code, not just scaffolding.
 
 When picking up new work, check this list before reaching for the SDK requirements doc — most foundational rules are already encoded in code; missing pieces are deferred deliberately, not by accident.

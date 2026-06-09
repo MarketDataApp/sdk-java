@@ -110,16 +110,59 @@ public final class StocksResource {
 
   // ---------- endpoints (typed) ----------
 
-  /** Async: fetch the OHLCV candle series for a single symbol. */
+  /**
+   * Async: fetch the OHLCV candle series for a single symbol.
+   *
+   * <p>Per SDK requirements §12, an <em>intraday</em> request with a {@code from} bound spanning
+   * more than ~one year is auto-split into year-sized sub-requests, dispatched concurrently through
+   * the transport's 50-permit pool and merged: the returned response's {@link
+   * MarketDataResponse#values()} are every slice's candles concatenated in chronological order.
+   * When splitting occurs, the response metadata ({@code statusCode}/{@code requestId}/{@code
+   * json}/{@code rateLimit}) reflects the final sub-request.
+   */
   public java.util.concurrent.CompletableFuture<StockCandlesResponse> candlesAsync(
       StockCandlesRequest request) {
-    RequestSpec.Builder b = candlesSpec(request);
-    config.applyTo(b);
-    return execute(
-        b.build(),
-        StockCandles.class,
-        (d, env, fmt) -> new StockCandlesResponse(d.candles(), env, fmt));
+    List<DateRange> chunks = candleChunks(request);
+    if (chunks.size() == 1) {
+      DateRange only = chunks.get(0);
+      RequestSpec.Builder b = candlesSpec(request, only.from(), only.to());
+      config.applyTo(b);
+      return execute(
+          b.build(),
+          StockCandles.class,
+          (d, env, fmt) -> new StockCandlesResponse(d.candles(), env, fmt));
+    }
+    List<java.util.concurrent.CompletableFuture<DecodedChunk>> futures =
+        new java.util.ArrayList<>(chunks.size());
+    for (DateRange range : chunks) {
+      RequestSpec.Builder b = candlesSpec(request, range.from(), range.to());
+      config.applyTo(b);
+      RequestSpec spec = b.build();
+      futures.add(
+          transport
+              .executeAsync(spec)
+              .thenApply(
+                  env ->
+                      new DecodedChunk(
+                          parser.parse(env, StockCandles.class, config.columns()),
+                          env,
+                          spec.format())));
+    }
+    return java.util.concurrent.CompletableFuture.allOf(
+            futures.toArray(new java.util.concurrent.CompletableFuture<?>[0]))
+        .thenApply(
+            unused -> {
+              List<StockCandle> merged = new java.util.ArrayList<>();
+              DecodedChunk last = futures.get(futures.size() - 1).join();
+              for (java.util.concurrent.CompletableFuture<DecodedChunk> f : futures) {
+                merged.addAll(f.join().decoded().candles());
+              }
+              return new StockCandlesResponse(List.copyOf(merged), last.envelope(), last.format());
+            });
   }
+
+  /** One decoded candle sub-request — its rows plus the envelope/format for metadata. */
+  private record DecodedChunk(StockCandles decoded, HttpResponseEnvelope envelope, Format format) {}
 
   /** Sync wrapper for {@link #candlesAsync(StockCandlesRequest)}. */
   public StockCandlesResponse candles(StockCandlesRequest request) {
@@ -231,6 +274,16 @@ public final class StocksResource {
   // ---------- request spec builders (package-private static — reused by the facets) ----------
 
   static RequestSpec.Builder candlesSpec(StockCandlesRequest r) {
+    return candlesSpec(r, r.from(), r.to());
+  }
+
+  /**
+   * Candles spec with the date window overridden — used by the auto-chunking path (§12), where each
+   * sub-request carries a slice of the original {@code from}/{@code to} range. Non-window params
+   * ({@code date}/{@code countback}/exchange/etc.) come from {@code r} unchanged.
+   */
+  static RequestSpec.Builder candlesSpec(
+      StockCandlesRequest r, @Nullable LocalDate from, @Nullable LocalDate to) {
     RequestSpec.Builder b =
         RequestSpec.get(
             "stocks/candles/"
@@ -240,11 +293,11 @@ public final class StocksResource {
     if (r.date() != null) {
       b.query("date", DateTimeFormatter.ISO_LOCAL_DATE.format(r.date()));
     }
-    if (r.from() != null) {
-      b.query("from", DateTimeFormatter.ISO_LOCAL_DATE.format(r.from()));
+    if (from != null) {
+      b.query("from", DateTimeFormatter.ISO_LOCAL_DATE.format(from));
     }
-    if (r.to() != null) {
-      b.query("to", DateTimeFormatter.ISO_LOCAL_DATE.format(r.to()));
+    if (to != null) {
+      b.query("to", DateTimeFormatter.ISO_LOCAL_DATE.format(to));
     }
     if (r.countback() != null) {
       b.query("countback", r.countback());
@@ -265,6 +318,43 @@ public final class StocksResource {
       b.query("adjustdividends", r.adjustDividends());
     }
     return b;
+  }
+
+  /** Inclusive-{@code from} / exclusive-{@code to} date window for one candle sub-request. */
+  record DateRange(@Nullable LocalDate from, @Nullable LocalDate to) {}
+
+  /** Year-sized chunk span: the API caps a single intraday candle request to ~one year. */
+  private static final int CHUNK_DAYS = 365;
+
+  /**
+   * Splits a candle request's date window into the sub-ranges to fetch (§12). Returns a single
+   * range (the request's own window) unless the resolution is intraday <em>and</em> a {@code from}
+   * bound is set — then the {@code [from, to]} span (with {@code to} defaulting to today when
+   * open-ended) is cut into consecutive ≤{@value #CHUNK_DAYS}-day ranges. Mirrors the Python SDK's
+   * {@code split_dates_by_timeframe}: contiguous, non-overlapping ({@code to} of one chunk is the
+   * {@code from} of the next, and {@code to} is exclusive so the boundary candle isn't duplicated).
+   */
+  static List<DateRange> candleChunks(StockCandlesRequest r) {
+    LocalDate from = r.from();
+    if (from == null || !r.resolution().isIntraday()) {
+      return List.of(new DateRange(from, r.to()));
+    }
+    LocalDate to = r.to() != null ? r.to() : LocalDate.now();
+    if (!from.isBefore(to)) {
+      return List.of(new DateRange(from, r.to())); // degenerate — let the backend handle it
+    }
+    List<DateRange> ranges = new java.util.ArrayList<>();
+    LocalDate current = from;
+    while (true) {
+      LocalDate nextCut = current.plusDays(CHUNK_DAYS);
+      if (!nextCut.isBefore(to)) { // nextCut >= to
+        ranges.add(new DateRange(current, to));
+        break;
+      }
+      ranges.add(new DateRange(current, nextCut));
+      current = nextCut;
+    }
+    return ranges;
   }
 
   static RequestSpec.Builder quoteSpec(

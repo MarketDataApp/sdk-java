@@ -40,7 +40,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on synthesized forward-quarter rows. Mixed date/timestamp wire shapes (a daily
   candle's date-only `t` vs. an intraday full timestamp) decode uniformly. Carries
   the same universal-parameter setters, `columns` projection (with the Option A
-  strict guarantee), and `asCsv()` facet as `options`.
+  strict guarantee), and `asCsv()` facet as `options`. Intraday candle requests
+  spanning more than ~one year are **auto-split** into year-sized sub-requests,
+  fetched concurrently through the 50-permit pool and merged into one response
+  (SDK requirements §12), on both the typed and CSV paths.
+- **Per-response rate limits** — every `MarketDataResponse` now exposes
+  `rateLimit()` returning a `RateLimitSnapshot` parsed from that response's own
+  `x-api-ratelimit-*` headers (request-scoped, SDK requirements §8.2), distinct
+  from the client-level `MarketDataClient.getRateLimits()`. Applies to every
+  resource (options/utilities/stocks) and the CSV/HTML responses.
 - **Options resource** (`client.options()`) — all six endpoints, each in sync +
   async form: `lookup`, `expirations`, `strikes`, `quote` (single contract),
   `quotes` (multi-contract fan-out returning a per-symbol

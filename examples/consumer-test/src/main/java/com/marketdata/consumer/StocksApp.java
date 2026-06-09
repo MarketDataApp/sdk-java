@@ -34,7 +34,10 @@ import java.util.List;
  *   <li>{@code columns} projection: requested fields populate, fields you did <em>not</em> ask for
  *       come back {@code null} with <strong>no error</strong>;
  *   <li>Option A failures: a required column you <em>did</em> request (or didn't project away) that
- *       the API omits raises a {@link ParseError}.
+ *       the API omits raises a {@link ParseError};
+ *   <li>§12 candle auto-chunking: an intraday range over a year splits into concurrent sub-requests
+ *       and merges into one response;
+ *   <li>§8.2 per-response rate limits: {@code rateLimit()} parsed from each response's headers.
  * </ul>
  *
  * <p>Each scenario scripts the mock server's response with {@link MockServerControl#script}.
@@ -95,11 +98,74 @@ public final class StocksApp {
 
     try (var client = new MarketDataClient("token", MockServerControl.BASE_URL, null, false)) {
       everyEndpointWithParams(mock, client);
+      candleAutoChunking(mock, client);
+      perResponseRateLimit(mock, client);
       csvFacet(mock, client);
       columnsProjectionDoesNotFail(mock, client);
       optionARequestedColumnMissingFails(mock, client);
       strictByDefaultMissingColumnFails(mock, client);
     }
+  }
+
+  // ---------- §12 candle auto-chunking ----------
+
+  private static void candleAutoChunking(MockServerControl mock, MarketDataClient client) {
+    Console.header("§12 candle auto-chunking — intraday range > 1 year splits + merges");
+    mock.reset();
+    // A 3-year HOURLY (intraday) range splits into 4 year-sized sub-requests, fetched concurrently
+    // and merged. Script one candle body per slice; each returns 2 rows → 8 merged.
+    mock.script(
+        List.of(
+            Step.of(200, CANDLES), Step.of(200, CANDLES), Step.of(200, CANDLES),
+            Step.of(200, CANDLES)));
+    Console.step("candles(hours(1), from=2020-01-01, to=2023-01-01) — auto-split");
+    var resp =
+        client
+            .stocks()
+            .candles(
+                StockCandlesRequest.builder(StockResolution.hours(1), "AAPL")
+                    .from(LocalDate.of(2020, 1, 1))
+                    .to(LocalDate.of(2023, 1, 1))
+                    .build());
+    Console.ok(
+        "candles.values() → "
+            + resp.values().size()
+            + " bars merged from "
+            + mock.stats().requests()
+            + " concurrent sub-requests (one continuous series, transparent to the caller)");
+    Console.info("Daily/weekly/… resolutions or no `from` bound → a single request, no chunking.");
+  }
+
+  // ---------- §8.2 per-response rate limit ----------
+
+  private static void perResponseRateLimit(MockServerControl mock, MarketDataClient client) {
+    Console.header("§8.2 per-response rate limit — rateLimit() off each response");
+    mock.reset();
+    // Script the four x-api-ratelimit-* headers on the response; the SDK parses them per response.
+    mock.script(
+        Step.of(200, QUOTE_FULL)
+            .withHeader("x-api-ratelimit-limit", "100000")
+            .withHeader("x-api-ratelimit-remaining", "99997")
+            .withHeader("x-api-ratelimit-reset", "1735689600")
+            .withHeader("x-api-ratelimit-consumed", "3"));
+    Console.step("quote(\"AAPL\").rateLimit() — parsed from THIS response's headers");
+    var resp = client.stocks().quote(StockQuoteRequest.of("AAPL"));
+    var rl = resp.rateLimit();
+    if (rl != null) {
+      Console.ok(
+          "rateLimit() → remaining="
+              + rl.remaining()
+              + "/"
+              + rl.limit()
+              + " consumed="
+              + rl.consumed()
+              + " reset="
+              + rl.reset());
+    } else {
+      Console.fail("expected a rate-limit snapshot from the response headers");
+    }
+    Console.info(
+        "Request-scoped — distinct from client.getRateLimits() (the client-wide latest snapshot).");
   }
 
   // ---------- every endpoint ----------
