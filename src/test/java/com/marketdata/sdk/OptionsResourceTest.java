@@ -833,6 +833,64 @@ class OptionsResourceTest {
     assertThat(client.captured.get(0).uri().toString()).contains("format=html");
   }
 
+  @Test
+  void csvFacetUniversalAndShapingParamsReachTheWire() {
+    CapturingClient client = okWith("optionSymbol,strike\nAAPL250117C00150000,150");
+    OptionsResource options = resourceWith(client);
+
+    options
+        .asCsv()
+        .dateFormat(DateFormat.TIMESTAMP)
+        .mode(Mode.DELAYED)
+        .limit(50)
+        .offset(10)
+        .columns("optionSymbol", "strike")
+        .human(true) // output-shaping — CSV-only
+        .headers(true) // output-shaping — CSV-only
+        .chain(OptionsChainRequest.of("AAPL"));
+
+    String url =
+        java.net.URLDecoder.decode(
+            client.captured.get(0).uri().toString(), java.nio.charset.StandardCharsets.UTF_8);
+    assertThat(url)
+        .contains("format=csv")
+        .contains("dateformat=timestamp")
+        .contains("mode=delayed")
+        .contains("limit=50")
+        .contains("offset=10")
+        .contains("columns=optionSymbol,strike")
+        .contains("human=true")
+        .contains("headers=true");
+  }
+
+  @Test
+  void csvFacetCoversEveryEndpoint() {
+    CapturingClient client = okWith("a,b\n1,2");
+    OptionsCsvResource csv = resourceWith(client).asCsv();
+
+    assertThat(csv.chain(OptionsChainRequest.of("AAPL")).csv()).contains("a,b");
+    assertThat(csv.quote(OptionsQuoteRequest.of("AAPL250117C00150000")).csv()).contains("a,b");
+    assertThat(csv.strikes(OptionsStrikesRequest.of("AAPL")).csv()).contains("a,b");
+    assertThat(csv.expirations(OptionsExpirationsRequest.of("AAPL")).csv()).contains("a,b");
+
+    Map<String, CsvResponse> fanout =
+        csv.quotes(
+            OptionsQuotesRequest.builder("AAPL250117C00150000", "AAPL250117P00150000").build());
+    assertThat(fanout).hasSize(2);
+    assertThat(fanout.values()).allSatisfy(r -> assertThat(r.csv()).contains("a,b"));
+  }
+
+  @Test
+  void htmlFacetCoversEveryEndpoint() {
+    CapturingClient client = okWith("<html>x</html>");
+    OptionsHtmlResource html = resourceWith(client).asHtml();
+
+    assertThat(html.chain(OptionsChainRequest.of("AAPL")).html()).contains("<html>");
+    assertThat(html.quote(OptionsQuoteRequest.of("AAPL250117C00150000")).html()).contains("<html>");
+    assertThat(html.strikes(OptionsStrikesRequest.of("AAPL")).html()).contains("<html>");
+    assertThat(html.expirations(OptionsExpirationsRequest.of("AAPL")).html()).contains("<html>");
+  }
+
   // ---------- response metadata (§13.5 / §16) ----------
 
   @Test
