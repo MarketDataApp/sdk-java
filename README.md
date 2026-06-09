@@ -32,9 +32,8 @@ common path is two lines:
 
 ```java
 try (var client = new MarketDataClient()) {
-    Response<OptionsExpirations> resp =
-        client.options().expirations(OptionsExpirationsRequest.of("AAPL"));
-    System.out.println(resp.data().expirations());
+    var resp = client.options().expirations(OptionsExpirationsRequest.of("AAPL"));
+    System.out.println(resp.values());   // values() is the typed payload (a List<ZonedDateTime>)
 }
 ```
 
@@ -43,9 +42,14 @@ try (var client = new MarketDataClient()) {
 ```kotlin
 MarketDataClient().use { client ->
     val resp = client.options().expirations(OptionsExpirationsRequest.of("AAPL"))
-    println(resp.data().expirations)
+    println(resp.values())   // List<ZonedDateTime>
 }
 ```
+
+Every response implements `MarketDataResponse<T>`: `values()` returns the typed payload
+(typed per endpoint — a `List`, a scalar `String`, …), and the same metadata accessors
+(`statusCode()`, `isNoData()`, `requestId()`, `json()`, `saveToFile(path)`) are available on
+every response, on every resource.
 
 ## Options
 
@@ -73,7 +77,7 @@ only one variant per group:
 
 ```java
 try (var client = new MarketDataClient()) {
-    Response<OptionsChain> resp = client.options().chain(
+    var resp = client.options().chain(
         OptionsChainRequest.builder("AAPL")
             .expirationFilter(ExpirationFilter.all())    // every expiration, not just front-month
             .strikeFilter(StrikeFilter.range(150, 200))  // 150 <= strike <= 200
@@ -81,9 +85,9 @@ try (var client = new MarketDataClient()) {
             .strikeLimit(5)
             .build());
 
-    for (OptionQuote q : resp.data().chain()) {
-        System.out.printf("%s  delta=%.3f  rho=%s%n",
-            q.optionSymbol(), q.delta(), q.rho()); // rho may be null (optional column)
+    for (OptionQuote q : resp.values()) {                // values() is a List<OptionQuote>
+        System.out.printf("%s  delta=%s  rho=%s%n",
+            q.optionSymbol(), q.delta(), q.rho());       // delta/rho are @Nullable Double
     }
 }
 ```
@@ -100,8 +104,8 @@ MarketDataClient().use { client ->
             .strikeLimit(5)
             .build()
     )
-    resp.data().chain.forEach { q ->
-        println("${q.optionSymbol}  delta=${q.delta}  rho=${q.rho}") // rho may be null
+    resp.values().forEach { q ->
+        println("${q.optionSymbol}  delta=${q.delta}  rho=${q.rho}") // delta/rho are nullable
     }
 }
 ```
@@ -109,17 +113,41 @@ MarketDataClient().use { client ->
 ### Multiple quotes
 
 `quotes` fans out one request per symbol concurrently and returns a
-`Map<String, Response<OptionsQuotes>>` keyed by the input symbol, so per-symbol
+`Map<String, OptionsQuotesResponse>` keyed by the input symbol, so per-symbol
 status and errors stay observable. `countback` caps the historical series to the
 N most recent rows before `to`:
 
 ```java
-Map<String, Response<OptionsQuotes>> bySymbol = client.options().quotes(
+Map<String, OptionsQuotesResponse> bySymbol = client.options().quotes(
     OptionsQuotesRequest.builder("AAPL250117C00150000", "AAPL250117P00150000")
         .to(LocalDate.now())
         .countback(5)   // at most 5 EOD rows per symbol, before `to`
         .build());
+
+bySymbol.forEach((sym, resp) -> System.out.println(sym + " → " + resp.values().size() + " rows"));
 ```
+
+### Universal parameters & CSV
+
+Universal parameters are set fluently on the resource (an immutable configured value, so you
+can "configure once, call many"); `columns` projects the response to a subset of fields, and
+`asCsv()` selects a CSV view of any endpoint:
+
+```java
+// type-preserving universal params + column projection (typed):
+var chain = client.options()
+    .dateFormat(DateFormat.TIMESTAMP).mode(Mode.DELAYED).limit(50)
+    .columns("optionSymbol", "strike", "delta")   // fields you don't request come back null
+    .chain(OptionsChainRequest.of("AAPL"));
+
+// CSV facet (adds human/headers, which only make sense for CSV):
+CsvResponse csv = client.options().asCsv().columns("optionSymbol", "strike").chain(req);
+csv.saveToFile(Path.of("aapl-chain.csv"));
+```
+
+With `columns`, a field you didn't request decodes to `null` (no error); a **required** field
+you *did* request (or didn't project away) that the API omits raises a `ParseError` — so a
+`null` never silently hides a dropped field.
 
 ## Configuration
 
@@ -147,9 +175,11 @@ Values are resolved through this cascade (highest priority first):
 | `MARKETDATA_USE_HUMAN_READABLE` | Human-readable field names | `false` |
 | `MARKETDATA_MODE` | Data mode (live/cached/delayed) | `live` |
 
-Endpoint-shape variables (`OUTPUT_FORMAT`, `DATE_FORMAT`, `COLUMNS`,
-`ADD_HEADERS`, `USE_HUMAN_READABLE`, `MODE`) are reserved here and will be
-honored when the request layer lands.
+The corresponding per-call setters — `dateFormat`/`limit`/`offset`/`mode`/`columns` on the
+resource, plus `human`/`headers` and `asCsv()` on the CSV facet — are exposed on `options`
+today (and on every resource as it lands). Auto-applying these env-var values as request
+*defaults* (`DATE_FORMAT`, `COLUMNS`, `ADD_HEADERS`, `USE_HUMAN_READABLE`, `MODE`,
+`OUTPUT_FORMAT`) is still reserved.
 
 ### Demo mode
 
@@ -213,13 +243,15 @@ isn't an exact match is rejected before any request is made.
 ## Package layout
 
 ```
-com.marketdata.sdk             # MarketDataClient, RateLimits, and the resource
-                               # façades (UtilitiesResource, OptionsResource) —
-                               # public; Configuration, EnvVars, Tokens, Version
-                               # are package-private and not part of the API
-com.marketdata.sdk.options     # Options request builders + response records
+com.marketdata.sdk             # MarketDataClient, RateLimits, the resource façades
+                               # (UtilitiesResource, OptionsResource, OptionsCsvResource),
+                               # and MarketDataResponse<T> + the named response types
+                               # (OptionsChainResponse, CsvResponse, …) — public;
+                               # Configuration, EnvVars, Tokens, Version are
+                               # package-private and not part of the API
+com.marketdata.sdk.options     # Options request builders + row records
                                # (OptionsChainRequest, OptionQuote, sealed
-                               # ExpirationFilter / StrikeFilter, …)
+                               # ExpirationFilter / StrikeFilter, Greek, …)
 com.marketdata.sdk.exception   # Sealed MarketDataException hierarchy + ErrorContext
 ```
 

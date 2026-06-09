@@ -2,7 +2,14 @@
 
 ## Status
 
-Proposed.
+**Accepted** (2026-06-08). Implemented on branch `10_options_resource`.
+
+Decided as **Option A** (request object + builder) — the `Consumer<Builder>` overload (Option
+B) was *not* adopted. Two pieces the original Context flagged but didn't resolve were settled
+here in the Decision below: the **§3 universal parameters** are a fluent resource-level config
+(not a request-object overload), and the **output/format axis** is a typed **resource facet**
+(not a parameter). The Context and Options-Considered sections are preserved as the decision
+rationale; the Decision/Consequences reflect what shipped.
 
 ## Context
 
@@ -226,48 +233,71 @@ structurally).
 
 ## Decision
 
-*Pending team ratification (status: Proposed).*
+**Option A — one immutable request object per endpoint** (`builder(required…)` /
+`of(required…)`), feeding both the sync and async surfaces. **No `String` convenience
+overloads and no `Consumer<Builder>` overload (Option B):** the team chose the minimal,
+uniform surface — the "counter-recommendation" the analysis above weighed — over the lambda
+front door. B stays purely additive, so it can be added later if call-site ceremony bites; it
+was not worth the overload-count cost up front. The sealed mutually-exclusive filter groups
+(`ExpirationFilter`, `StrikeFilter`) are retained unchanged.
 
-Recommended: **Option A + Option B.** Each endpoint keeps a single
-immutable request object (`builder(required…)` / `of(required…)`) as the
-canonical form feeding both sync and async surfaces, and additionally
-exposes a `foo(String required, Consumer<FooRequest.Builder>)` overload
-(plus a bare `foo(String required)` for the no-optional case) as the
-ergonomic front door. The sealed mutually-exclusive filter groups
-(`ExpirationFilter`, `StrikeFilter`) are retained unchanged. Universal
-parameters (§3, deferred to `stocks`) retrofit as a second request-object
-overload, not as additional builder state.
+Two things resolved **differently from the original recommendation**, because a request-object
+overload turned out to be the wrong axis for them:
 
-Options C (transport-bound fluent terminal) and D (flat params object)
-were considered and are not recommended — C because it sacrifices the
-decoupled request object, introduces an un-enforceable
-dangling-terminal footgun, amends ADR-006, and makes Java the cross-SDK
-call-shape outlier; D because it discards the compile-time
-mutual-exclusivity guarantee that is the Java SDK's one advantage over
-its siblings.
+- **Universal parameters are not a second request-object overload.** They are set fluently on
+  the **resource** — `client.options().dateFormat(…).mode(…).limit(…).offset(…).columns(…)`,
+  an immutable configured value carried across endpoints via `RequestConfig`. Type-preserving
+  params (`dateFormat`/`mode`/`limit`/`offset`/`columns`) sit on the typed resource; the
+  output-shaping `human`/`headers` live only on the CSV facet (they reshape the payload, so they
+  don't cohere with the typed decode).
+- **The output/format axis** — which a request-object parameter *cannot* express in a
+  statically-typed language (the return type would have to vary at runtime) — is selected via a
+  **typed resource facet** (`.asCsv()` → `CsvResponse`; `.asHtml()` built but not yet exposed),
+  not a parameter.
+
+Options C (transport-bound fluent terminal) and D (flat params object) were considered and
+rejected — C because it sacrifices the decoupled request object, introduces an un-enforceable
+dangling-terminal footgun, amends ADR-006, and makes Java the cross-SDK call-shape outlier; D
+because it discards the compile-time mutual-exclusivity guarantee that is the Java SDK's one
+advantage over its siblings.
+
+### Nullable response fields + Option A (the cost of `columns`)
+
+Exposing `columns` on the **typed** path forced a response-side decision. A projected response
+omits the columns you didn't ask for, so the typed model can't keep "always present" fields:
+**every response-row field is `@Nullable`** (boxed) — including structural ones like `strike`
+and `bid`, not just the legitimately-optional values (the option greeks / `iv`).
+
+To stop that from degrading into *silent* failures, the deserializer reads every column
+leniently but then enforces **Option A**: it cross-references the columns the consumer actually
+requested (threaded in via a parser attribute) and raises a `ParseError` if a **required**
+column that was requested — or wasn't projected away (no `columns` filter ⇒ all required
+columns are implicitly requested) — is missing from the response. The contract that buys:
+
+- a `null` a consumer sees means **only** "I projected it away with `columns`" or "a
+  legitimately-optional model value (greek/IV)";
+- it **never** means "the backend silently dropped a required field" — that is always a
+  `ParseError`.
+
+So the nullable fields do **not** weaken the strict-by-default decode; they just make
+projection representable. (Greek presence is additionally inspectable via
+`OptionQuote.presentGreeks()` / `greek(Greek)`.)
 
 ## Consequences
 
-Follow-on work implied by each option. The recommended option is marked.
+What actually shipped, and what was left out.
 
-- **A (request object only):** One signature per endpoint. Call sites
-  always name `FooRequest.builder(…).build()` (or `of(…)`). No lambda
-  overloads. The convention already shipped in the `options` PR.
-- **A + B (recommended):** Every endpoint additionally gets
-  `foo(String, Consumer<Builder>)` and `foo(String)` overloads
-  delegating to `foo(FooRequest)`. Applied uniformly across `options`
-  and every future resource. Docs name `foo(FooRequest)` as canonical
-  (reuse / conditional construction) and the lambda overload as the
-  quick path. Each new endpoint adds ~6 lines of delegating overloads.
-- **C (fluent terminal):** All six endpoints return transport-bound
-  builders with `fetch()` / `fetchAsync()` terminals; ADR-006 amended so
-  the terminal pair is the documented endpoint surface; ErrorProne
-  `@CheckReturnValue` added on builder setters to mitigate the
-  dangling-terminal footgun; the inert request object is dropped or
-  maintained as a second surface.
-- **D (flat params object):** Sealed `ExpirationFilter` / `StrikeFilter`
-  collapse into independent optional fields on a mutable params object;
-  mutual-exclusivity moves to `build()`/wire-time validation.
+- **A (shipped):** One signature per endpoint; call sites always name
+  `FooRequest.builder(…).build()` (or `of(…)`); no lambda overloads. Shipped for `options` and
+  is the template every future resource (`stocks`/`funds`/`markets`) copies.
+- **B (not adopted):** the `foo(String, Consumer<Builder>)` / `foo(String)` overloads were
+  considered and deliberately left out — purely additive, so revisitable without a breaking
+  change if call-site ceremony proves annoying in practice.
+- **Universal parameters:** fluent setters on the **resource** (`RequestConfig`), applied
+  across endpoints — *not* the "second request-object overload" the recommendation originally
+  envisioned. Implemented for `options`; `human`/`headers` and the format facet land on the CSV
+  view.
+- **C (fluent terminal) / D (flat params object):** not adopted (rejected as above).
 
 ## References
 

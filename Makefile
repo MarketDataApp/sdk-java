@@ -80,13 +80,17 @@ demo-retry: ## Retry, Retry-After, preflight (needs mock-server)
 	cd $(CONSUMER_DIR) && ./gradlew runRetry
 
 .PHONY: demo-response
-demo-response: ## Response<T> surface features (needs mock-server)
+demo-response: ## MarketDataResponse surface features (needs mock-server)
 	cd $(CONSUMER_DIR) && ./gradlew runResponse
 
 .PHONY: demo-concurrency
 demo-concurrency: ## 50-permit semaphore (needs mock-server)
 	cd $(CONSUMER_DIR) && ./gradlew runConcurrency
 
+.PHONY: demo-options
+demo-options: ## Full options surface: every endpoint + all params, CSV facet, columns, Option A (needs mock-server)
+	cd $(CONSUMER_DIR) && ./gradlew runOptions
+
 .PHONY: demos-all
 demos-all: ## Run every mock-server-based demo back-to-back (needs mock-server)
-	cd $(CONSUMER_DIR) && ./gradlew runDemoConfig runExceptions runRetry runResponse runConcurrency
+	cd $(CONSUMER_DIR) && ./gradlew runDemoConfig runExceptions runRetry runResponse runConcurrency runOptions
