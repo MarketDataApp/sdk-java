@@ -92,6 +92,39 @@ final class MarketDataDates {
   }
 
   /**
+   * Parse a cell that may carry <em>either</em> a date-only or a full-timestamp string (plus the
+   * numeric {@code unix}/{@code spreadsheet} encodings) to a {@link ZonedDateTime} in {@link
+   * #MARKET_ZONE}. Several stock endpoints flip between the two textual shapes under {@code
+   * dateformat=timestamp}: a daily candle's {@code t} (and earnings/news date fields) come back
+   * date-only ({@code "2026-06-03"}), while an intraday candle's {@code t} carries the full {@code
+   * "yyyy-MM-dd HH:mm:ss XXX"}. This helper tolerates both — date-only strings are lifted to a
+   * market-zone midnight — so a single model field decodes uniformly regardless of resolution.
+   */
+  static ZonedDateTime parseDateOrTimestampField(
+      @org.jspecify.annotations.Nullable JsonParser p, JsonNode node, String fieldName)
+      throws JsonMappingException {
+    if (node == null || node.isNull()) {
+      throw new JsonMappingException(p, "missing field: " + fieldName);
+    }
+    if (node.isTextual()) {
+      String text = node.asText();
+      try {
+        return ZonedDateTime.parse(text, ZONED_TIMESTAMP_FORMAT).withZoneSameInstant(MARKET_ZONE);
+      } catch (DateTimeParseException fullTimestamp) {
+        try {
+          return LocalDate.parse(text).atStartOfDay(MARKET_ZONE);
+        } catch (DateTimeParseException dateOnly) {
+          throw new JsonMappingException(
+              p, "non-conforming date/timestamp string for field " + fieldName + ": " + text);
+        }
+      }
+    }
+    // Numeric encodings (unix epoch / spreadsheet serial) are unambiguous — defer to the shared
+    // numeric path used by the pure-timestamp parser.
+    return parseTimestampField(p, node, fieldName);
+  }
+
+  /**
    * Parse a timestamp-field cell ({@code timestamp}, {@code unix}, or {@code spreadsheet}) to a
    * {@link ZonedDateTime} in {@link #MARKET_ZONE}. {@code timestamp} strings include time-of-day
    * and offset ({@code "yyyy-MM-dd HH:mm:ss XXX"}); numeric values are epoch seconds or fractional

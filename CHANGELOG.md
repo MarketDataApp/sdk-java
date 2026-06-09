@@ -26,17 +26,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   down the call stack.
 
 ### Added
+- **Stocks resource** (`client.stocks()`) — six endpoints, each in sync + async
+  form: `candles`, `quote` (single symbol), `quotes` and `prices` (multi-symbol,
+  batched into one request — one row per symbol, not a fan-out map like
+  `options.quotes`), `news`, and `earnings`. Every endpoint takes a Builder-based
+  per-endpoint request object. Candle resolution is a `StockResolution` value
+  type (`DAILY`, `minutes(15)`, `hours(1)`, …) rather than an enum, since the API
+  accepts an open-ended family of resolutions. Quote/price numeric fields are
+  nullable (the backend nulls them for a closed/illiquid market); the OHLC and
+  52-week columns are opt-in via `candle` / `week52`. `news` exposes the feed's
+  scalar `updated()` off the response (distinct from each article's
+  `publicationDate`); `earnings` tolerates the nullable fundamentals/report fields
+  on synthesized forward-quarter rows. Mixed date/timestamp wire shapes (a daily
+  candle's date-only `t` vs. an intraday full timestamp) decode uniformly. Carries
+  the same universal-parameter setters, `columns` projection (with the Option A
+  strict guarantee), and `asCsv()` facet as `options`.
 - **Options resource** (`client.options()`) — all six endpoints, each in sync +
   async form: `lookup`, `expirations`, `strikes`, `quote` (single contract),
-  `quotes` (multi-contract fan-out returning
-  `Map<String, Response<OptionsQuotes>>`), and `chain`. Every endpoint takes a
-  Builder-based per-endpoint request object (no `String` convenience overloads).
-  The `chain` request models its mutually-exclusive expiration and strike groups
-  as sealed types (`ExpirationFilter`, `StrikeFilter`) so the exclusivity is
-  compiler-enforced. Covers the `rho` greek (decoded as an optional, nullable
-  column — absent on some feeds), the `expiration=all` filter (the full chain
-  vs. the default front-month), and the `countback` historical-window parameter
-  (validated: positive, and mutually exclusive with `date`/`from`).
+  `quotes` (multi-contract fan-out returning a per-symbol
+  `Map<String, OptionsQuotesResponse>`), and `chain`. Every endpoint takes a
+  Builder-based per-endpoint request object (no `String` convenience overloads)
+  and returns a named typed response (`OptionsChainResponse`,
+  `OptionsLookupResponse`, …) implementing `MarketDataResponse<T>` — the payload
+  is reached via `values()`. The `chain` request models its mutually-exclusive
+  expiration and strike groups as sealed types (`ExpirationFilter`,
+  `StrikeFilter`) so the exclusivity is compiler-enforced. Covers the `rho` greek
+  (decoded as an optional, nullable column — absent on some feeds) plus the
+  `Greek` enum with `presentGreeks()` / `greek(Greek)` accessors, the
+  `expiration=all` filter (the full chain vs. the default front-month), and the
+  `countback` historical-window parameter (validated: positive, and mutually
+  exclusive with `date`/`from`). Universal parameters
+  (`dateFormat`/`mode`/`limit`/`offset`) and `columns` projection are set fluently
+  on the resource; a non-requested column decodes to `null`, while a required
+  column you *did* request that the API omits raises a `ParseError` (Option A).
+  The `asCsv()` facet returns CSV (`CsvResponse`) for every endpoint and adds the
+  output-shaping `human` / `headers` params.
 - Project scaffold per ADRs 001–007: Gradle Kotlin DSL build, JDK 17 toolchain,
   `integrationTest` source set, Spotless + JaCoCo, Vanniktech Maven Publish.
 - `MarketDataClient` skeleton with two public constructors — a no-arg one
@@ -53,7 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ServerError`, `NetworkError`, `ParseError`), each carrying support context
   (`requestId`, `requestUrl`, `statusCode`, `timestamp`) and a
   `getSupportInfo()` helper.
-- `RateLimits` record exposed via `MarketDataClient.getRateLimits()`.
+- `RateLimitSnapshot` record exposed via `MarketDataClient.getRateLimits()`.
 - JSpecify `@NullMarked` on every public package; JSpecify on `compileOnlyApi`
   so consumers get the annotations at compile time without a runtime dep.
 - Token redaction utility (`Tokens`, package-private in the SDK root) for

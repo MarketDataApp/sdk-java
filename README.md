@@ -1,7 +1,7 @@
 # Market Data Java SDK
 
 Java SDK for the [Market Data API](https://www.marketdata.app/). **Pre-release**
-— the `utilities` and `options` resources are implemented; `stocks`, `funds`,
+— the `utilities`, `options`, and `stocks` resources are implemented; `funds`
 and `markets` are forthcoming. The build, package layout, configuration cascade,
 exception taxonomy, and Kotlin-interop foundations are in place.
 
@@ -149,6 +149,90 @@ With `columns`, a field you didn't request decodes to `null` (no error); a **req
 you *did* request (or didn't project away) that the API omits raises a `ParseError` — so a
 `null` never silently hides a dropped field.
 
+## Stocks
+
+Reached via `client.stocks()`. Same conventions as `options`: every endpoint has a
+synchronous method and an `…Async` variant, takes a Builder-based request object, and returns
+a typed `MarketDataResponse` (payload via `values()`). The universal-parameter setters
+(`dateFormat`/`mode`/`limit`/`offset`/`columns`) and the `asCsv()` facet work identically.
+
+| Method | Purpose |
+|--------|---------|
+| `candles` | Historical OHLCV candles for a symbol at a given `StockResolution` |
+| `quote` | Real-time quote for a single symbol |
+| `quotes` | Quotes for many symbols — batched in **one** request, one row per symbol |
+| `prices` | Lightweight price snapshot (mid/change) for many symbols |
+| `news` | Recent news articles for a symbol |
+| `earnings` | EPS history and the forward earnings calendar |
+
+> Unlike `options.quotes` (which fans out one request per contract and returns a per-symbol
+> map), the stocks backend accepts a comma list in a single request — so `stocks.quotes` and
+> `stocks.prices` return a single response with one row per symbol.
+
+### Candles
+
+`StockResolution` is a value type, not an enum — the API accepts an open-ended family of
+resolutions, so use the factories (`DAILY`, `minutes(15)`, `hours(1)`, `days(2)`, …):
+
+#### Java
+
+```java
+try (var client = new MarketDataClient()) {
+    var resp = client.stocks().candles(
+        StockCandlesRequest.builder(StockResolution.DAILY, "AAPL")
+            .from(LocalDate.now().minusMonths(1))
+            .to(LocalDate.now())
+            .build());
+
+    for (StockCandle c : resp.values()) {              // values() is a List<StockCandle>
+        System.out.printf("%s  O=%s H=%s L=%s C=%s V=%s%n",
+            c.time(), c.open(), c.high(), c.low(), c.close(), c.volume());
+    }
+}
+```
+
+#### Kotlin
+
+```kotlin
+MarketDataClient().use { client ->
+    val resp = client.stocks().candles(
+        StockCandlesRequest.builder(StockResolution.DAILY, "AAPL")
+            .from(LocalDate.now().minusMonths(1))
+            .to(LocalDate.now())
+            .build()
+    )
+    resp.values().forEach { c ->
+        println("${c.time}  O=${c.open} H=${c.high} L=${c.low} C=${c.close} V=${c.volume}")
+    }
+}
+```
+
+### Quotes, prices, news, earnings
+
+```java
+// Multi-symbol quote — one batched request, one row per symbol:
+StockQuotesResponse q = client.stocks().quotes(
+    StockQuotesRequest.builder("AAPL", "MSFT")
+        .candle(true)    // opt-in OHLC columns
+        .week52(true)    // opt-in 52-week high/low columns
+        .build());
+
+// News — articles plus the feed's latest-update time as a scalar off the response:
+StockNewsResponse news = client.stocks().news(StockNewsRequest.of("AAPL"));
+news.values().forEach(a -> System.out.println(a.publicationDate() + "  " + a.headline()));
+System.out.println("feed updated: " + news.updated());
+
+// Earnings — fundamentals and report fields are nullable on forward-quarter rows:
+client.stocks().earnings(StockEarningsRequest.of("AAPL"))
+    .values()
+    .forEach(e -> System.out.println("FY" + e.fiscalYear() + " Q" + e.fiscalQuarter()
+        + " reportedEPS=" + e.reportedEPS()));
+```
+
+Stock quote/price numeric fields are `@Nullable` (the backend nulls them for a closed or
+illiquid market), and the OHLC / 52-week columns appear only when opted in via `candle` /
+`week52`.
+
 ## Configuration
 
 Values are resolved through this cascade (highest priority first):
@@ -177,7 +261,7 @@ Values are resolved through this cascade (highest priority first):
 
 The corresponding per-call setters — `dateFormat`/`limit`/`offset`/`mode`/`columns` on the
 resource, plus `human`/`headers` and `asCsv()` on the CSV facet — are exposed on `options`
-today (and on every resource as it lands). Auto-applying these env-var values as request
+and `stocks` today (and on every resource as it lands). Auto-applying these env-var values as request
 *defaults* (`DATE_FORMAT`, `COLUMNS`, `ADD_HEADERS`, `USE_HUMAN_READABLE`, `MODE`,
 `OUTPUT_FORMAT`) is still reserved.
 
@@ -244,14 +328,18 @@ isn't an exact match is rejected before any request is made.
 
 ```
 com.marketdata.sdk             # MarketDataClient, RateLimits, the resource façades
-                               # (UtilitiesResource, OptionsResource, OptionsCsvResource),
-                               # and MarketDataResponse<T> + the named response types
-                               # (OptionsChainResponse, CsvResponse, …) — public;
-                               # Configuration, EnvVars, Tokens, Version are
+                               # (UtilitiesResource, OptionsResource, StocksResource,
+                               # OptionsCsvResource, StocksCsvResource), and
+                               # MarketDataResponse<T> + the named response types
+                               # (OptionsChainResponse, StockCandlesResponse, CsvResponse, …)
+                               # — public; Configuration, EnvVars, Tokens, Version are
                                # package-private and not part of the API
 com.marketdata.sdk.options     # Options request builders + row records
                                # (OptionsChainRequest, OptionQuote, sealed
                                # ExpirationFilter / StrikeFilter, Greek, …)
+com.marketdata.sdk.stocks      # Stocks request builders + row records
+                               # (StockCandlesRequest, StockCandle, StockQuote,
+                               # StockEarning, StockResolution, …)
 com.marketdata.sdk.exception   # Sealed MarketDataException hierarchy + ErrorContext
 ```
 
