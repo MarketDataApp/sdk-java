@@ -4,6 +4,8 @@ import com.marketdata.consumer.shared.Console;
 import com.marketdata.sdk.MarketDataClient;
 import com.marketdata.sdk.exception.AuthenticationError;
 import com.marketdata.sdk.exception.MarketDataException;
+import com.marketdata.sdk.markets.MarketStatus;
+import com.marketdata.sdk.markets.MarketStatusRequest;
 import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.ExpirationStrikes;
 import com.marketdata.sdk.options.OptionQuote;
@@ -80,8 +82,8 @@ public final class QuickstartApp {
       utilitiesExamples(client);
       optionsExamples(client);
       stocksExamples(client);
+      marketsExamples(client);
       // fundsExamples(client);     // ← add when client.funds() lands
-      // marketsExamples(client);   // ← add when client.markets() lands
     }
   }
 
@@ -391,6 +393,40 @@ public final class QuickstartApp {
       Console.info("401 — needs a token.");
     } catch (MarketDataException e) {
       Console.fail("earnings() failed: " + e.getExceptionType() + " — " + e.getMessage());
+    }
+  }
+
+  // ---------- markets ----------
+
+  /**
+   * Markets expose a single endpoint: {@code status} — the exchange open/closed calendar (was/is
+   * the market open on these days?). Distinct from {@code utilities().status()}, which reports the
+   * API's own per-service health. Entry point is {@code client.markets()}; every parameter is
+   * optional (a bare request returns today's status, US calendar).
+   */
+  private static void marketsExamples(MarketDataClient client) {
+    Console.header("markets — status (the exchange open/closed calendar)");
+
+    Console.step("client.markets().status(...) — open/closed for the last week");
+    try {
+      var r =
+          client
+              .markets()
+              .status(
+                  MarketStatusRequest.builder()
+                      .from(LocalDate.now().minusDays(7))
+                      .to(LocalDate.now())
+                      .build());
+      long open = r.values().stream().filter(MarketStatus::isOpen).count();
+      Console.ok(r.values().size() + " days fetched; " + open + " open");
+      if (!r.values().isEmpty()) {
+        MarketStatus today = r.values().get(r.values().size() - 1);
+        Console.ok("latest: " + today.date().toLocalDate() + " → " + today.status());
+      }
+    } catch (AuthenticationError e) {
+      Console.info("401 — set MARKETDATA_TOKEN (env or .env) to exercise the markets endpoint.");
+    } catch (MarketDataException e) {
+      Console.fail("status() failed: " + e.getExceptionType() + " — " + e.getMessage());
     }
   }
 
