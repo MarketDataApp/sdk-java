@@ -355,6 +355,50 @@ class StocksResourceTest {
     assertThat(resp.updated()).isNull();
   }
 
+  @Test
+  void newsRejectsColumnsProjectionOnTypedPath() {
+    // StockNewsArticle is non-null by contract, so a typed columns projection can't be honored
+    // without lying. It must fail fast and clearly, before any request is dispatched (Option B).
+    CapturingClient client = okWith(NEWS_BODY);
+    StocksResource stocks = resourceWith(client);
+
+    assertThatThrownBy(() -> stocks.columns("headline").news(StockNewsRequest.of("AAPL")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("news")
+        .hasMessageContaining("asCsv");
+    // Fail-fast: no request reached the wire.
+    assertThat(client.captured).isEmpty();
+  }
+
+  @Test
+  void newsColumnsRejectionIsAFailedFutureNotASyncThrow() {
+    // ADR-006: the async surface signals errors through the future. The guard must NOT throw at the
+    // call site (which would bypass .exceptionally/.handle) — newsAsync(...) returns normally and
+    // the returned future completes exceptionally instead.
+    CapturingClient client = okWith(NEWS_BODY);
+    StocksResource stocks = resourceWith(client);
+
+    var future = stocks.columns("headline").newsAsync(StockNewsRequest.of("AAPL"));
+
+    assertThat(future).isCompletedExceptionally();
+    assertThatThrownBy(future::join)
+        .isInstanceOf(java.util.concurrent.CompletionException.class)
+        .hasCauseInstanceOf(IllegalArgumentException.class);
+    assertThat(client.captured).isEmpty();
+  }
+
+  @Test
+  void newsColumnsProjectionStillWorksOnCsvFacet() {
+    // The CSV facet returns raw text — no typed contract to break — so columns stays supported
+    // there.
+    CapturingClient client = okWith("a,b\n1,2");
+    StocksCsvResource csv = resourceWith(client).asCsv();
+
+    assertThat(csv.columns("headline").news(StockNewsRequest.of("AAPL")).csv()).contains("a,b");
+    String url = URLDecoder.decode(client.captured.get(0).uri().toString(), StandardCharsets.UTF_8);
+    assertThat(url).contains("columns=headline");
+  }
+
   // ---------- earnings ----------
 
   @Test
