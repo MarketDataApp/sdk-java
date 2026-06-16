@@ -22,6 +22,7 @@ public final class MarketDataClient implements AutoCloseable {
   private final HttpTransport transport;
   private final UtilitiesResource utilities;
   private final OptionsResource options;
+  private final StocksResource stocks;
 
   public MarketDataClient() {
     this(null, null, null, true);
@@ -108,6 +109,7 @@ public final class MarketDataClient implements AutoCloseable {
       JsonResponseParser parser = new JsonResponseParser();
       this.utilities = new UtilitiesResource(transport, parser);
       this.options = new OptionsResource(transport, parser);
+      this.stocks = new StocksResource(transport, parser);
       cacheRef.set(
           new StatusCache(
               () -> utilities.statusAsync().thenApply(r -> new ApiStatus(r.values())),
@@ -152,6 +154,14 @@ public final class MarketDataClient implements AutoCloseable {
    */
   public OptionsResource options() {
     return options;
+  }
+
+  /**
+   * Stocks endpoints: {@code candles}, {@code quote}, {@code quotes}, {@code prices}, {@code news},
+   * {@code earnings}.
+   */
+  public StocksResource stocks() {
+    return stocks;
   }
 
   /**

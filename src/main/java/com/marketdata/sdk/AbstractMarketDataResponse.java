@@ -29,6 +29,7 @@ abstract class AbstractMarketDataResponse<T> implements MarketDataResponse<T> {
   private final int statusCode;
   private final @Nullable String requestId;
   private final URI requestUrl;
+  private final @Nullable RateLimitSnapshot rateLimit;
 
   AbstractMarketDataResponse(T values, HttpResponseEnvelope envelope, Format format) {
     this.values = Objects.requireNonNull(values, "values");
@@ -37,6 +38,9 @@ abstract class AbstractMarketDataResponse<T> implements MarketDataResponse<T> {
     this.statusCode = envelope.statusCode();
     this.requestId = envelope.requestId();
     this.requestUrl = envelope.url();
+    // §8.2: attach this response's own rate-limit snapshot (null when the four headers weren't all
+    // present, e.g. a CDN-served error). Request-scoped, distinct from the client-level latest.
+    this.rateLimit = RateLimitHeaders.parse(envelope.headers());
   }
 
   @Override
@@ -57,6 +61,11 @@ abstract class AbstractMarketDataResponse<T> implements MarketDataResponse<T> {
   @Override
   public @Nullable String requestId() {
     return requestId;
+  }
+
+  @Override
+  public @Nullable RateLimitSnapshot rateLimit() {
+    return rateLimit;
   }
 
   @Override

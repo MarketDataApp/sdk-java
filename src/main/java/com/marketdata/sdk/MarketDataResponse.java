@@ -34,6 +34,14 @@ public interface MarketDataResponse<T> {
   /** Server-provided request id (Cloudflare {@code cf-ray}), or {@code null} when absent. */
   @Nullable String requestId();
 
+  /**
+   * The rate-limit snapshot parsed from <em>this</em> response's {@code x-api-ratelimit-*} headers
+   * (SDK requirements §8.2), or {@code null} when the response did not carry the full header set.
+   * Request-scoped: distinct from {@link MarketDataClient#getRateLimits()}, which returns the
+   * latest snapshot seen across all requests on the client.
+   */
+  @Nullable RateLimitSnapshot rateLimit();
+
   /** Absolute URL the response came from. */
   URI requestUrl();
 

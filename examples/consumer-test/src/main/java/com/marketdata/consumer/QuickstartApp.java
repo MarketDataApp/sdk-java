@@ -21,6 +21,15 @@ import com.marketdata.sdk.options.OptionsStrikes;
 import com.marketdata.sdk.options.OptionsStrikesRequest;
 import com.marketdata.sdk.options.StrikeFilter;
 import com.marketdata.sdk.options.StrikeRange;
+import com.marketdata.sdk.stocks.StockCandlesRequest;
+import com.marketdata.sdk.stocks.StockEarning;
+import com.marketdata.sdk.stocks.StockEarningsRequest;
+import com.marketdata.sdk.stocks.StockNewsRequest;
+import com.marketdata.sdk.stocks.StockPricesRequest;
+import com.marketdata.sdk.stocks.StockQuote;
+import com.marketdata.sdk.stocks.StockQuoteRequest;
+import com.marketdata.sdk.stocks.StockQuotesRequest;
+import com.marketdata.sdk.stocks.StockResolution;
 import com.marketdata.sdk.utilities.ApiStatus;
 import com.marketdata.sdk.utilities.RequestHeaders;
 import com.marketdata.sdk.utilities.ServiceStatus;
@@ -70,7 +79,7 @@ public final class QuickstartApp {
       }
       utilitiesExamples(client);
       optionsExamples(client);
-      // stocksExamples(client);    // ← add when client.stocks() lands
+      stocksExamples(client);
       // fundsExamples(client);     // ← add when client.funds() lands
       // marketsExamples(client);   // ← add when client.markets() lands
     }
@@ -275,19 +284,115 @@ public final class QuickstartApp {
     }
   }
 
-  // ---------- stocks (TODO: enable when client.stocks() lands) ----------
-  //
-  // private static void stocksExamples(MarketDataClient client) {
-  //   Console.header("stocks — quotes, candles, news");
-  //
-  //   Console.step("client.stocks().quote(\"AAPL\") — latest quote");
-  //   var q = client.stocks().quote("AAPL");
-  //   Console.ok("AAPL last=" + q.values().last() + " (asOf " + q.values().asOf() + ")");
-  //
-  //   Console.step("client.stocks().candles(\"AAPL\", Resolution.D, from, to) — historical OHLCV");
-  //   var c = client.stocks().candles("AAPL", Resolution.D, ...);
-  //   Console.ok(c.values().rows().size() + " daily candles fetched");
-  // }
+  // ---------- stocks ----------
+
+  /**
+   * One short snippet per stocks endpoint, in the order a consumer typically reaches for them:
+   * candles → quote/quotes → prices → news → earnings. Entry point is {@code client.stocks()}; every
+   * endpoint takes a Builder-based request and returns a typed {@code MarketDataResponse} (payload
+   * via {@code .values()}). Stock data needs entitlements, so each step catches {@link
+   * AuthenticationError} separately and prints a hint — the tour stays runnable in demo mode.
+   */
+  private static void stocksExamples(MarketDataClient client) {
+    Console.header("stocks — candles, quote, quotes, prices, news, earnings");
+
+    // 1) candles — historical OHLCV. Resolution is a value type (StockResolution.DAILY, .hours(1),
+    //    .minutes(15), ...); the window is from/to (or date, or to+countback).
+    Console.step("client.stocks().candles(...) — daily OHLCV for the last month");
+    try {
+      var r =
+          client
+              .stocks()
+              .candles(
+                  StockCandlesRequest.builder(StockResolution.DAILY, "AAPL")
+                      .from(LocalDate.now().minusMonths(1))
+                      .to(LocalDate.now())
+                      .build());
+      Console.ok(r.values().size() + " daily candles fetched");
+      // §8.2: each response carries its own rate-limit snapshot (request-scoped).
+      if (r.rateLimit() != null) {
+        Console.info(
+            "rate limit (from this response): "
+                + r.rateLimit().remaining()
+                + "/"
+                + r.rateLimit().limit()
+                + " remaining");
+      }
+    } catch (AuthenticationError e) {
+      Console.info("401 — set MARKETDATA_TOKEN (env or .env) to exercise the stocks endpoints.");
+    } catch (MarketDataException e) {
+      Console.fail("candles() failed: " + e.getExceptionType() + " — " + e.getMessage());
+    }
+
+    // 2) quote — single symbol. candle(true)/week52(true) add the opt-in OHLC / 52-week columns.
+    Console.step("client.stocks().quote(\"AAPL\") — latest quote");
+    try {
+      var r = client.stocks().quote(StockQuoteRequest.of("AAPL"));
+      if (r.values().isEmpty()) {
+        Console.ok("no quote returned");
+      } else {
+        StockQuote q = r.values().get(0);
+        Console.ok(q.symbol() + " last=" + q.last() + " bid/ask=" + q.bid() + "/" + q.ask());
+      }
+    } catch (AuthenticationError e) {
+      Console.info("401 — needs a token.");
+    } catch (MarketDataException e) {
+      Console.fail("quote() failed: " + e.getExceptionType() + " — " + e.getMessage());
+    }
+
+    // 3) quotes — multiple symbols in ONE request (the stocks backend batches a comma list), so the
+    //    result is a single response with one row per symbol (NOT a per-symbol map like options).
+    Console.step("client.stocks().quotes(\"AAPL\", \"MSFT\") — multi-symbol batch (single request)");
+    try {
+      var r = client.stocks().quotes(StockQuotesRequest.builder("AAPL", "MSFT").build());
+      Console.ok(r.values().size() + " quote rows in one response");
+    } catch (AuthenticationError e) {
+      Console.info("401 — needs a token.");
+    } catch (MarketDataException e) {
+      Console.fail("quotes() failed: " + e.getExceptionType() + " — " + e.getMessage());
+    }
+
+    // 4) prices — a lighter snapshot (mid/change/updated) for several symbols, also batched.
+    Console.step("client.stocks().prices(\"AAPL\", \"MSFT\") — light price snapshot");
+    try {
+      var r = client.stocks().prices(StockPricesRequest.of("AAPL", "MSFT"));
+      Console.ok(r.values().size() + " prices fetched");
+    } catch (AuthenticationError e) {
+      Console.info("401 — needs a token.");
+    } catch (MarketDataException e) {
+      Console.fail("prices() failed: " + e.getExceptionType() + " — " + e.getMessage());
+    }
+
+    // 5) news — recent articles. The feed's latest-update time is a scalar off the response
+    //    (response.updated()), distinct from each article's publicationDate.
+    Console.step("client.stocks().news(\"AAPL\") — recent articles + scalar updated()");
+    try {
+      var r = client.stocks().news(StockNewsRequest.of("AAPL"));
+      Console.ok(r.values().size() + " articles; feed updated " + r.updated());
+    } catch (AuthenticationError e) {
+      Console.info("401 — needs a token.");
+    } catch (MarketDataException e) {
+      Console.fail("news() failed: " + e.getExceptionType() + " — " + e.getMessage());
+    }
+
+    // 6) earnings — history + forward calendar. Fundamentals/report fields are nullable on
+    //    synthesized forward-quarter rows; they decode to null without error.
+    Console.step("client.stocks().earnings(\"AAPL\") — EPS history (nullable forward fields)");
+    try {
+      var r = client.stocks().earnings(StockEarningsRequest.of("AAPL"));
+      Console.ok(r.values().size() + " earnings rows");
+      if (!r.values().isEmpty()) {
+        StockEarning e = r.values().get(r.values().size() - 1);
+        Console.ok(
+            "latest: FY" + e.fiscalYear() + " Q" + e.fiscalQuarter() + " reportedEPS="
+                + e.reportedEPS());
+      }
+    } catch (AuthenticationError e) {
+      Console.info("401 — needs a token.");
+    } catch (MarketDataException e) {
+      Console.fail("earnings() failed: " + e.getExceptionType() + " — " + e.getMessage());
+    }
+  }
 
   // ---------- helpers ----------
 
