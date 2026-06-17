@@ -19,7 +19,7 @@ import java.util.List;
  * <ul>
  *   <li>the single endpoint ({@code candles}) with its full parameter surface — universal params
  *       (dateFormat/mode/limit/offset) + the three window shapes ({@code from}/{@code to}, {@code
- *       date}, {@code to}+{@code countback}) and the adjustment/exchange params;
+ *       date}, {@code to}+{@code countback});
  *   <li>what funds do NOT have: no volume column (NAV series), no intraday resolutions (the API
  *       rejects them), and therefore no §12 auto-chunking — a multi-decade daily range is one
  *       request;
@@ -66,7 +66,7 @@ public final class FundsApp {
   private static void candlesWithParams(MockServerControl mock, MarketDataClient client) {
     Console.header("funds.candles — the parameter surface");
 
-    // from/to window + adjustment/exchange params + universal params, set fluently.
+    // from/to window + universal params, set fluently.
     Console.step("candles(...) — daily OHLC + universal params (dateFormat/mode/limit)");
     mock.reset();
     mock.script(Step.of(200, CANDLES));
@@ -80,8 +80,6 @@ public final class FundsApp {
                 FundCandlesRequest.builder(FundResolution.DAILY, "VFINX") // required: resolution + symbol
                     .from(LocalDate.of(2025, 1, 1))
                     .to(LocalDate.of(2025, 1, 31))
-                    .adjustSplits(true)
-                    .adjustDividends(true)
                     .build());
     List<FundCandle> bars = candles.values(); // List<FundCandle>
     Console.ok("candles.values() → " + bars.size() + " bars; iterating (note: no volume column):");

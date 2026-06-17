@@ -79,10 +79,6 @@ class FundsResourceTest {
             FundCandlesRequest.builder(FundResolution.WEEKLY, "VFINX")
                 .from(LocalDate.of(2025, Month.JANUARY, 1))
                 .to(LocalDate.of(2025, Month.JANUARY, 31))
-                .exchange("XNAS")
-                .country("US")
-                .adjustSplits(true)
-                .adjustDividends(false)
                 .build())
         .join();
 
@@ -90,11 +86,7 @@ class FundsResourceTest {
     assertThat(url)
         .contains("/v1/funds/candles/W/VFINX/")
         .contains("from=2025-01-01")
-        .contains("to=2025-01-31")
-        .contains("exchange=XNAS")
-        .contains("country=US")
-        .contains("adjustsplits=true")
-        .contains("adjustdividends=false");
+        .contains("to=2025-01-31");
   }
 
   @Test

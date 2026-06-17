@@ -84,7 +84,7 @@ These are the load-bearing review points — each is a *contract* fact, verified
 3. **No §12 auto-chunking.** The ~one-year span cap that chunking works around only applies to intraday candle requests. A multi-decade daily funds request is **one** HTTP request, on both the typed resource and the CSV facet (which is why `FundsCsvResource` has no `mergeCsvBodies` analogue). Test: `candlesLongDailyRangeIsASingleRequest`.
 4. **No `extended` parameter.** Extended-hours sessions only exist intraday; exposing the flag would be dead surface. (The backend's OpenAPI schema lists it because funds reuse the stock-candles schema helper, but it can never have an effect.)
 
-Python-SDK parity note: `sdk-py` exposes `symbol/resolution/from/to/countback` only. This PR additionally exposes `date`, `exchange`, `country`, `adjustsplits`, `adjustdividends` — all accepted by the funds endpoint (shared candles serializer/handler) and all meaningful for daily-and-up fund series (CRSP split/dividend adjustment very much applies to funds).
+Python-SDK parity note: `sdk-py` exposes `symbol/resolution/from/to/countback` only. This PR additionally exposes `date` (a window shape the backend honors). It does **not** expose `exchange`, `country`, `adjustsplits`, `adjustdividends`: although the funds OpenAPI schema declares them (it reuses the shared candles serializer), the funds handler ignores `exchange`/`country` entirely and `adjustdividends` is commented out — only `adjustsplits` is read, and `sdk-py` does not surface it either, so all four were dropped for cross-language parity.
 
 ---
 
@@ -94,7 +94,7 @@ One spec builder, `FundsResource.candlesSpec` (package-private static, reused by
 
 | Endpoint | Path | Params |
 |---|---|---|
-| `candlesSpec` | `funds/candles/{resolution}/{symbol}` | `date`/`from`/`to`/`countback`, `exchange`, `country`, `adjustsplits`, `adjustdividends` |
+| `candlesSpec` | `funds/candles/{resolution}/{symbol}` | `date`/`from`/`to`/`countback` |
 
 What to verify:
 - Path segments encoded via `PathSegments.encode` (resolution token too); dates ISO-formatted (`2025-01-17`).

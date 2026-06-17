@@ -153,18 +153,6 @@ public final class FundsResource {
     if (r.countback() != null) {
       b.query("countback", r.countback());
     }
-    if (r.exchange() != null) {
-      b.query("exchange", r.exchange());
-    }
-    if (r.country() != null) {
-      b.query("country", r.country());
-    }
-    if (r.adjustSplits() != null) {
-      b.query("adjustsplits", r.adjustSplits());
-    }
-    if (r.adjustDividends() != null) {
-      b.query("adjustdividends", r.adjustDividends());
-    }
     return b;
   }
 

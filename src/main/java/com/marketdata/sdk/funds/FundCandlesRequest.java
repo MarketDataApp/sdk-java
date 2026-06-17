@@ -6,15 +6,15 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * Parameters for {@code GET /v1/funds/candles/{resolution}/{symbol}/}. The {@link FundResolution}
- * and the fund's ticker {@code symbol} are required; the rest bound the window and tune
- * adjustment/exchange resolution.
+ * and the fund's ticker {@code symbol} are required; the rest bound the window.
  *
  * <p>Window rules (enforced in {@link Builder#build()}): {@code date} selects a single trading day
  * and is incompatible with {@code from}/{@code to}/{@code countback}; {@code countback} pairs with
  * {@code to} (not {@code from}) and must be positive.
  *
  * <p>There is no {@code extended} parameter: extended-hours sessions only exist on intraday
- * candles, which the funds endpoint does not serve.
+ * candles, which the funds endpoint does not serve. The funds endpoint also does not honor {@code
+ * exchange}/{@code country}/{@code adjustsplits}/{@code adjustdividends}, so those are not exposed.
  */
 public final class FundCandlesRequest {
 
@@ -24,10 +24,6 @@ public final class FundCandlesRequest {
   private final @Nullable LocalDate from;
   private final @Nullable LocalDate to;
   private final @Nullable Integer countback;
-  private final @Nullable String exchange;
-  private final @Nullable String country;
-  private final @Nullable Boolean adjustSplits;
-  private final @Nullable Boolean adjustDividends;
 
   private FundCandlesRequest(Builder b) {
     this.resolution = b.resolution;
@@ -36,10 +32,6 @@ public final class FundCandlesRequest {
     this.from = b.from;
     this.to = b.to;
     this.countback = b.countback;
-    this.exchange = b.exchange;
-    this.country = b.country;
-    this.adjustSplits = b.adjustSplits;
-    this.adjustDividends = b.adjustDividends;
   }
 
   /** Shortcut for {@code builder(resolution, symbol).build()}. */
@@ -75,22 +67,6 @@ public final class FundCandlesRequest {
     return countback;
   }
 
-  public @Nullable String exchange() {
-    return exchange;
-  }
-
-  public @Nullable String country() {
-    return country;
-  }
-
-  public @Nullable Boolean adjustSplits() {
-    return adjustSplits;
-  }
-
-  public @Nullable Boolean adjustDividends() {
-    return adjustDividends;
-  }
-
   public static final class Builder {
     private final FundResolution resolution;
     private final String symbol;
@@ -98,10 +74,6 @@ public final class FundCandlesRequest {
     private @Nullable LocalDate from;
     private @Nullable LocalDate to;
     private @Nullable Integer countback;
-    private @Nullable String exchange;
-    private @Nullable String country;
-    private @Nullable Boolean adjustSplits;
-    private @Nullable Boolean adjustDividends;
 
     private Builder(FundResolution resolution, String symbol) {
       this.resolution = Objects.requireNonNull(resolution, "resolution");
@@ -131,30 +103,6 @@ public final class FundCandlesRequest {
     /** Fetch {@code countback} candles before {@code to}. Positive; pair with {@code to}. */
     public Builder countback(int countback) {
       this.countback = countback;
-      return this;
-    }
-
-    /** Disambiguate the exchange (acronym, MIC code, or two-digit Yahoo code). */
-    public Builder exchange(String exchange) {
-      this.exchange = Objects.requireNonNull(exchange, "exchange");
-      return this;
-    }
-
-    /** Disambiguate the exchange country (two-digit ISO 3166 code). */
-    public Builder country(String country) {
-      this.country = Objects.requireNonNull(country, "country");
-      return this;
-    }
-
-    /** Adjust for splits and reverse splits (daily default true). */
-    public Builder adjustSplits(boolean adjustSplits) {
-      this.adjustSplits = adjustSplits;
-      return this;
-    }
-
-    /** Adjust for dividends (daily default true). */
-    public Builder adjustDividends(boolean adjustDividends) {
-      this.adjustDividends = adjustDividends;
       return this;
     }
 
