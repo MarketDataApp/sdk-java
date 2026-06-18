@@ -26,14 +26,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   down the call stack.
 
 ### Added
+- **Markets resource** (`client.markets()`) — the single markets endpoint,
+  `status`, in sync + async form: the exchange open/closed calendar ("was/is
+  the market open on these days?"), distinct from `utilities().status()` (the
+  API's own service health). Takes a Builder-based `MarketStatusRequest` where
+  *every* parameter is optional — a bare `of()` returns today's status, US
+  calendar; window is `date` xor `from`/`to` xor `to`+`countback`, plus
+  `country` (two-digit ISO 3166; the backend serves US today and answers
+  `no_data` for others). Rows are `MarketStatus(date, status)` with derived
+  `isOpen()`/`isClosed()` predicates; a `status` cell comes back null for days
+  outside the backend's holiday-calendar coverage and decodes to null (the
+  Option A column guarantee still applies to the column itself). Universal
+  params (`dateFormat`/`mode`/`limit`/`offset`/`columns`) as configured
+  copies, CSV facet via `asCsv()` with the `human`/`headers` shaping params,
+  and the same nullable-fields + `columns` + Option A decoding contract as
+  stocks/options.
 - **Funds resource** (`client.funds()`) — the single funds endpoint, `candles`,
   in sync + async form, taking a Builder-based `FundCandlesRequest` (window:
-  `date` xor `from`/`to`/`countback`, plus `exchange`/`country`/`adjustsplits`/
-  `adjustdividends`). Fund candles are NAV series: OHLC only (no volume column),
-  daily-and-up resolutions only — `FundResolution` models `DAILY`/`WEEKLY`/
-  `MONTHLY`/`YEARLY` and `days/weeks/months/years(n)`, with no intraday
-  factories (the API rejects intraday tokens for funds) and therefore no §12
-  auto-chunking. Universal params (`dateFormat`/`mode`/`limit`/`offset`/
+  `date` xor `from`/`to`/`countback`). Fund candles are NAV series: OHLC only
+  (no volume column), daily-and-up resolutions only — `FundResolution` models
+  `DAILY`/`WEEKLY`/`MONTHLY`/`YEARLY` and `days/weeks/months/years(n)`, with no
+  intraday factories (the API rejects intraday tokens for funds) and therefore
+  no §12 auto-chunking. Universal params (`dateFormat`/`mode`/`limit`/`offset`/
   `columns`) as configured copies, CSV facet via `asCsv()` with the
   `human`/`headers` shaping params, and the same nullable-fields + `columns` +
   Option A decoding contract as stocks/options.

@@ -23,6 +23,7 @@ public final class MarketDataClient implements AutoCloseable {
   private final UtilitiesResource utilities;
   private final OptionsResource options;
   private final StocksResource stocks;
+  private final MarketsResource markets;
   private final FundsResource funds;
 
   public MarketDataClient() {
@@ -111,6 +112,7 @@ public final class MarketDataClient implements AutoCloseable {
       this.utilities = new UtilitiesResource(transport, parser);
       this.options = new OptionsResource(transport, parser);
       this.stocks = new StocksResource(transport, parser);
+      this.markets = new MarketsResource(transport, parser);
       this.funds = new FundsResource(transport, parser);
       cacheRef.set(
           new StatusCache(
@@ -169,6 +171,14 @@ public final class MarketDataClient implements AutoCloseable {
   /** Funds endpoints: {@code candles}. */
   public FundsResource funds() {
     return funds;
+  }
+
+  /**
+   * Markets endpoints: {@code status} (the exchange open/closed calendar — distinct from {@code
+   * utilities().status()}, the API's own service health).
+   */
+  public MarketsResource markets() {
+    return markets;
   }
 
   /**
