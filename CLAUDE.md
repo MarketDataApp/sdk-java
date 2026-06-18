@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-This repo contains a working Java SDK in active development on branch `clean-architecture-restart`. Gradle 9.0 (Kotlin DSL) build per ADR-003; ~48 main + ~28 test source files; full CI matrix per ADR-002. The transport, retry, rate-limit, status-cache, and exception layers are wired; the `utilities`, `options`, and `stocks` resource façades are implemented today — funds/markets resources are still to come (see "Deliberately deferred" below).
+This repo contains a working Java SDK in active development on branch `clean-architecture-restart`. Gradle 9.0 (Kotlin DSL) build per ADR-003; ~48 main + ~28 test source files; full CI matrix per ADR-002. The transport, retry, rate-limit, status-cache, and exception layers are wired; the `utilities`, `options`, `stocks`, and `funds` resource façades are implemented today — the markets resource is still to come (see "Deliberately deferred" below).
 
 Sibling repo: `../api/` is the backend (Python/Django). The Python SDK lives at `../../sdk-py/` (referenced from ADRs). The cross-language `sdk-requirements.md` is referenced as `../sdk-requirements.md` from inside `docs/`; it is canonical but not committed in this repo.
 
@@ -83,8 +83,8 @@ The Java SDK must also satisfy the canonical, cross-language [SDK Requirements](
   - Coverage ratchet lives in `codecov.yml`: project status with `target: auto, threshold: 5%` (cannot drop >5 pp vs base branch) plus a patch-coverage requirement of 70 % on new code. Requires a `CODECOV_TOKEN` repo secret — without it the upload step fails because workflows pass `fail_ci_if_error: true`.
 
 **Deliberately deferred (require the per-resource layer to land first):**
-- §1.2 resource groupings — `client.utilities()`, `client.options()`, and `client.stocks()` are wired today; `client.funds`, `client.markets` still to come.
-- §2 endpoint method coverage; §3 universal parameters; §11 wire-format decoding for the remaining resources (funds, markets). The plumbing (`ParallelArrays.zip` helper for the parallel-arrays shape, `JsonResponseParser`, the `MarketDataResponse<T>` named-response types) is in place — each new endpoint just declares its fields and row builder.
+- §1.2 resource groupings — `client.utilities()`, `client.options()`, `client.stocks()`, and `client.funds()` are wired today; `client.markets` still to come.
+- §2 endpoint method coverage; §3 universal parameters; §11 wire-format decoding for the remaining resource (markets). The plumbing (`ParallelArrays.zip` helper for the parallel-arrays shape, `JsonResponseParser`, the `MarketDataResponse<T>` named-response types) is in place — each new endpoint just declares its fields and row builder.
 - ~~§8 request-scoped rate-limit attachment~~ **DONE** — every `MarketDataResponse` now exposes `rateLimit()`, parsed from that response's own `x-api-ratelimit-*` headers (request-scoped), alongside the client-level `client.getRateLimits()`.
 - §13 100% coverage threshold via JaCoCo `violationRules`; deferred until the resource layer lands so the threshold meaningfully ratchets functional code, not just scaffolding.
 

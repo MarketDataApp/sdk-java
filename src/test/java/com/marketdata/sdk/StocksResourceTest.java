@@ -780,6 +780,18 @@ class StocksResourceTest {
   }
 
   @Test
+  void candlesRequestRejectsFromAfterTo() {
+    assertThatThrownBy(
+            () ->
+                StockCandlesRequest.builder(StockResolution.DAILY, "AAPL")
+                    .from(LocalDate.of(2025, Month.JANUARY, 31))
+                    .to(LocalDate.of(2025, Month.JANUARY, 1))
+                    .build())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("from must not be after to");
+  }
+
+  @Test
   void quotesRequestRequiresAtLeastOneSymbol() {
     assertThatThrownBy(() -> StockQuotesRequest.builder(""))
         .isInstanceOf(IllegalArgumentException.class)

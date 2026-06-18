@@ -39,7 +39,9 @@ val demoApps = mapOf(
   "runOptions" to ("com.marketdata.consumer.OptionsApp" to
     "Full options surface: every endpoint + all params, CSV facet, columns projection, Option A. Needs mock server."),
   "runStocks" to ("com.marketdata.consumer.StocksApp" to
-    "Full stocks surface: candles/quote/quotes/prices/news/earnings + all params, CSV facet, columns projection, Option A. Needs mock server.")
+    "Full stocks surface: candles/quote/quotes/prices/news/earnings + all params, CSV facet, columns projection, Option A. Needs mock server."),
+  "runFunds" to ("com.marketdata.consumer.FundsApp" to
+    "Full funds surface: candles + all params (no volume / no intraday / no chunking), CSV facet, columns projection, Option A. Needs mock server.")
 )
 
 demoApps.forEach { (taskName, app) ->

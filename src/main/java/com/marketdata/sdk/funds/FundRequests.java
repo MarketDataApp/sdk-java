@@ -1,19 +1,18 @@
-package com.marketdata.sdk.stocks;
+package com.marketdata.sdk.funds;
 
 import java.time.LocalDate;
 import org.jspecify.annotations.Nullable;
 
-/** Shared request-builder validation for the stock endpoints. */
-final class StockRequests {
+/** Shared request-builder validation for the fund endpoints. */
+final class FundRequests {
 
-  private StockRequests() {}
+  private FundRequests() {}
 
   /**
-   * Validates the historical-window parameters shared by candles/news/earnings: {@code date} is a
-   * single-point lookup incompatible with any ranging parameter; {@code countback} is an
-   * alternative to {@code from} for the left edge (per the API: "if you use from, countback is not
-   * required"), so the two cannot be combined; {@code countback} must be positive; and {@code from}
-   * must not be after {@code to}.
+   * Validates the historical-window parameters: {@code date} is a single-point lookup incompatible
+   * with any ranging parameter; {@code countback} is an alternative to {@code from} for the left
+   * edge (per the API: "if you use from, countback is not required"), so the two cannot be
+   * combined; {@code countback} must be positive; and {@code from} must not be after {@code to}.
    */
   static void validateWindow(
       @Nullable LocalDate date,

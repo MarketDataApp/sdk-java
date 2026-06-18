@@ -636,6 +636,18 @@ class OptionsResourceTest {
         .hasMessageContaining("countback must be positive");
   }
 
+  @Test
+  void quoteRequestRejectsFromAfterTo() {
+    assertThatThrownBy(
+            () ->
+                OptionsQuoteRequest.builder("X")
+                    .from(LocalDate.of(2025, Month.JANUARY, 31))
+                    .to(LocalDate.of(2025, Month.JANUARY, 1))
+                    .build())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("from must not be after to");
+  }
+
   // ---------- quote: response decoding ----------
 
   @Test
