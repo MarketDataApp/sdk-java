@@ -41,6 +41,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   copies, CSV facet via `asCsv()` with the `human`/`headers` shaping params,
   and the same nullable-fields + `columns` + Option A decoding contract as
   stocks/options.
+- **Funds resource** (`client.funds()`) — the single funds endpoint, `candles`,
+  in sync + async form, taking a Builder-based `FundCandlesRequest` (window:
+  `date` xor `from`/`to`/`countback`). Fund candles are NAV series: OHLC only
+  (no volume column), daily-and-up resolutions only — `FundResolution` models
+  `DAILY`/`WEEKLY`/`MONTHLY`/`YEARLY` and `days/weeks/months/years(n)`, with no
+  intraday factories (the API rejects intraday tokens for funds) and therefore
+  no §12 auto-chunking. Universal params (`dateFormat`/`mode`/`limit`/`offset`/
+  `columns`) as configured copies, CSV facet via `asCsv()` with the
+  `human`/`headers` shaping params, and the same nullable-fields + `columns` +
+  Option A decoding contract as stocks/options.
 - **Stocks resource** (`client.stocks()`) — six endpoints, each in sync + async
   form: `candles`, `quote` (single symbol), `quotes` and `prices` (multi-symbol,
   batched into one request — one row per symbol, not a fan-out map like

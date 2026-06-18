@@ -24,6 +24,7 @@ public final class MarketDataClient implements AutoCloseable {
   private final OptionsResource options;
   private final StocksResource stocks;
   private final MarketsResource markets;
+  private final FundsResource funds;
 
   public MarketDataClient() {
     this(null, null, null, true);
@@ -112,6 +113,7 @@ public final class MarketDataClient implements AutoCloseable {
       this.options = new OptionsResource(transport, parser);
       this.stocks = new StocksResource(transport, parser);
       this.markets = new MarketsResource(transport, parser);
+      this.funds = new FundsResource(transport, parser);
       cacheRef.set(
           new StatusCache(
               () -> utilities.statusAsync().thenApply(r -> new ApiStatus(r.values())),
@@ -164,6 +166,11 @@ public final class MarketDataClient implements AutoCloseable {
    */
   public StocksResource stocks() {
     return stocks;
+  }
+
+  /** Funds endpoints: {@code candles}. */
+  public FundsResource funds() {
+    return funds;
   }
 
   /**

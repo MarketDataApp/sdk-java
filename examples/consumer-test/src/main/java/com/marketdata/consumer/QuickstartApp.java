@@ -4,6 +4,8 @@ import com.marketdata.consumer.shared.Console;
 import com.marketdata.sdk.MarketDataClient;
 import com.marketdata.sdk.exception.AuthenticationError;
 import com.marketdata.sdk.exception.MarketDataException;
+import com.marketdata.sdk.funds.FundCandlesRequest;
+import com.marketdata.sdk.funds.FundResolution;
 import com.marketdata.sdk.markets.MarketStatus;
 import com.marketdata.sdk.markets.MarketStatusRequest;
 import com.marketdata.sdk.options.ExpirationFilter;
@@ -83,7 +85,7 @@ public final class QuickstartApp {
       optionsExamples(client);
       stocksExamples(client);
       marketsExamples(client);
-      // fundsExamples(client);     // ← add when client.funds() lands
+      fundsExamples(client);
     }
   }
 
@@ -427,6 +429,38 @@ public final class QuickstartApp {
       Console.info("401 — set MARKETDATA_TOKEN (env or .env) to exercise the markets endpoint.");
     } catch (MarketDataException e) {
       Console.fail("status() failed: " + e.getExceptionType() + " — " + e.getMessage());
+    }
+  }
+
+  // ---------- funds ----------
+
+  /**
+   * Funds expose a single endpoint: {@code candles}. NAV-based OHLC — no volume column, no
+   * intraday resolutions ({@code FundResolution} only models daily and up), and no §12
+   * auto-chunking (it only applies to intraday candles). Entry point is {@code client.funds()}.
+   */
+  private static void fundsExamples(MarketDataClient client) {
+    Console.header("funds — candles (NAV series: OHLC, no volume)");
+
+    Console.step("client.funds().candles(...) — daily NAV candles for the last month");
+    try {
+      var r =
+          client
+              .funds()
+              .candles(
+                  FundCandlesRequest.builder(FundResolution.DAILY, "VFINX")
+                      .from(LocalDate.now().minusMonths(1))
+                      .to(LocalDate.now())
+                      .build());
+      Console.ok(r.values().size() + " daily candles fetched");
+      if (!r.values().isEmpty()) {
+        var bar = r.values().get(r.values().size() - 1);
+        Console.ok("latest: " + bar.time() + " close=" + bar.close());
+      }
+    } catch (AuthenticationError e) {
+      Console.info("401 — set MARKETDATA_TOKEN (env or .env) to exercise the funds endpoint.");
+    } catch (MarketDataException e) {
+      Console.fail("candles() failed: " + e.getExceptionType() + " — " + e.getMessage());
     }
   }
 

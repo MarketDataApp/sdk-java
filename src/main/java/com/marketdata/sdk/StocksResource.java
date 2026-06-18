@@ -222,10 +222,35 @@ public final class StocksResource {
     return transport.joinSync(pricesAsync(request));
   }
 
-  /** Async: fetch news articles for a single symbol. */
+  /**
+   * Async: fetch news articles for a single symbol.
+   *
+   * <p>Unlike the other endpoints, {@code news} does not support a {@code columns} projection on
+   * the typed path: {@link com.marketdata.sdk.stocks.StockNewsArticle} declares every field
+   * non-null, so projecting columns away would force the model to lie (return {@code null} where
+   * the type promises a value). Rather than silently degrade, a configured {@code columns} filter
+   * is rejected with a clear message. Consumers who genuinely want a projected payload can use the
+   * CSV facet — {@code client.stocks().asCsv().columns(...).news(...)} — where the output is raw
+   * text and no typed contract is broken.
+   *
+   * <p>The rejection is surfaced as a <em>failed future</em>, not a synchronous throw, so it
+   * reaches async callers through their {@code exceptionally}/{@code handle} chain like every other
+   * failure; the sync {@link #news(StockNewsRequest)} wrapper unwraps it to a direct {@link
+   * IllegalArgumentException} via {@code join()} (ADR-006).
+   */
   public java.util.concurrent.CompletableFuture<StockNewsResponse> newsAsync(
       StockNewsRequest request) {
+    if (!config.columns().isEmpty()) {
+      return java.util.concurrent.CompletableFuture.failedFuture(
+          new IllegalArgumentException(
+              "columns projection is not supported on the news endpoint; news always returns all"
+                  + " fields. For a projected payload use the CSV facet:"
+                  + " client.stocks().asCsv().columns(...).news(...)"));
+    }
     RequestSpec.Builder b = newsSpec(request);
+    // Only `columns` is unsupported on news; the rest of the universal params (dateFormat/mode/
+    // limit/offset) are valid. Past the guard `columns` is empty, so applyTo writes those and
+    // no-ops the columns clause.
     config.applyTo(b);
     return execute(
         b.build(),

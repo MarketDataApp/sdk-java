@@ -99,6 +99,10 @@ demo-stocks: ## Full stocks surface: every endpoint + all params, CSV facet, col
 demo-markets: ## Full markets surface: status + all params (open/closed calendar, null cells), CSV facet, columns, Option A (needs mock-server)
 	cd $(CONSUMER_DIR) && ./gradlew runMarkets
 
+.PHONY: demo-funds
+demo-funds: ## Full funds surface: candles + all params (no volume/intraday/chunking), CSV facet, columns, Option A (needs mock-server)
+	cd $(CONSUMER_DIR) && ./gradlew runFunds
+
 .PHONY: demos-all
 demos-all: ## Run every mock-server-based demo back-to-back (needs mock-server)
-	cd $(CONSUMER_DIR) && ./gradlew runDemoConfig runExceptions runRetry runResponse runConcurrency runOptions runStocks runMarkets
+	cd $(CONSUMER_DIR) && ./gradlew runDemoConfig runExceptions runRetry runResponse runConcurrency runOptions runStocks runMarkets runFunds
