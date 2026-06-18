@@ -112,8 +112,8 @@ public final class OptionsQuoteRequest {
   /**
    * Shared validation for the historical-window parameters across both quote request forms: {@code
    * date} is a single snapshot incompatible with any ranging parameter; {@code countback} is an
-   * alternative to {@code from} for the left edge, so the two cannot be combined; and {@code
-   * countback} must be positive.
+   * alternative to {@code from} for the left edge, so the two cannot be combined; {@code countback}
+   * must be positive; and {@code from} must not be after {@code to}.
    */
   static void validateWindow(
       @Nullable LocalDate date,
@@ -122,6 +122,9 @@ public final class OptionsQuoteRequest {
       @Nullable Integer countback) {
     if (date != null && (from != null || to != null || countback != null)) {
       throw new IllegalArgumentException("date and from/to/countback are mutually exclusive");
+    }
+    if (from != null && to != null && from.isAfter(to)) {
+      throw new IllegalArgumentException("from must not be after to");
     }
     if (countback != null) {
       if (countback <= 0) {

@@ -157,11 +157,14 @@ class MarketsResourceTest {
 
   @Test
   void statusNoDataEnvelopeYieldsEmptyList() {
-    CapturingClient client = okWith("{\"s\":\"no_data\"}");
+    // The backend answers non-US countries with 404 + {"s":"no_data"} — the SDK surfaces that as a
+    // successful empty response (isNoData() == true), not an exception.
+    CapturingClient client = notFoundWith("{\"s\":\"no_data\"}");
     MarketsResource markets = resourceWith(client);
 
-    assertThat(markets.status(MarketStatusRequest.builder().country("XX").build()).values())
-        .isEmpty();
+    var response = markets.status(MarketStatusRequest.builder().country("XX").build());
+    assertThat(response.values()).isEmpty();
+    assertThat(response.isNoData()).isTrue();
   }
 
   @Test
@@ -351,10 +354,26 @@ class MarketsResourceTest {
         .hasMessageContaining("positive");
   }
 
+  @Test
+  void statusRequestRejectsFromAfterTo() {
+    assertThatThrownBy(
+            () ->
+                MarketStatusRequest.builder()
+                    .from(LocalDate.of(2025, Month.JANUARY, 31))
+                    .to(LocalDate.of(2025, Month.JANUARY, 1))
+                    .build())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("from must not be after to");
+  }
+
   // ---------- helpers ----------
 
   private static CapturingClient okWith(String body) {
     return new CapturingClient(200, body.getBytes(StandardCharsets.UTF_8), EMPTY_HEADERS);
+  }
+
+  private static CapturingClient notFoundWith(String body) {
+    return new CapturingClient(404, body.getBytes(StandardCharsets.UTF_8), EMPTY_HEADERS);
   }
 
   private static final class CapturingClient extends TestHttpClients.StubHttpClient {

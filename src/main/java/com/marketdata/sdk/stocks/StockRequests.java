@@ -12,7 +12,8 @@ final class StockRequests {
    * Validates the historical-window parameters shared by candles/news/earnings: {@code date} is a
    * single-point lookup incompatible with any ranging parameter; {@code countback} is an
    * alternative to {@code from} for the left edge (per the API: "if you use from, countback is not
-   * required"), so the two cannot be combined; and {@code countback} must be positive.
+   * required"), so the two cannot be combined; {@code countback} must be positive; and {@code from}
+   * must not be after {@code to}.
    */
   static void validateWindow(
       @Nullable LocalDate date,
@@ -21,6 +22,9 @@ final class StockRequests {
       @Nullable Integer countback) {
     if (date != null && (from != null || to != null || countback != null)) {
       throw new IllegalArgumentException("date and from/to/countback are mutually exclusive");
+    }
+    if (from != null && to != null && from.isAfter(to)) {
+      throw new IllegalArgumentException("from must not be after to");
     }
     if (countback != null) {
       if (countback <= 0) {
