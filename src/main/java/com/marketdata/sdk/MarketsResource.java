@@ -93,17 +93,7 @@ public final class MarketsResource extends ConfiguredResource<MarketsResource> {
 
   private <D, R> java.util.concurrent.CompletableFuture<R> execute(
       RequestSpec spec, Class<D> decodeType, ResponseFactory<D, R> factory) {
-    return transport
-        .executeAsync(spec)
-        .thenApply(
-            env ->
-                factory.create(
-                    parser.parse(env, decodeType, config.columns()), env, spec.format()));
-  }
-
-  @FunctionalInterface
-  interface ResponseFactory<D, R> {
-    R create(D decoded, HttpResponseEnvelope envelope, Format format);
+    return JsonResponses.execute(transport, parser, spec, config.columns(), decodeType, factory);
   }
 
   // ---------- request spec builders (package-private static — reused by the facets) ----------
