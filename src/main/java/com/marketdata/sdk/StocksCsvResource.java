@@ -20,44 +20,17 @@ import java.util.concurrent.CompletableFuture;
  * <p>Carries the universal-param config from the typed resource and additionally exposes the
  * output-shaping {@code columns}/{@code human}/{@code headers} params, which only cohere with CSV.
  */
-public final class StocksCsvResource {
-
-  private final HttpTransport transport;
-  private final RequestConfig config;
+public final class StocksCsvResource extends FormattedResource<StocksCsvResource> {
 
   StocksCsvResource(HttpTransport transport, RequestConfig config) {
-    this.transport = transport;
-    this.config = config;
+    super(transport, config);
   }
 
-  // ---------- universal + output-shaping params ----------
+  // ---------- universal + output-shaping params: inherited from FormattedResource ----------
 
-  public StocksCsvResource dateFormat(DateFormat v) {
-    return new StocksCsvResource(transport, config.withDateFormat(v));
-  }
-
-  public StocksCsvResource mode(Mode v) {
-    return new StocksCsvResource(transport, config.withMode(v));
-  }
-
-  public StocksCsvResource limit(int v) {
-    return new StocksCsvResource(transport, config.withLimit(v));
-  }
-
-  public StocksCsvResource offset(int v) {
-    return new StocksCsvResource(transport, config.withOffset(v));
-  }
-
-  public StocksCsvResource columns(String... v) {
-    return new StocksCsvResource(transport, config.withColumns(java.util.List.of(v)));
-  }
-
-  public StocksCsvResource human(boolean v) {
-    return new StocksCsvResource(transport, config.withHuman(v));
-  }
-
-  public StocksCsvResource headers(boolean v) {
-    return new StocksCsvResource(transport, config.withHeaders(v));
+  @Override
+  StocksCsvResource withConfig(RequestConfig config) {
+    return new StocksCsvResource(transport, config);
   }
 
   // ---------- endpoints ----------
@@ -175,14 +148,6 @@ public final class StocksCsvResource {
   // ---------- execute ----------
 
   private CompletableFuture<CsvResponse> executeCsv(RequestSpec.Builder b) {
-    config.applyTo(b);
-    b.format(Format.CSV);
-    RequestSpec spec = b.build();
-    return transport
-        .executeAsync(spec)
-        .thenApply(
-            env ->
-                new CsvResponse(
-                    new String(env.body(), StandardCharsets.UTF_8), env, spec.format()));
+    return TextResponses.execute(transport, config, b, Format.CSV, CsvResponse::new);
   }
 }

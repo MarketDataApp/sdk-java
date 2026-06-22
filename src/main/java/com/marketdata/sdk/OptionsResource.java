@@ -43,11 +43,9 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>Constructor is package-private (ADR-007) — consumers cannot instantiate.
  */
-public final class OptionsResource {
+public final class OptionsResource extends ConfiguredResource<OptionsResource> {
 
-  private final HttpTransport transport;
   private final JsonResponseParser parser;
-  private final RequestConfig config;
 
   /** Client-facing constructor: registers the wire-format module once, starts with empty config. */
   OptionsResource(HttpTransport transport, JsonResponseParser parser) {
@@ -57,42 +55,15 @@ public final class OptionsResource {
 
   private OptionsResource(
       HttpTransport transport, JsonResponseParser parser, RequestConfig config) {
-    this.transport = transport;
+    super(transport, config);
     this.parser = parser;
-    this.config = config;
   }
 
-  // ---------- universal parameters (type-preserving + columns) ----------
+  // ---------- universal parameters: inherited from ConfiguredResource ----------
 
-  /** Returns a copy that requests {@code dateformat} on every subsequent call. */
-  public OptionsResource dateFormat(DateFormat dateFormat) {
-    return new OptionsResource(transport, parser, config.withDateFormat(dateFormat));
-  }
-
-  /**
-   * Returns a copy with the data-freshness {@code mode} (cached honored only by quote endpoints).
-   */
-  public OptionsResource mode(Mode mode) {
-    return new OptionsResource(transport, parser, config.withMode(mode));
-  }
-
-  /** Returns a copy with the pagination {@code limit}. */
-  public OptionsResource limit(int limit) {
-    return new OptionsResource(transport, parser, config.withLimit(limit));
-  }
-
-  /** Returns a copy with the pagination {@code offset}. */
-  public OptionsResource offset(int offset) {
-    return new OptionsResource(transport, parser, config.withOffset(offset));
-  }
-
-  /**
-   * Returns a copy that projects the response to the given columns (wire field names). Fields not
-   * requested decode to {@code null}; a requested column the API fails to return surfaces as a
-   * {@link com.marketdata.sdk.exception.ParseError} rather than a silent null.
-   */
-  public OptionsResource columns(String... columns) {
-    return new OptionsResource(transport, parser, config.withColumns(List.of(columns)));
+  @Override
+  OptionsResource withConfig(RequestConfig config) {
+    return new OptionsResource(transport, parser, config);
   }
 
   // ---------- format facet ----------

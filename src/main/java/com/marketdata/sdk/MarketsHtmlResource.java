@@ -1,7 +1,6 @@
 package com.marketdata.sdk;
 
 import com.marketdata.sdk.markets.MarketStatusRequest;
-import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -30,14 +29,6 @@ public final class MarketsHtmlResource {
   }
 
   private CompletableFuture<HtmlResponse> executeHtml(RequestSpec.Builder b) {
-    config.applyTo(b);
-    b.format(Format.HTML);
-    RequestSpec spec = b.build();
-    return transport
-        .executeAsync(spec)
-        .thenApply(
-            env ->
-                new HtmlResponse(
-                    new String(env.body(), StandardCharsets.UTF_8), env, spec.format()));
+    return TextResponses.execute(transport, config, b, Format.HTML, HtmlResponse::new);
   }
 }

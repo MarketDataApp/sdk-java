@@ -1,7 +1,6 @@
 package com.marketdata.sdk;
 
 import com.marketdata.sdk.markets.MarketStatusRequest;
-import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -11,44 +10,17 @@ import java.util.concurrent.CompletableFuture;
  * <p>Carries the universal-param config from the typed resource and additionally exposes the
  * output-shaping {@code columns}/{@code human}/{@code headers} params, which only cohere with CSV.
  */
-public final class MarketsCsvResource {
-
-  private final HttpTransport transport;
-  private final RequestConfig config;
+public final class MarketsCsvResource extends FormattedResource<MarketsCsvResource> {
 
   MarketsCsvResource(HttpTransport transport, RequestConfig config) {
-    this.transport = transport;
-    this.config = config;
+    super(transport, config);
   }
 
-  // ---------- universal + output-shaping params ----------
+  // ---------- universal + output-shaping params: inherited from FormattedResource ----------
 
-  public MarketsCsvResource dateFormat(DateFormat v) {
-    return new MarketsCsvResource(transport, config.withDateFormat(v));
-  }
-
-  public MarketsCsvResource mode(Mode v) {
-    return new MarketsCsvResource(transport, config.withMode(v));
-  }
-
-  public MarketsCsvResource limit(int v) {
-    return new MarketsCsvResource(transport, config.withLimit(v));
-  }
-
-  public MarketsCsvResource offset(int v) {
-    return new MarketsCsvResource(transport, config.withOffset(v));
-  }
-
-  public MarketsCsvResource columns(String... v) {
-    return new MarketsCsvResource(transport, config.withColumns(java.util.List.of(v)));
-  }
-
-  public MarketsCsvResource human(boolean v) {
-    return new MarketsCsvResource(transport, config.withHuman(v));
-  }
-
-  public MarketsCsvResource headers(boolean v) {
-    return new MarketsCsvResource(transport, config.withHeaders(v));
+  @Override
+  MarketsCsvResource withConfig(RequestConfig config) {
+    return new MarketsCsvResource(transport, config);
   }
 
   // ---------- endpoints ----------
@@ -64,14 +36,6 @@ public final class MarketsCsvResource {
   // ---------- execute ----------
 
   private CompletableFuture<CsvResponse> executeCsv(RequestSpec.Builder b) {
-    config.applyTo(b);
-    b.format(Format.CSV);
-    RequestSpec spec = b.build();
-    return transport
-        .executeAsync(spec)
-        .thenApply(
-            env ->
-                new CsvResponse(
-                    new String(env.body(), StandardCharsets.UTF_8), env, spec.format()));
+    return TextResponses.execute(transport, config, b, Format.CSV, CsvResponse::new);
   }
 }
