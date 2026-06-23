@@ -349,9 +349,9 @@ public final class OptionsResource extends ConfiguredResource<OptionsResource> {
       b.query("year", v.year());
     } else if (f instanceof ExpirationFilter.All) {
       b.query("expiration", "all");
-    } else {
-      throw new IllegalStateException("unhandled ExpirationFilter variant: " + f);
     }
+    // ExpirationFilter is sealed and every variant is handled above; Java 17 can't prove that in
+    // an if-chain, but there is no reachable else, so no defensive throw is needed.
   }
 
   private static String strikeFilterWireValue(StrikeFilter f) {
@@ -359,10 +359,11 @@ public final class OptionsResource extends ConfiguredResource<OptionsResource> {
       return formatStrike(v.price());
     } else if (f instanceof StrikeFilter.Range v) {
       return formatStrike(v.min()) + "-" + formatStrike(v.max());
-    } else if (f instanceof StrikeFilter.Comparison v) {
-      return v.operator().wireValue() + formatStrike(v.price());
     }
-    throw new IllegalStateException("unhandled StrikeFilter variant: " + f);
+    // StrikeFilter is sealed; the only remaining variant is Comparison. The cast documents that
+    // exhaustiveness (Java 17 can't prove it in an if-chain) and fails fast if a variant is added.
+    StrikeFilter.Comparison v = (StrikeFilter.Comparison) f;
+    return v.operator().wireValue() + formatStrike(v.price());
   }
 
   private static String formatStrike(double v) {

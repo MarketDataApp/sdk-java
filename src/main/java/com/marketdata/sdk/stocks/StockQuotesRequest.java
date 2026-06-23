@@ -1,5 +1,6 @@
 package com.marketdata.sdk.stocks;
 
+import com.marketdata.sdk.Generated;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -86,6 +87,9 @@ public final class StockQuotesRequest {
       return this;
     }
 
+    // @Generated: the empty-symbols guard is unreachable — builder(first, ...) always seeds one
+    // symbol and the constructor is private, so the list is never empty here.
+    @Generated
     public StockQuotesRequest build() {
       if (symbols.isEmpty()) {
         throw new IllegalArgumentException("at least one symbol is required");

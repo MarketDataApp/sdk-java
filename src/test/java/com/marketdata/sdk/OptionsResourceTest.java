@@ -953,6 +953,35 @@ class OptionsResourceTest {
   }
 
   @Test
+  void chainSpecEncodesEveryOptionalFilter() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options.chain(
+        OptionsChainRequest.builder("AAPL")
+            .am(true)
+            .pm(true)
+            .delta(0.5)
+            .minBid(1.0)
+            .maxBid(2.0)
+            .minAsk(1.5)
+            .maxAsk(2.5)
+            .date(java.time.LocalDate.of(2026, 6, 22))
+            .build());
+
+    String url = client.captured.get(0).uri().toString();
+    assertThat(url)
+        .contains("am=")
+        .contains("pm=")
+        .contains("delta=")
+        .contains("minBid=")
+        .contains("maxBid=")
+        .contains("minAsk=")
+        .contains("maxAsk=")
+        .contains("date=2026-06-22");
+  }
+
+  @Test
   void responseExposesRequestIdAndUrlMetadata() {
     CapturingClient client = okWith(CANNED_QUOTE_BODY);
     OptionsResource options = resourceWith(client);

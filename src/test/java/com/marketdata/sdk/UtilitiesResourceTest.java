@@ -142,6 +142,23 @@ class UtilitiesResourceTest {
     assertThat(u.requestsRemaining()).isEqualTo(7);
   }
 
+  @Test
+  void validateAuthProbesUserEndpointAndSucceedsOn200() {
+    CapturingClient client =
+        new CapturingClient(
+            200,
+            ("{\"x-ratelimit-requests-remaining\":1,\"x-ratelimit-requests-limit\":2,"
+                    + "\"x-options-data-permissions\":\"\"}")
+                .getBytes(),
+            HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    // Single-attempt /user/ probe used by MarketDataClient startup validation; returns on 200.
+    utilities.validateAuth();
+
+    assertThat(client.captured.get(0).uri().toString()).isEqualTo("http://localhost/user/");
+  }
+
   /**
    * The {@code /user/} endpoint's typical failure mode is "no billing plan" — surfaces as 401. The
    * sync method must unwrap it to {@link AuthenticationError} directly so {@code validateOnStartup}

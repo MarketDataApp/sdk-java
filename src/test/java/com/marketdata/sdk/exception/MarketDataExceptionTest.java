@@ -158,4 +158,47 @@ class MarketDataExceptionTest {
 
     assertThat(label).isEqualTo("rate");
   }
+
+  @Test
+  void request_url_redacts_query_string() {
+    ErrorContext ctx =
+        ErrorContext.forResponse("https://api.example/v1/stocks/quote?token=secret", 200, "r", TS);
+    ServerError error = new ServerError("x", ctx);
+
+    assertThat(error.getRequestUrl()).isEqualTo("https://api.example/v1/stocks/quote?…");
+  }
+
+  @Test
+  void request_url_returns_malformed_url_verbatim() {
+    // A space makes new URI(...) throw URISyntaxException; the getter must not propagate it.
+    ErrorContext ctx = ErrorContext.forResponse("http://exa mple.com/x?q=1", 200, "r", TS);
+    ServerError error = new ServerError("x", ctx);
+
+    assertThat(error.getRequestUrl()).isEqualTo("http://exa mple.com/x?q=1");
+  }
+
+  @Test
+  void support_info_renders_empty_message_when_null() {
+    ServerError error = new ServerError(null, sampleContext());
+
+    assertThat(error.getSupportInfo()).contains("message:").doesNotContain("message:        null");
+  }
+
+  @Test
+  void rate_limit_error_three_arg_constructor_carries_cause_without_retry_after() {
+    IOException cause = new IOException("boom");
+    RateLimitError error = new RateLimitError("limited", sampleContext(), cause);
+
+    assertThat(error.getCause()).isSameAs(cause);
+    assertThat(error.getRetryAfter()).isEmpty();
+  }
+
+  @Test
+  void server_error_three_arg_constructor_carries_cause_without_retry_after() {
+    IOException cause = new IOException("boom");
+    ServerError error = new ServerError("server boom", sampleContext(), cause);
+
+    assertThat(error.getCause()).isSameAs(cause);
+    assertThat(error.getRetryAfter()).isEmpty();
+  }
 }

@@ -373,6 +373,58 @@ class ParallelArraysTest {
         .hasMessageContaining("boom");
   }
 
+  // ---------- optional columns ----------
+
+  @Test
+  void absentOptionalColumnYieldsNullViaOrNullAccessor() throws IOException {
+    JsonNode root = parse("{\"s\":\"ok\",\"a\":[\"x\"]}");
+
+    List<Double> rows =
+        ParallelArrays.zip(null, root, List.of("a"), List.of("opt"), row -> row.dblOrNull("opt"));
+
+    assertThat(rows).containsExactly((Double) null);
+  }
+
+  @Test
+  void mismatchedOptionalColumnLengthFails() {
+    assertThatThrownBy(
+            () ->
+                ParallelArrays.zip(
+                    null,
+                    parse("{\"s\":\"ok\",\"a\":[\"x\",\"y\"],\"opt\":[1.0]}"),
+                    List.of("a"),
+                    List.of("opt"),
+                    row -> row.dblOrNull("opt")))
+        .isInstanceOf(JsonMappingException.class)
+        .hasMessageContaining("mismatched lengths")
+        .hasMessageContaining("opt");
+  }
+
+  @Test
+  void orNullAccessorsRejectTypeMismatchedCells() throws IOException {
+    JsonNode root =
+        parse("{\"s\":\"ok\",\"a\":[\"x\"],\"d\":[\"nan\"],\"t\":[1],\"l\":[\"y\"],\"b\":[\"z\"]}");
+
+    assertThatThrownBy(
+            () -> ParallelArrays.zip(null, root, List.of("a"), List.of("d"), r -> r.dblOrNull("d")))
+        .isInstanceOf(JsonMappingException.class)
+        .hasMessageContaining("number");
+    assertThatThrownBy(
+            () ->
+                ParallelArrays.zip(null, root, List.of("a"), List.of("t"), r -> r.textOrNull("t")))
+        .isInstanceOf(JsonMappingException.class)
+        .hasMessageContaining("string");
+    assertThatThrownBy(
+            () -> ParallelArrays.zip(null, root, List.of("a"), List.of("l"), r -> r.lngOrNull("l")))
+        .isInstanceOf(JsonMappingException.class)
+        .hasMessageContaining("number");
+    assertThatThrownBy(
+            () ->
+                ParallelArrays.zip(null, root, List.of("a"), List.of("b"), r -> r.boolOrNull("b")))
+        .isInstanceOf(JsonMappingException.class)
+        .hasMessageContaining("boolean");
+  }
+
   // ---------- helper record ----------
 
   private record Record(String symbol, double price, boolean active, long updated) {}

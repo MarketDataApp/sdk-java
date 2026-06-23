@@ -1,5 +1,7 @@
 package com.marketdata.sdk.options;
 
+import com.marketdata.sdk.Generated;
+
 /**
  * The chain endpoint's {@code ?strike=} parameter accepts three syntactic forms — exact value,
  * range, and comparison ({@code >150}, {@code <=160}, …). Modeling them as a sealed type with
@@ -27,6 +29,9 @@ public sealed interface StrikeFilter
   }
 
   /** Match strikes satisfying {@code operator price} (e.g. {@code > 150}). */
+  // @Generated: the null-operator guard is unreachable through the public comparison factories,
+  // which always supply a non-null Operator from the typed enum.
+  @Generated
   static Comparison comparison(Operator operator, double price) {
     if (operator == null) {
       throw new IllegalArgumentException("operator must not be null");

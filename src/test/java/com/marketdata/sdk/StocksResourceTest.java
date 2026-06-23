@@ -584,6 +584,8 @@ class StocksResourceTest {
     assertThat(html.candles(StockCandlesRequest.of(StockResolution.DAILY, "AAPL")).html())
         .contains("<html>");
     assertThat(html.quote(StockQuoteRequest.of("AAPL")).html()).contains("<html>");
+    assertThat(html.quotes(StockQuotesRequest.builder("AAPL", "MSFT").build()).html())
+        .contains("<html>");
     assertThat(html.prices(StockPricesRequest.of("AAPL")).html()).contains("<html>");
     assertThat(html.news(StockNewsRequest.of("AAPL")).html()).contains("<html>");
     assertThat(html.earnings(StockEarningsRequest.of("AAPL")).html()).contains("<html>");
