@@ -46,6 +46,33 @@ class HttpTransportTest {
         clock);
   }
 
+  // ---------- joinSync error unwrapping ----------
+
+  @Test
+  void joinSyncUnwrapsCancellation() {
+    HttpTransport transport =
+        newTransport(
+            new CapturingClient(200, "ok".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true)));
+    CompletableFuture<String> cancelled = new CompletableFuture<>();
+    cancelled.cancel(true);
+
+    assertThatThrownBy(() -> transport.joinSync(cancelled))
+        .isInstanceOf(java.util.concurrent.CancellationException.class);
+  }
+
+  @Test
+  void joinSyncWrapsCheckedCauseAsNetworkError() {
+    HttpTransport transport =
+        newTransport(
+            new CapturingClient(200, "ok".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true)));
+    // A non-RuntimeException, non-MarketDataException cause falls to the NetworkError fallback.
+    CompletableFuture<String> failed =
+        CompletableFuture.failedFuture(new java.io.IOException("transport down"));
+
+    assertThatThrownBy(() -> transport.joinSync(failed))
+        .isInstanceOf(com.marketdata.sdk.exception.NetworkError.class);
+  }
+
   // ---------- URL & header composition ----------
 
   @Test

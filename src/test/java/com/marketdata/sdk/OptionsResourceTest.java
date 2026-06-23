@@ -982,6 +982,27 @@ class OptionsResourceTest {
   }
 
   @Test
+  void chainStrikeFilterEncodesFractionalStrikeVerbatim() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+
+    resourceWith(client)
+        .chain(OptionsChainRequest.builder("AAPL").strikeFilter(StrikeFilter.exact(150.5)).build());
+
+    // A non-whole strike formats via Double.toString (not the integer fast-path).
+    assertThat(client.captured.get(0).uri().toString()).contains("strike=150.5");
+  }
+
+  @Test
+  void chainNoDataResponseSkipsColumnValidation() {
+    CapturingClient client = okWith("{\"s\":\"no_data\"}");
+
+    OptionsChainResponse resp = resourceWith(client).chain(OptionsChainRequest.of("AAPL"));
+
+    // no_data → empty rows; Option A column validation short-circuits without a ParseError.
+    assertThat(resp.values()).isEmpty();
+  }
+
+  @Test
   void responseExposesRequestIdAndUrlMetadata() {
     CapturingClient client = okWith(CANNED_QUOTE_BODY);
     OptionsResource options = resourceWith(client);

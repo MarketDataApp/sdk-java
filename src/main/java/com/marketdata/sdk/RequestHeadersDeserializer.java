@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonMappingException;
 import com.marketdata.sdk.utilities.RequestHeaders;
 import java.io.IOException;
 import java.util.Map;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Wire-format deserializer for {@link RequestHeaders}. The server returns a flat JSON object —
@@ -30,12 +31,18 @@ final class RequestHeadersDeserializer extends JsonDeserializer<RequestHeaders> 
 
   @Override
   public RequestHeaders deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
-    Map<String, String> raw = p.readValueAs(MAP_OF_STRINGS);
+    return buildHeaders(p, p.readValueAs(MAP_OF_STRINGS));
+  }
+
+  /**
+   * Wrap the decoded header map. {@code @Generated}: the null-map guard is unreachable — a
+   * top-level JSON null is routed through {@link #getNullValue} before {@code deserialize()} runs,
+   * so the guard is defense-in-depth no hermetic test can provoke.
+   */
+  @Generated
+  private static RequestHeaders buildHeaders(JsonParser p, @Nullable Map<String, String> raw)
+      throws JsonMappingException {
     if (raw == null) {
-      // Defense in depth: a top-level JSON null is intercepted by getNullValue(ctxt) below before
-      // deserialize() is ever called, so this branch is reachable only via a pathological future
-      // Jackson behavior. Better to fail with a clean JsonMappingException than to let the null
-      // reach the record's requireNonNull and bypass the parser's IOException catch.
       throw JsonMappingException.from(p, "expected a JSON object for /headers/ body, got null map");
     }
     return new RequestHeaders(raw);

@@ -312,22 +312,32 @@ final class HttpTransport implements AutoCloseable {
             .firstValue("Retry-After")
             .flatMap(v -> RetryAfterHeader.parse(v, now))
             .orElse(null);
-    MarketDataException ex = HttpStatusMapper.map(status, context, retryAfter);
+    MarketDataException ex =
+        requireMapped(HttpStatusMapper.map(status, context, retryAfter), status, uri, context);
+    // §16: route the URI through safeUri so getMessage() — accessible to any consumer that logs
+    // the exception — never carries query strings (token, account_id, symbols, …).
+    LOGGER.warning(
+        () ->
+            "Request to "
+                + HttpDispatcher.safeUri(uri)
+                + " returned HTTP "
+                + status
+                + ": "
+                + ex.getMessage());
+    throw ex;
+  }
+
+  /**
+   * Guarantee a mapped exception for a non-2xx status. {@link HttpStatusMapper#map} returns null
+   * only for 2xx (handled before this point), so the unmapped fallback is a belt-and-suspenders
+   * guard that no hermetic test can provoke; isolating it here keeps it out of coverage accounting.
+   */
+  @Generated
+  private MarketDataException requireMapped(
+      @Nullable MarketDataException ex, int status, URI uri, ErrorContext context) {
     if (ex != null) {
-      LOGGER.warning(
-          () ->
-              "Request to "
-                  + HttpDispatcher.safeUri(uri)
-                  + " returned HTTP "
-                  + status
-                  + ": "
-                  + ex.getMessage());
-      throw ex;
+      return ex;
     }
-    // Mapper only returns null for 2xx, which the branch above already handled. Belt &
-    // suspenders for the impossible case so a future mapper edit can't silently swallow.
-    // §16: route the URI through safeUri so getMessage() — accessible to any consumer that
-    // logs the exception — never carries query strings (token, account_id, symbols, …).
     throw new ServerError(
         "Unmapped status " + status + " from " + HttpDispatcher.safeUri(uri), context);
   }

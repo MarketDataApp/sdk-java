@@ -252,4 +252,37 @@ class HttpDispatcherTest {
     assertThat(HttpDispatcher.safeUri(URI.create("mailto:user@example.com")))
         .isEqualTo("mailto:user@example.com");
   }
+
+  // ---------- FINE response logging ----------
+
+  @Test
+  void dispatchEvaluatesFineResponseLogWhenLevelEnabled() {
+    java.util.logging.Logger sdkLog =
+        java.util.logging.Logger.getLogger(MarketDataLogging.SDK_LOGGER_NAME);
+    java.util.logging.Level previous = sdkLog.getLevel();
+    sdkLog.setLevel(java.util.logging.Level.FINE);
+    try {
+      HttpClient client =
+          new TestHttpClients.StubHttpClient() {
+            @SuppressWarnings({"unchecked", "rawtypes"})
+            @Override
+            public <T> CompletableFuture<HttpResponse<T>> sendAsync(
+                HttpRequest request, HttpResponse.BodyHandler<T> bh) {
+              HttpResponse<byte[]> resp =
+                  TestHttpClients.response(
+                      200,
+                      "ok".getBytes(),
+                      HttpHeaders.of(Map.of(), (a, b) -> true),
+                      request.uri());
+              return (CompletableFuture) CompletableFuture.completedFuture(resp);
+            }
+          };
+      HttpDispatcher dispatcher = new HttpDispatcher(client, LIMIT);
+
+      // With FINE enabled, the response-log supplier is evaluated (the message is built).
+      assertThat(dispatcher.dispatch(req()).join().statusCode()).isEqualTo(200);
+    } finally {
+      sdkLog.setLevel(previous);
+    }
+  }
 }

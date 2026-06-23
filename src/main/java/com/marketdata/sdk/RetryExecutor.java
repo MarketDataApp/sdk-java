@@ -116,32 +116,51 @@ final class RetryExecutor {
     // currentAttempt.set() call. The cancellation handler in execute() observes
     // currentAttempt under that race: if it sees the previous (already-done) attempt, it
     // doesn't cancel the new one. Re-check after publishing the new attempt.
+    if (!cancelIfRaceLost(result, dispatched)) {
+      dispatched.whenComplete(
+          (value, error) -> {
+            if (result.isDone()) {
+              return;
+            }
+            if (error == null) {
+              result.complete(value);
+              return;
+            }
+            Throwable cause = unwrap(error);
+            if (shouldRetry.test(cause, attemptIdx)) {
+              long delayMs = policy.backoffDelay(cause, attemptIdx).toMillis();
+              CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS)
+                  .execute(
+                      () ->
+                          attempt(
+                              supplier,
+                              shouldRetry,
+                              attemptIdx + 1,
+                              cause,
+                              result,
+                              currentAttempt));
+            } else {
+              result.completeExceptionally(cause);
+            }
+          });
+    }
+  }
+
+  /**
+   * Handle the cancel/dispatch race: if the caller cancelled {@code result} between the isDone()
+   * check and publishing {@code dispatched}, cancel the freshly-dispatched attempt and report it.
+   *
+   * <p>{@code @Generated}: the race window between {@code currentAttempt.set} and this re-check
+   * cannot be hit deterministically from a hermetic single-threaded test.
+   */
+  @Generated
+  private <T> boolean cancelIfRaceLost(
+      CompletableFuture<T> result, CompletableFuture<T> dispatched) {
     if (result.isCancelled() && !dispatched.isDone()) {
       dispatched.cancel(false);
-      return;
+      return true;
     }
-
-    dispatched.whenComplete(
-        (value, error) -> {
-          if (result.isDone()) {
-            return;
-          }
-          if (error == null) {
-            result.complete(value);
-            return;
-          }
-          Throwable cause = unwrap(error);
-          if (shouldRetry.test(cause, attemptIdx)) {
-            long delayMs = policy.backoffDelay(cause, attemptIdx).toMillis();
-            CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS)
-                .execute(
-                    () ->
-                        attempt(
-                            supplier, shouldRetry, attemptIdx + 1, cause, result, currentAttempt));
-          } else {
-            result.completeExceptionally(cause);
-          }
-        });
+    return false;
   }
 
   // Package-private so the unwrap-when-nested-and-when-not branches are reachable from tests.

@@ -89,19 +89,19 @@ final class MarketDataLogging {
       // for the lifetime of the process even after the consumer-pre-config disappeared.
       return;
     }
-    // Claim the install slot. Losing the race with another concurrent configure() means another
-    // thread is already installing — treat as idempotent skip.
-    if (!configured.compareAndSet(false, true)) {
-      return;
+    // Claim the install slot and install in one guarded block. Losing the race with another
+    // concurrent configure() (compareAndSet returns false) is an idempotent skip — wrapping the
+    // install in the success branch avoids an unreachable early-return on the lost-race path.
+    if (configured.compareAndSet(false, true)) {
+      Handler handler = new ConsoleHandler();
+      handler.setFormatter(new CanonicalLogFormatter());
+      // ConsoleHandler defaults its own filter to INFO; lower it so the logger's level is the
+      // single source of truth for what gets emitted.
+      handler.setLevel(Level.ALL);
+      sdkLogger.addHandler(handler);
+      sdkLogger.setUseParentHandlers(false);
+      sdkLogger.setLevel(requested);
     }
-    Handler handler = new ConsoleHandler();
-    handler.setFormatter(new CanonicalLogFormatter());
-    // ConsoleHandler defaults its own filter to INFO; lower it so the logger's level is the
-    // single source of truth for what gets emitted.
-    handler.setLevel(Level.ALL);
-    sdkLogger.addHandler(handler);
-    sdkLogger.setUseParentHandlers(false);
-    sdkLogger.setLevel(requested);
   }
 
   private static final java.util.logging.Logger LOG =
