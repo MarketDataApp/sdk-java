@@ -14,9 +14,11 @@ import com.marketdata.sdk.stocks.StockQuoteRequest
  * Run: `./gradlew runKotlinQuickstart`
  */
 fun main() {
-    // `use {}` closes the client when the block ends — the Kotlin equivalent of try-with-resources.
-    MarketDataClient().use { client ->
-        try {
+    try {
+        // `use {}` closes the client when the block ends — the Kotlin equivalent of try-with-resources.
+        // Construction is inside the `try` so the no-arg constructor's startup validation (a real
+        // `/user/` probe) is covered by the catch below on a missing/expired token.
+        MarketDataClient().use { client ->
             // Sync: blocks and returns the typed response.
             val quote = client.stocks().quote(StockQuoteRequest.of("AAPL")).values()[0]
             println("Sync:  ${quote.symbol()} last=${quote.last()}")
@@ -27,8 +29,8 @@ fun main() {
                 .quoteAsync(StockQuoteRequest.of("AAPL"))
                 .thenAccept { resp -> println("Async: ${resp.values()[0].last()}") }
                 .join()
-        } catch (e: AuthenticationError) {
-            println("Set MARKETDATA_TOKEN (env var or .env) to run this example.")
         }
+    } catch (e: AuthenticationError) {
+        println("Set MARKETDATA_TOKEN (env var or .env) to run this example.")
     }
 }
