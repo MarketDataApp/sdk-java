@@ -222,14 +222,16 @@ class AsyncSemaphoreTest {
 
     sem.close();
 
-    // CompletableFuture#join unwraps CancellationException specifically: it surfaces directly
-    // rather than being wrapped in CompletionException. That's the same propagation downstream
-    // observers see, so we assert the bare exception shape here.
+    // join() surfaces a CancellationException, but its shape is JDK-dependent: JDK 17 rethrows the
+    // original directly (message "AsyncSemaphore is closed"), while JDK 21+ wraps it in a fresh
+    // CancellationException (message "join") carrying the original as its cause. Accept either.
     for (CompletableFuture<Void> w : List.of(w1, w2, w3)) {
       assertThat(w).isCompletedExceptionally();
       assertThatThrownBy(w::join)
           .isInstanceOf(CancellationException.class)
-          .hasMessageContaining("closed");
+          .satisfiesAnyOf(
+              t -> assertThat(t).hasMessageContaining("closed"),
+              t -> assertThat(t).hasRootCauseMessage("AsyncSemaphore is closed"));
     }
     assertThat(sem.queueLength()).isZero();
   }
@@ -244,7 +246,9 @@ class AsyncSemaphoreTest {
     assertThat(failed).isCompletedExceptionally();
     assertThatThrownBy(failed::join)
         .isInstanceOf(CancellationException.class)
-        .hasMessageContaining("closed");
+        .satisfiesAnyOf(
+            t -> assertThat(t).hasMessageContaining("closed"),
+            t -> assertThat(t).hasRootCauseMessage("AsyncSemaphore is closed"));
     assertThat(sem.queueLength()).isZero();
   }
 
