@@ -1,3 +1,5 @@
+import com.vanniktech.maven.publish.SonatypeHost
+
 plugins {
     `java-library`
     jacoco
@@ -5,8 +7,14 @@ plugins {
     alias(libs.plugins.vanniktech.publish)
 }
 
-group = "com.marketdata"
-version = "0.1.0-SNAPSHOT"
+// Maven groupId = the verified Central Portal namespace (domain marketdata.app,
+// reversed). Independent of the Java package, which stays com.marketdata.sdk.
+group = "app.marketdata"
+
+// Version is overridable from the command line so a manual Central Portal
+// validation run can use a real release version (e.g. `-PsdkVersion=0.1.0`)
+// without committing it. Default stays on the in-development SNAPSHOT.
+version = (findProperty("sdkVersion") as String?) ?: "0.1.0-SNAPSHOT"
 
 // ADR-002: minimum JDK 17, build with --release 17, single bytecode level.
 java {
@@ -174,13 +182,46 @@ spotless {
 }
 
 // ADR-003 / requirements §15: Maven Central publishing via Vanniktech.
-// Coordinates and POM metadata below are placeholders — fill in before
-// the first publication.
+//
+// Publishes to the Sonatype Central Portal (central.sonatype.com).
+// `automaticRelease = false` uploads the deployment but leaves it in the
+// VALIDATED state for manual review/release (or drop) from the portal UI —
+// the safe path for a first manual validation run.
+//
+// Upload + signing credentials are read from Gradle properties / env vars by
+// the plugin (never hard-coded here):
+//   - ORG_GRADLE_PROJECT_mavenCentralUsername / _mavenCentralPassword
+//   - ORG_GRADLE_PROJECT_signingInMemoryKey / _signingInMemoryKeyPassword
+//     (optionally _signingInMemoryKeyId)
 mavenPublishing {
+    publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL, automaticRelease = false)
+    signAllPublications()
+
     coordinates(group.toString(), "marketdata-sdk-java", version.toString())
     pom {
         name.set("Market Data Java SDK")
         description.set("Java SDK for the Market Data API.")
-        // TODO: set url, scm, license, developers before publishing.
+        url.set("https://github.com/MarketDataApp/sdk-java")
+        inceptionYear.set("2026")
+
+        licenses {
+            license {
+                name.set("MIT License")
+                url.set("https://github.com/MarketDataApp/sdk-java/blob/main/LICENSE")
+                distribution.set("repo")
+            }
+        }
+        developers {
+            developer {
+                id.set("marketdata")
+                name.set("Market Data")
+                url.set("https://www.marketdata.app")
+            }
+        }
+        scm {
+            url.set("https://github.com/MarketDataApp/sdk-java")
+            connection.set("scm:git:git://github.com/MarketDataApp/sdk-java.git")
+            developerConnection.set("scm:git:ssh://git@github.com/MarketDataApp/sdk-java.git")
+        }
     }
 }
