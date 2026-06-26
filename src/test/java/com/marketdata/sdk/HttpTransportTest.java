@@ -484,6 +484,33 @@ class HttpTransportTest {
   }
 
   /**
+   * Demo / unauthenticated responses carry {@code limit=0, remaining=0} on every successful (203)
+   * call — the API's "unmetered" signal, NOT an exhausted quota. The preflight must let every
+   * subsequent request through; otherwise demo mode breaks after the first call (the SDK would
+   * block AAPL options/stocks/funds that the API serves freely without a token).
+   */
+  @Test
+  void preflightAllowsWhenSnapshotIsUnmeteredDemo() {
+    long resetEpoch = Instant.now().plus(Duration.ofHours(1)).getEpochSecond();
+    HttpHeaders demo =
+        TestHttpClients.headersOf(
+            Map.of(
+                "x-api-ratelimit-limit", "0",
+                "x-api-ratelimit-remaining", "0",
+                "x-api-ratelimit-reset", String.valueOf(resetEpoch),
+                "x-api-ratelimit-consumed", "0"));
+    CapturingClient client = new CapturingClient(203, "ok".getBytes(), demo);
+    HttpTransport transport = newTransport(client);
+
+    // First call lands the unmetered snapshot (limit=0, remaining=0, reset in the future).
+    transport.executeAsync(RequestSpec.get("options/chain/AAPL").build()).join();
+    // Second call must still reach the wire — limit=0 means unmetered, not exhausted.
+    transport.executeAsync(RequestSpec.get("options/chain/AAPL").build()).join();
+
+    assertThat(client.captured).hasSize(2);
+  }
+
+  /**
    * Before any rate-limit-bearing response has arrived, the snapshot is {@code null} — the first
    * request must NOT be blocked despite there being "zero" remaining in the EMPTY sentinel. The
    * pre-flight gate has to distinguish "no data yet" from "actually exhausted".
