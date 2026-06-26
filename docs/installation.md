@@ -1,0 +1,70 @@
+# Installation
+
+This guide will help you install the Market Data Java SDK and configure it for your project.
+
+## Prerequisites
+
+- **JDK 17 or newer.** The SDK is compiled for Java 17 and is tested on JDK 17, 21, and 25.
+- A build tool: [Gradle](https://gradle.org/) or [Maven](https://maven.apache.org/).
+
+## Basic Installation
+
+Add the SDK as a dependency. The published artifact is a single JAR; it does **not** pull in a Kotlin standard library or a third-party HTTP client.
+
+### Gradle (Kotlin DSL)
+
+```kotlin
+// build.gradle.kts
+dependencies {
+    implementation("app.marketdata:marketdata-sdk-java:0.1.0")
+}
+```
+
+### Gradle (Groovy DSL)
+
+```groovy
+// build.gradle
+dependencies {
+    implementation 'app.marketdata:marketdata-sdk-java:0.1.0'
+}
+```
+
+### Maven
+
+```xml
+<dependency>
+  <groupId>app.marketdata</groupId>
+  <artifactId>marketdata-sdk-java</artifactId>
+  <version>0.1.0</version>
+</dependency>
+```
+
+> [!TIP]
+> Always check the [latest release](https://github.com/MarketDataApp/sdk-java/releases) for the current version number.
+
+> [!NOTE]
+> The Maven **groupId** is `app.marketdata` (the published Maven Central namespace), while the Java **package** you import from is `com.marketdata.sdk` — for example `import com.marketdata.sdk.MarketDataClient;`. The two are intentionally different.
+
+## Kotlin Support
+
+Although the SDK is written in Java, Kotlin consumers are a first-class audience:
+
+- The public API is null-annotated, so Kotlin sees real nullable/non-null types — not platform types (`String!`).
+- `MarketDataClient` is `AutoCloseable`, so you can use `client.use { ... }`.
+- Async methods return `java.util.concurrent.CompletableFuture`. If you use coroutines, bridge it with `kotlinx-coroutines-jdk8`'s `await()` — the SDK does **not** depend on coroutines itself.
+
+## Requirements & Dependencies
+
+The SDK keeps its dependency footprint small:
+
+- **No third-party HTTP client.** It uses the JDK's built-in `java.net.http.HttpClient` (HTTP/2).
+- **Jackson** (`jackson-databind`) for JSON decoding.
+- **JSpecify** nullability annotations — compile-time only, with no runtime cost.
+
+## Next Steps
+
+After installation, you'll need to:
+
+1. Set up your [authentication token](./authentication.md).
+2. Learn about the [client](./client.md) and how to make your first API requests.
+3. Configure [Settings](./settings.md) to customize output format, date format, and other universal parameters.

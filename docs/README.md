@@ -1,0 +1,63 @@
+# Java SDK
+
+Welcome to the Market Data Java SDK documentation. This SDK lets you integrate Market Data services into any JVM application. It ships typed, records-based responses, sync **and** async (`CompletableFuture`) variants for every endpoint, automatic retries and rate-limit tracking, and a sealed exception hierarchy you can branch on exhaustively.
+
+The SDK is written in Java (JDK 17+) with no Kotlin runtime dependency, but it is designed to be **idiomatic from Kotlin too**: nullability is annotated (no platform types), the client is `AutoCloseable` (so `use {}` works), and async methods return `CompletableFuture`, which Kotlin interops with directly.
+
+## Quick Start
+
+### Java
+
+```java
+import com.marketdata.sdk.MarketDataClient;
+import com.marketdata.sdk.stocks.StockQuoteRequest;
+
+// The no-arg constructor reads MARKETDATA_TOKEN from the environment (or a .env file)
+// and validates it on startup. The client is AutoCloseable.
+try (MarketDataClient client = new MarketDataClient()) {
+
+  // A single quote — quote(...) returns a list; a single symbol is row 0.
+  var quote = client.stocks().quote(StockQuoteRequest.of("AAPL")).values().get(0);
+  System.out.println(quote.symbol() + " last=" + quote.last());
+}
+```
+
+### Kotlin
+
+```kotlin
+import com.marketdata.sdk.MarketDataClient
+import com.marketdata.sdk.stocks.StockQuoteRequest
+
+// `use {}` closes the client when the block ends — the Kotlin equivalent of try-with-resources.
+MarketDataClient().use { client ->
+    val quote = client.stocks().quote(StockQuoteRequest.of("AAPL")).values()[0]
+    println("${quote.symbol()} last=${quote.last()}")
+}
+```
+
+## Open Source
+
+The SDK is open source and available on GitHub. Feel free to contribute to the project, report bugs, or request new features.
+
+- [Java SDK on GitHub](https://github.com/MarketDataApp/sdk-java/)
+
+## Documentation
+
+The best source for documentation on the SDK is right here. This documentation is the most up-to-date and accurate source of information on the SDK.
+
+## Using the SDK
+
+This SDK is designed to help you get up and running with Market Data's APIs as quickly as possible, providing all the tools you need to access real-time stock and options prices, historical data, and much more.
+
+### Getting Started
+
+1. [Install the SDK](./installation.md) into a Gradle or Maven project.
+2. Set up your [authentication token](./authentication.md) to access the API.
+3. Learn about the [client](./client.md) and how to make your first API requests.
+4. Configure [Settings](./settings.md) to customize output format, date format, and other universal parameters.
+5. Explore the available endpoints for [stocks](./stocks/README.md), [options](./options/README.md), [funds](./funds/README.md), [markets](./markets/README.md), and [utilities](./utilities/README.md).
+
+### Support
+
+- If you have any questions or need further assistance, please don't hesitate to open a ticket at our [helpdesk](https://www.marketdata.app/dashboard/).
+- If you find a bug you may also [open an issue in our GitHub repository](https://github.com/MarketDataApp/sdk-java/issues). Please only open issues if you find a bug. Use our helpdesk for general questions or implementation assistance.
