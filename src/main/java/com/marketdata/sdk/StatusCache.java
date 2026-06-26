@@ -128,10 +128,11 @@ final class StatusCache {
    * one malformed/truncated server-side entry could block retries for an unrelated service.
    */
   private static @Nullable String lookupService(Snapshot snap, URI uri) {
-    String path = uri.getPath();
-    if (path == null) {
-      return null;
-    }
+    // getPath() is null only for opaque URIs (e.g. mailto:) — never for the http(s) request URIs
+    // this gate sees. Coalesce to "" so no service key matches, rather than early-returning on a
+    // branch a hermetic test can't reach.
+    String rawPath = uri.getPath();
+    String path = rawPath == null ? "" : rawPath;
     String normalizedPath = path.endsWith("/") ? path : path + "/";
     String bestKey = null;
     for (String key : snap.serviceToStatus.keySet()) {

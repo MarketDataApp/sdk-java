@@ -584,10 +584,60 @@ class StocksResourceTest {
     assertThat(html.candles(StockCandlesRequest.of(StockResolution.DAILY, "AAPL")).html())
         .contains("<html>");
     assertThat(html.quote(StockQuoteRequest.of("AAPL")).html()).contains("<html>");
+    assertThat(html.quotes(StockQuotesRequest.builder("AAPL", "MSFT").build()).html())
+        .contains("<html>");
     assertThat(html.prices(StockPricesRequest.of("AAPL")).html()).contains("<html>");
     assertThat(html.news(StockNewsRequest.of("AAPL")).html()).contains("<html>");
     assertThat(html.earnings(StockEarningsRequest.of("AAPL")).html()).contains("<html>");
     assertThat(client.captured.get(0).uri().toString()).contains("format=html");
+  }
+
+  @Test
+  void candlesSpecEncodesDateAndCountbackWindows() {
+    CapturingClient client = okWith(CANDLES_BODY);
+    StocksResource stocks = resourceWith(client);
+
+    stocks.candles(
+        StockCandlesRequest.builder(StockResolution.DAILY, "AAPL")
+            .date(java.time.LocalDate.of(2026, 6, 22))
+            .build());
+    assertThat(client.captured.get(0).uri().toString()).contains("date=2026-06-22");
+
+    CapturingClient client2 = okWith(CANDLES_BODY);
+    resourceWith(client2)
+        .candles(
+            StockCandlesRequest.builder(StockResolution.DAILY, "AAPL")
+                .to(java.time.LocalDate.of(2026, 6, 22))
+                .countback(5)
+                .build());
+    assertThat(client2.captured.get(0).uri().toString()).contains("countback=5");
+  }
+
+  @Test
+  void intradayCandlesWithDegenerateWindowAreNotChunked() {
+    // Intraday + from == to: the chunker can't split a zero-width window, so it returns the single
+    // (degenerate) range and lets the backend handle it — one request, no fan-out.
+    CapturingClient client = okWith(CANDLES_BODY);
+    java.time.LocalDate day = java.time.LocalDate.of(2026, 6, 22);
+
+    resourceWith(client)
+        .candles(
+            StockCandlesRequest.builder(StockResolution.hours(1), "AAPL")
+                .from(day)
+                .to(day)
+                .build());
+
+    assertThat(client.captured).hasSize(1);
+  }
+
+  @Test
+  void newsSpecEncodesDateWindow() {
+    CapturingClient client = okWith(NEWS_BODY);
+
+    resourceWith(client)
+        .news(StockNewsRequest.builder("AAPL").date(java.time.LocalDate.of(2026, 6, 22)).build());
+
+    assertThat(client.captured.get(0).uri().toString()).contains("date=2026-06-22");
   }
 
   // ---------- response metadata (§13.5 / §16) ----------

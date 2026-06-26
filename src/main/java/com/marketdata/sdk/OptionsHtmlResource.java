@@ -4,7 +4,6 @@ import com.marketdata.sdk.options.OptionsChainRequest;
 import com.marketdata.sdk.options.OptionsExpirationsRequest;
 import com.marketdata.sdk.options.OptionsQuoteRequest;
 import com.marketdata.sdk.options.OptionsStrikesRequest;
-import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -63,14 +62,6 @@ public final class OptionsHtmlResource {
   }
 
   private CompletableFuture<HtmlResponse> executeHtml(RequestSpec.Builder b) {
-    config.applyTo(b);
-    b.format(Format.HTML);
-    RequestSpec spec = b.build();
-    return transport
-        .executeAsync(spec)
-        .thenApply(
-            env ->
-                new HtmlResponse(
-                    new String(env.body(), StandardCharsets.UTF_8), env, spec.format()));
+    return TextResponses.execute(transport, config, b, Format.HTML, HtmlResponse::new);
   }
 }

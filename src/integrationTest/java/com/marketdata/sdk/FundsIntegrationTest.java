@@ -40,6 +40,23 @@ class FundsIntegrationTest {
   }
 
   @Test
+  void csvCandlesReturnsRawCsvText() {
+    CsvResponse resp =
+        client
+            .funds()
+            .asCsv()
+            .candles(
+                FundCandlesRequest.builder(FundResolution.DAILY, SYMBOL)
+                    .from(LocalDate.now().minusMonths(1))
+                    .to(LocalDate.now())
+                    .build());
+
+    assertThat(resp.statusCode()).isIn(200, 203);
+    assertThat(resp.isCsv()).isTrue();
+    assertThat(resp.csv()).as("CSV facet returns comma-delimited text").isNotBlank().contains(",");
+  }
+
+  @Test
   void candlesReturnsDailyOhlcSeries() {
     FundCandlesResponse resp =
         client

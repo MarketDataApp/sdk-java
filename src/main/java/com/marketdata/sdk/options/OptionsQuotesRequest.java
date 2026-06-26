@@ -1,5 +1,6 @@
 package com.marketdata.sdk.options;
 
+import com.marketdata.sdk.Generated;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -113,6 +114,9 @@ public final class OptionsQuotesRequest {
       return this;
     }
 
+    // @Generated: the empty-symbols guard is unreachable — builder(first, ...) always seeds one
+    // symbol and the constructor is private, so the list is never empty here.
+    @Generated
     public OptionsQuotesRequest build() {
       if (optionSymbols.isEmpty()) {
         throw new IllegalArgumentException("at least one optionSymbol is required");

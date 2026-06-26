@@ -41,11 +41,9 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>Constructor is package-private (ADR-007) — consumers cannot instantiate.
  */
-public final class StocksResource {
+public final class StocksResource extends ConfiguredResource<StocksResource> {
 
-  private final HttpTransport transport;
   private final JsonResponseParser parser;
-  private final RequestConfig config;
 
   /** Client-facing constructor: registers the wire-format module once, starts with empty config. */
   StocksResource(HttpTransport transport, JsonResponseParser parser) {
@@ -54,42 +52,15 @@ public final class StocksResource {
   }
 
   private StocksResource(HttpTransport transport, JsonResponseParser parser, RequestConfig config) {
-    this.transport = transport;
+    super(transport, config);
     this.parser = parser;
-    this.config = config;
   }
 
-  // ---------- universal parameters (type-preserving + columns) ----------
+  // ---------- universal parameters: inherited from ConfiguredResource ----------
 
-  /** Returns a copy that requests {@code dateformat} on every subsequent call. */
-  public StocksResource dateFormat(DateFormat dateFormat) {
-    return new StocksResource(transport, parser, config.withDateFormat(dateFormat));
-  }
-
-  /**
-   * Returns a copy with the data-freshness {@code mode} (cached honored only by quote endpoints).
-   */
-  public StocksResource mode(Mode mode) {
-    return new StocksResource(transport, parser, config.withMode(mode));
-  }
-
-  /** Returns a copy with the pagination {@code limit}. */
-  public StocksResource limit(int limit) {
-    return new StocksResource(transport, parser, config.withLimit(limit));
-  }
-
-  /** Returns a copy with the pagination {@code offset}. */
-  public StocksResource offset(int offset) {
-    return new StocksResource(transport, parser, config.withOffset(offset));
-  }
-
-  /**
-   * Returns a copy that projects the response to the given columns (wire field names). Fields not
-   * requested decode to {@code null}; a requested column the API fails to return surfaces as a
-   * {@link com.marketdata.sdk.exception.ParseError} rather than a silent null.
-   */
-  public StocksResource columns(String... columns) {
-    return new StocksResource(transport, parser, config.withColumns(List.of(columns)));
+  @Override
+  StocksResource withConfig(RequestConfig config) {
+    return new StocksResource(transport, parser, config);
   }
 
   // ---------- format facet ----------
@@ -283,17 +254,7 @@ public final class StocksResource {
 
   private <D, R> java.util.concurrent.CompletableFuture<R> execute(
       RequestSpec spec, Class<D> decodeType, ResponseFactory<D, R> factory) {
-    return transport
-        .executeAsync(spec)
-        .thenApply(
-            env ->
-                factory.create(
-                    parser.parse(env, decodeType, config.columns()), env, spec.format()));
-  }
-
-  @FunctionalInterface
-  interface ResponseFactory<D, R> {
-    R create(D decoded, HttpResponseEnvelope envelope, Format format);
+    return JsonResponses.execute(transport, parser, spec, config.columns(), decodeType, factory);
   }
 
   // ---------- request spec builders (package-private static — reused by the facets) ----------

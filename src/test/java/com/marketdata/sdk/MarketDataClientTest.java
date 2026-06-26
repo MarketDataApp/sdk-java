@@ -234,4 +234,52 @@ class MarketDataClientTest {
         .hasMessageContaining(".env")
         .hasMessageContaining("not readable");
   }
+
+  // ---------- resource accessors + happy-path wiring ----------
+
+  @Test
+  void exposes_a_non_null_facade_for_every_resource(@TempDir Path tmp) {
+    try (MarketDataClient client =
+        new MarketDataClient(null, null, null, false, NO_ENV, noDotEnv(tmp))) {
+      assertThat(client.utilities()).isNotNull();
+      assertThat(client.options()).isNotNull();
+      assertThat(client.stocks()).isNotNull();
+      assertThat(client.funds()).isNotNull();
+      assertThat(client.markets()).isNotNull();
+    }
+  }
+
+  @Test
+  @Timeout(value = 5, unit = TimeUnit.SECONDS)
+  void constructor_runs_startup_validation_in_demo_mode_without_network(@TempDir Path tmp) {
+    // validateOnStartup=true drives the constructor's runStartupValidation() call; with no token
+    // the client is in demo mode, so validation must skip the /user/ call (no network, no hang).
+    try (MarketDataClient client =
+        new MarketDataClient(null, null, null, true, NO_ENV, noDotEnv(tmp))) {
+      assertThat(client.toString()).contains("demoMode=true");
+    }
+  }
+
+  @Test
+  void successful_resolve_replays_pending_dotenv_warnings(@TempDir Path tmp) throws IOException {
+    // Unreadable .env emits a warning, but explicit valid config means resolve SUCCEEDS — so the
+    // constructor's happy-path warning-replay loop runs (distinct from the resolve-failure path).
+    Path dotEnv = tmp.resolve(".env");
+    Files.writeString(dotEnv, "MARKETDATA_TOKEN=irrelevant\n");
+    boolean permsSupported = false;
+    try {
+      Files.setPosixFilePermissions(dotEnv, PosixFilePermissions.fromString("---------"));
+      permsSupported = true;
+    } catch (UnsupportedOperationException ignored) {
+      // Non-POSIX filesystem — skipped below.
+    }
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+        permsSupported && !Files.isReadable(dotEnv),
+        "Test requires a filesystem that supports making files unreadable to the current user.");
+
+    try (MarketDataClient client =
+        new MarketDataClient("any-token", "https://valid.example", "v1", false, NO_ENV, dotEnv)) {
+      assertThat(client.toString()).contains("baseUrl=https://valid.example");
+    }
+  }
 }

@@ -147,20 +147,11 @@ public final class UtilitiesResource {
 
   private <D, R> CompletableFuture<R> execute(
       RequestSpec spec, Class<D> decodeType, ResponseFactory<D, R> factory) {
-    return transport
-        .executeAsync(spec)
-        .thenApply(env -> factory.create(parser.parse(env, decodeType), env, spec.format()));
+    return JsonResponses.execute(transport, parser, spec, List.of(), decodeType, factory);
   }
 
   private <D, R> CompletableFuture<R> execute(
       RequestSpec spec, RetryPolicy policy, Class<D> decodeType, ResponseFactory<D, R> factory) {
-    return transport
-        .executeAsync(spec, policy)
-        .thenApply(env -> factory.create(parser.parse(env, decodeType), env, spec.format()));
-  }
-
-  @FunctionalInterface
-  interface ResponseFactory<D, R> {
-    R create(D decoded, HttpResponseEnvelope envelope, Format format);
+    return JsonResponses.execute(transport, parser, spec, policy, List.of(), decodeType, factory);
   }
 }

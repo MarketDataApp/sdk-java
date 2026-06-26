@@ -57,6 +57,17 @@ class OptionsIntegrationTest {
   }
 
   @Test
+  void csvExpirationsReturnsRawCsvText() {
+    CsvResponse resp =
+        client.options().asCsv().expirations(OptionsExpirationsRequest.of(UNDERLYING));
+
+    assertThat(resp.statusCode()).isIn(200, 203);
+    assertThat(resp.isCsv()).isTrue();
+    // expirations CSV is a single date column, so assert non-blank text rather than a delimiter.
+    assertThat(resp.csv()).isNotBlank();
+  }
+
+  @Test
   void lookupConvertsHumanDescriptionToOccSymbol() {
     // A far-future date keeps the test stable against expiration drift — the endpoint converts
     // the description regardless of whether such a contract actually exists today.

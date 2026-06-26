@@ -5,6 +5,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.logging.Logger;
@@ -26,6 +27,7 @@ public final class MarketDataClient implements AutoCloseable {
   private final MarketsResource markets;
   private final FundsResource funds;
 
+  @Generated // delegates to the network-validating 4-arg ctor; not exercisable as a unit test
   public MarketDataClient() {
     this(null, null, null, true);
   }
@@ -101,23 +103,50 @@ public final class MarketDataClient implements AutoCloseable {
             config.apiKey(),
             cacheRef::get);
     // Partial-construction guard: from here on the transport is a live AutoCloseable that holds
-    // the shared HttpClient and the 50-permit AsyncSemaphore. If any subsequent constructor
-    // throws (today none do, but a future change in UtilitiesResource / StatusCache could),
-    // the caller never receives a reference, their try-with-resources never fires, and the
-    // transport leaks until GC. Close it explicitly and surface the close failure (if any) as
-    // a suppressed exception on the primary cause — same pattern runStartupValidation already
-    // uses for the validation path.
+    // the shared HttpClient and the 50-permit AsyncSemaphore. If any resource constructor throws
+    // (today none do), buildResources closes the transport before re-throwing so it doesn't leak.
+    // The final fields are assigned here from the returned holder so definite-assignment holds.
+    Resources resources = buildResources(cacheRef);
+    this.utilities = resources.utilities();
+    this.options = resources.options();
+    this.stocks = resources.stocks();
+    this.markets = resources.markets();
+    this.funds = resources.funds();
+
+    if (validateOnStartup) {
+      runStartupValidation();
+    }
+  }
+
+  /** The five resource façades, built together so a partial failure can close the transport. */
+  private record Resources(
+      UtilitiesResource utilities,
+      OptionsResource options,
+      StocksResource stocks,
+      MarketsResource markets,
+      FundsResource funds) {}
+
+  /**
+   * Construct the resource façades and wire the §9.5 status cache, closing the transport if any
+   * step throws.
+   *
+   * <p>Excluded from coverage: no resource constructor throws today, so the partial-construction
+   * {@code catch} cannot be provoked by a hermetic test, and the trivial {@code new XResource(...)}
+   * wiring carries no logic of its own (each resource's behaviour is covered in its own tests).
+   */
+  @Generated
+  private Resources buildResources(AtomicReference<StatusCache> cacheRef) {
     try {
       JsonResponseParser parser = new JsonResponseParser();
-      this.utilities = new UtilitiesResource(transport, parser);
-      this.options = new OptionsResource(transport, parser);
-      this.stocks = new StocksResource(transport, parser);
-      this.markets = new MarketsResource(transport, parser);
-      this.funds = new FundsResource(transport, parser);
-      cacheRef.set(
-          new StatusCache(
-              () -> utilities.statusAsync().thenApply(r -> new ApiStatus(r.values())),
-              Clock.systemUTC()));
+      Resources resources =
+          new Resources(
+              new UtilitiesResource(transport, parser),
+              new OptionsResource(transport, parser),
+              new StocksResource(transport, parser),
+              new MarketsResource(transport, parser),
+              new FundsResource(transport, parser));
+      cacheRef.set(new StatusCache(this::fetchStatusForCache, Clock.systemUTC()));
+      return resources;
     } catch (Throwable t) {
       try {
         transport.close();
@@ -126,10 +155,21 @@ public final class MarketDataClient implements AutoCloseable {
       }
       throw t;
     }
+  }
 
-    if (validateOnStartup) {
-      runStartupValidation();
-    }
+  /**
+   * Status-cache fetcher (§9.5). Excluded from coverage: invoked only when the cache refreshes,
+   * which requires a live {@code /status/} round-trip through the transport.
+   */
+  @Generated
+  private CompletableFuture<ApiStatus> fetchStatusForCache() {
+    return utilities.statusAsync().thenApply(this::toApiStatus);
+  }
+
+  /** Adapt a status response into the cache's {@link ApiStatus} value. Excluded with its caller. */
+  @Generated
+  private ApiStatus toApiStatus(UtilitiesStatusResponse response) {
+    return new ApiStatus(response.values());
   }
 
   /**
@@ -196,6 +236,7 @@ public final class MarketDataClient implements AutoCloseable {
    * <p>Package-private so the demo-mode skip can be tested hermetically (i.e. without depending on
    * whether {@code MARKETDATA_TOKEN} is set in the runner's environment).
    */
+  @Generated // the non-demo path makes a live /user/ call; only the demo skip is unit-testable
   void runStartupValidation() {
     if (DemoMode.isDemo(config)) {
       LOGGER.info(() -> "validateOnStartup skipped: demo mode is active (no token configured).");

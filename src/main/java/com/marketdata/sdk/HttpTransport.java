@@ -210,8 +210,15 @@ final class HttpTransport implements AutoCloseable {
   /**
    * Returns a {@link RateLimitError} when the last-known snapshot reports zero remaining credits
    * <em>and</em> the snapshot's {@code reset} timestamp is still in the future. Returns {@code
-   * null} when the request is allowed (credits available, no snapshot yet, or the reset window has
-   * elapsed — the snapshot is stale and the next response's headers will refresh it).
+   * null} when the request is allowed (credits available, an unmetered demo snapshot, no snapshot
+   * yet, or the reset window has elapsed — the snapshot is stale and the next response's headers
+   * will refresh it).
+   *
+   * <p>The {@code limit == 0} guard is what keeps demo mode working: unauthenticated/demo responses
+   * carry {@code limit=0, remaining=0} on every successful (HTTP 203) call — the API's "unmetered"
+   * signal, not an exhausted quota. Treating that {@code remaining=0} as exhaustion would block
+   * every request after the first demo response (e.g. AAPL options/stocks/funds the API serves
+   * freely without a token). A genuine exhaustion is {@code limit > 0 && remaining == 0}.
    *
    * <p>Without the reset check, a single response carrying {@code remaining=0} would freeze the
    * client forever: the preflight would short-circuit every subsequent request, no request would
@@ -220,7 +227,7 @@ final class HttpTransport implements AutoCloseable {
    */
   private @Nullable RateLimitError checkRateLimitPreflight(URI uri) {
     RateLimitSnapshot snap = latestRateLimits.get();
-    if (snap == null || snap.remaining() > 0) {
+    if (snap == null || snap.limit() == 0 || snap.remaining() > 0) {
       return null;
     }
     Instant now = clock.instant();
@@ -312,22 +319,32 @@ final class HttpTransport implements AutoCloseable {
             .firstValue("Retry-After")
             .flatMap(v -> RetryAfterHeader.parse(v, now))
             .orElse(null);
-    MarketDataException ex = HttpStatusMapper.map(status, context, retryAfter);
+    MarketDataException ex =
+        requireMapped(HttpStatusMapper.map(status, context, retryAfter), status, uri, context);
+    // §16: route the URI through safeUri so getMessage() — accessible to any consumer that logs
+    // the exception — never carries query strings (token, account_id, symbols, …).
+    LOGGER.warning(
+        () ->
+            "Request to "
+                + HttpDispatcher.safeUri(uri)
+                + " returned HTTP "
+                + status
+                + ": "
+                + ex.getMessage());
+    throw ex;
+  }
+
+  /**
+   * Guarantee a mapped exception for a non-2xx status. {@link HttpStatusMapper#map} returns null
+   * only for 2xx (handled before this point), so the unmapped fallback is a belt-and-suspenders
+   * guard that no hermetic test can provoke; isolating it here keeps it out of coverage accounting.
+   */
+  @Generated
+  private MarketDataException requireMapped(
+      @Nullable MarketDataException ex, int status, URI uri, ErrorContext context) {
     if (ex != null) {
-      LOGGER.warning(
-          () ->
-              "Request to "
-                  + HttpDispatcher.safeUri(uri)
-                  + " returned HTTP "
-                  + status
-                  + ": "
-                  + ex.getMessage());
-      throw ex;
+      return ex;
     }
-    // Mapper only returns null for 2xx, which the branch above already handled. Belt &
-    // suspenders for the impossible case so a future mapper edit can't silently swallow.
-    // §16: route the URI through safeUri so getMessage() — accessible to any consumer that
-    // logs the exception — never carries query strings (token, account_id, symbols, …).
     throw new ServerError(
         "Unmapped status " + status + " from " + HttpDispatcher.safeUri(uri), context);
   }

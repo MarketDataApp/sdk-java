@@ -37,6 +37,23 @@ class MarketsIntegrationTest {
   }
 
   @Test
+  void csvStatusReturnsRawCsvText() {
+    CsvResponse resp =
+        client
+            .markets()
+            .asCsv()
+            .status(
+                MarketStatusRequest.builder()
+                    .from(LocalDate.now().minusDays(7))
+                    .to(LocalDate.now())
+                    .build());
+
+    assertThat(resp.statusCode()).isIn(200, 203);
+    assertThat(resp.isCsv()).isTrue();
+    assertThat(resp.csv()).as("CSV facet returns comma-delimited text").isNotBlank().contains(",");
+  }
+
+  @Test
   void statusReturnsOneRowPerDayInRange() {
     MarketStatusResponse resp =
         client

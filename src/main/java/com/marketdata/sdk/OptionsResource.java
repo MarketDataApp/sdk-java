@@ -43,11 +43,9 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>Constructor is package-private (ADR-007) — consumers cannot instantiate.
  */
-public final class OptionsResource {
+public final class OptionsResource extends ConfiguredResource<OptionsResource> {
 
-  private final HttpTransport transport;
   private final JsonResponseParser parser;
-  private final RequestConfig config;
 
   /** Client-facing constructor: registers the wire-format module once, starts with empty config. */
   OptionsResource(HttpTransport transport, JsonResponseParser parser) {
@@ -57,42 +55,15 @@ public final class OptionsResource {
 
   private OptionsResource(
       HttpTransport transport, JsonResponseParser parser, RequestConfig config) {
-    this.transport = transport;
+    super(transport, config);
     this.parser = parser;
-    this.config = config;
   }
 
-  // ---------- universal parameters (type-preserving + columns) ----------
+  // ---------- universal parameters: inherited from ConfiguredResource ----------
 
-  /** Returns a copy that requests {@code dateformat} on every subsequent call. */
-  public OptionsResource dateFormat(DateFormat dateFormat) {
-    return new OptionsResource(transport, parser, config.withDateFormat(dateFormat));
-  }
-
-  /**
-   * Returns a copy with the data-freshness {@code mode} (cached honored only by quote endpoints).
-   */
-  public OptionsResource mode(Mode mode) {
-    return new OptionsResource(transport, parser, config.withMode(mode));
-  }
-
-  /** Returns a copy with the pagination {@code limit}. */
-  public OptionsResource limit(int limit) {
-    return new OptionsResource(transport, parser, config.withLimit(limit));
-  }
-
-  /** Returns a copy with the pagination {@code offset}. */
-  public OptionsResource offset(int offset) {
-    return new OptionsResource(transport, parser, config.withOffset(offset));
-  }
-
-  /**
-   * Returns a copy that projects the response to the given columns (wire field names). Fields not
-   * requested decode to {@code null}; a requested column the API fails to return surfaces as a
-   * {@link com.marketdata.sdk.exception.ParseError} rather than a silent null.
-   */
-  public OptionsResource columns(String... columns) {
-    return new OptionsResource(transport, parser, config.withColumns(List.of(columns)));
+  @Override
+  OptionsResource withConfig(RequestConfig config) {
+    return new OptionsResource(transport, parser, config);
   }
 
   // ---------- format facet ----------
@@ -237,17 +208,7 @@ public final class OptionsResource {
 
   private <D, R> CompletableFuture<R> execute(
       RequestSpec spec, Class<D> decodeType, ResponseFactory<D, R> factory) {
-    return transport
-        .executeAsync(spec)
-        .thenApply(
-            env ->
-                factory.create(
-                    parser.parse(env, decodeType, config.columns()), env, spec.format()));
-  }
-
-  @FunctionalInterface
-  interface ResponseFactory<D, R> {
-    R create(D decoded, HttpResponseEnvelope envelope, Format format);
+    return JsonResponses.execute(transport, parser, spec, config.columns(), decodeType, factory);
   }
 
   // ---------- request spec builders (package-private static — reused by the facets) ----------
@@ -388,9 +349,9 @@ public final class OptionsResource {
       b.query("year", v.year());
     } else if (f instanceof ExpirationFilter.All) {
       b.query("expiration", "all");
-    } else {
-      throw new IllegalStateException("unhandled ExpirationFilter variant: " + f);
     }
+    // ExpirationFilter is sealed and every variant is handled above; Java 17 can't prove that in
+    // an if-chain, but there is no reachable else, so no defensive throw is needed.
   }
 
   private static String strikeFilterWireValue(StrikeFilter f) {
@@ -398,10 +359,11 @@ public final class OptionsResource {
       return formatStrike(v.price());
     } else if (f instanceof StrikeFilter.Range v) {
       return formatStrike(v.min()) + "-" + formatStrike(v.max());
-    } else if (f instanceof StrikeFilter.Comparison v) {
-      return v.operator().wireValue() + formatStrike(v.price());
     }
-    throw new IllegalStateException("unhandled StrikeFilter variant: " + f);
+    // StrikeFilter is sealed; the only remaining variant is Comparison. The cast documents that
+    // exhaustiveness (Java 17 can't prove it in an if-chain) and fails fast if a variant is added.
+    StrikeFilter.Comparison v = (StrikeFilter.Comparison) f;
+    return v.operator().wireValue() + formatStrike(v.price());
   }
 
   private static String formatStrike(double v) {

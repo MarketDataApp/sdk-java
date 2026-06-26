@@ -5,7 +5,6 @@ import com.marketdata.sdk.options.OptionsExpirationsRequest;
 import com.marketdata.sdk.options.OptionsQuoteRequest;
 import com.marketdata.sdk.options.OptionsQuotesRequest;
 import com.marketdata.sdk.options.OptionsStrikesRequest;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -20,44 +19,17 @@ import java.util.concurrent.CompletableFuture;
  * <p>Carries the universal-param config from the typed resource and additionally exposes the
  * output-shaping {@code columns}/{@code human}/{@code headers} params, which only cohere with CSV.
  */
-public final class OptionsCsvResource {
-
-  private final HttpTransport transport;
-  private final RequestConfig config;
+public final class OptionsCsvResource extends FormattedResource<OptionsCsvResource> {
 
   OptionsCsvResource(HttpTransport transport, RequestConfig config) {
-    this.transport = transport;
-    this.config = config;
+    super(transport, config);
   }
 
-  // ---------- universal + output-shaping params ----------
+  // ---------- universal + output-shaping params: inherited from FormattedResource ----------
 
-  public OptionsCsvResource dateFormat(DateFormat v) {
-    return new OptionsCsvResource(transport, config.withDateFormat(v));
-  }
-
-  public OptionsCsvResource mode(Mode v) {
-    return new OptionsCsvResource(transport, config.withMode(v));
-  }
-
-  public OptionsCsvResource limit(int v) {
-    return new OptionsCsvResource(transport, config.withLimit(v));
-  }
-
-  public OptionsCsvResource offset(int v) {
-    return new OptionsCsvResource(transport, config.withOffset(v));
-  }
-
-  public OptionsCsvResource columns(String... v) {
-    return new OptionsCsvResource(transport, config.withColumns(List.of(v)));
-  }
-
-  public OptionsCsvResource human(boolean v) {
-    return new OptionsCsvResource(transport, config.withHuman(v));
-  }
-
-  public OptionsCsvResource headers(boolean v) {
-    return new OptionsCsvResource(transport, config.withHeaders(v));
+  @Override
+  OptionsCsvResource withConfig(RequestConfig config) {
+    return new OptionsCsvResource(transport, config);
   }
 
   // ---------- endpoints ----------
@@ -131,14 +103,6 @@ public final class OptionsCsvResource {
   // ---------- execute ----------
 
   private CompletableFuture<CsvResponse> executeCsv(RequestSpec.Builder b) {
-    config.applyTo(b);
-    b.format(Format.CSV);
-    RequestSpec spec = b.build();
-    return transport
-        .executeAsync(spec)
-        .thenApply(
-            env ->
-                new CsvResponse(
-                    new String(env.body(), StandardCharsets.UTF_8), env, spec.format()));
+    return TextResponses.execute(transport, config, b, Format.CSV, CsvResponse::new);
   }
 }

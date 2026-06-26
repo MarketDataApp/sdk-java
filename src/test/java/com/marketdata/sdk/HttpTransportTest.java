@@ -46,6 +46,33 @@ class HttpTransportTest {
         clock);
   }
 
+  // ---------- joinSync error unwrapping ----------
+
+  @Test
+  void joinSyncUnwrapsCancellation() {
+    HttpTransport transport =
+        newTransport(
+            new CapturingClient(200, "ok".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true)));
+    CompletableFuture<String> cancelled = new CompletableFuture<>();
+    cancelled.cancel(true);
+
+    assertThatThrownBy(() -> transport.joinSync(cancelled))
+        .isInstanceOf(java.util.concurrent.CancellationException.class);
+  }
+
+  @Test
+  void joinSyncWrapsCheckedCauseAsNetworkError() {
+    HttpTransport transport =
+        newTransport(
+            new CapturingClient(200, "ok".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true)));
+    // A non-RuntimeException, non-MarketDataException cause falls to the NetworkError fallback.
+    CompletableFuture<String> failed =
+        CompletableFuture.failedFuture(new java.io.IOException("transport down"));
+
+    assertThatThrownBy(() -> transport.joinSync(failed))
+        .isInstanceOf(com.marketdata.sdk.exception.NetworkError.class);
+  }
+
   // ---------- URL & header composition ----------
 
   @Test
@@ -452,6 +479,33 @@ class HttpTransportTest {
     transport.executeAsync(RequestSpec.get("markets/status").build()).join();
     // Second call should proceed — credits still available.
     transport.executeAsync(RequestSpec.get("markets/status").build()).join();
+
+    assertThat(client.captured).hasSize(2);
+  }
+
+  /**
+   * Demo / unauthenticated responses carry {@code limit=0, remaining=0} on every successful (203)
+   * call — the API's "unmetered" signal, NOT an exhausted quota. The preflight must let every
+   * subsequent request through; otherwise demo mode breaks after the first call (the SDK would
+   * block AAPL options/stocks/funds that the API serves freely without a token).
+   */
+  @Test
+  void preflightAllowsWhenSnapshotIsUnmeteredDemo() {
+    long resetEpoch = Instant.now().plus(Duration.ofHours(1)).getEpochSecond();
+    HttpHeaders demo =
+        TestHttpClients.headersOf(
+            Map.of(
+                "x-api-ratelimit-limit", "0",
+                "x-api-ratelimit-remaining", "0",
+                "x-api-ratelimit-reset", String.valueOf(resetEpoch),
+                "x-api-ratelimit-consumed", "0"));
+    CapturingClient client = new CapturingClient(203, "ok".getBytes(), demo);
+    HttpTransport transport = newTransport(client);
+
+    // First call lands the unmetered snapshot (limit=0, remaining=0, reset in the future).
+    transport.executeAsync(RequestSpec.get("options/chain/AAPL").build()).join();
+    // Second call must still reach the wire — limit=0 means unmetered, not exhausted.
+    transport.executeAsync(RequestSpec.get("options/chain/AAPL").build()).join();
 
     assertThat(client.captured).hasSize(2);
   }

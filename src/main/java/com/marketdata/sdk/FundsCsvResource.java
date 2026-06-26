@@ -1,7 +1,6 @@
 package com.marketdata.sdk;
 
 import com.marketdata.sdk.funds.FundCandlesRequest;
-import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -12,44 +11,17 @@ import java.util.concurrent.CompletableFuture;
  * <p>Carries the universal-param config from the typed resource and additionally exposes the
  * output-shaping {@code columns}/{@code human}/{@code headers} params, which only cohere with CSV.
  */
-public final class FundsCsvResource {
-
-  private final HttpTransport transport;
-  private final RequestConfig config;
+public final class FundsCsvResource extends FormattedResource<FundsCsvResource> {
 
   FundsCsvResource(HttpTransport transport, RequestConfig config) {
-    this.transport = transport;
-    this.config = config;
+    super(transport, config);
   }
 
-  // ---------- universal + output-shaping params ----------
+  // ---------- universal + output-shaping params: inherited from FormattedResource ----------
 
-  public FundsCsvResource dateFormat(DateFormat v) {
-    return new FundsCsvResource(transport, config.withDateFormat(v));
-  }
-
-  public FundsCsvResource mode(Mode v) {
-    return new FundsCsvResource(transport, config.withMode(v));
-  }
-
-  public FundsCsvResource limit(int v) {
-    return new FundsCsvResource(transport, config.withLimit(v));
-  }
-
-  public FundsCsvResource offset(int v) {
-    return new FundsCsvResource(transport, config.withOffset(v));
-  }
-
-  public FundsCsvResource columns(String... v) {
-    return new FundsCsvResource(transport, config.withColumns(java.util.List.of(v)));
-  }
-
-  public FundsCsvResource human(boolean v) {
-    return new FundsCsvResource(transport, config.withHuman(v));
-  }
-
-  public FundsCsvResource headers(boolean v) {
-    return new FundsCsvResource(transport, config.withHeaders(v));
+  @Override
+  FundsCsvResource withConfig(RequestConfig config) {
+    return new FundsCsvResource(transport, config);
   }
 
   // ---------- endpoints ----------
@@ -65,14 +37,6 @@ public final class FundsCsvResource {
   // ---------- execute ----------
 
   private CompletableFuture<CsvResponse> executeCsv(RequestSpec.Builder b) {
-    config.applyTo(b);
-    b.format(Format.CSV);
-    RequestSpec spec = b.build();
-    return transport
-        .executeAsync(spec)
-        .thenApply(
-            env ->
-                new CsvResponse(
-                    new String(env.body(), StandardCharsets.UTF_8), env, spec.format()));
+    return TextResponses.execute(transport, config, b, Format.CSV, CsvResponse::new);
   }
 }

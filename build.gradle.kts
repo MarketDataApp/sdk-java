@@ -134,14 +134,31 @@ tasks.register<JacocoReport>("jacocoAggregateReport") {
     }
 }
 
-// Coverage ratchet (line coverage cannot drop more than 5 pp below
-// main's last value) is enforced in CI — see .github/workflows/pull-request.yml
-// and .github/scripts/check-coverage-delta.py. Not enforced locally so that
-// dev iteration isn't blocked while coverage is in flux.
+// Coverage ratchet (line coverage cannot drop more than 5 pp below main's last value) is enforced
+// in CI — see .github/workflows/pull-request.yml and .github/scripts/check-coverage-delta.py.
 //
-// SDK requirements §15.3 mandates 100% line coverage with explicit ignore
-// comments on untestable lines. Target deferred until business resources land
-// and the defensive-guards cleanup pass can run together.
+// SDK requirements §15.3: 100% line coverage. Enforced locally and in CI by
+// jacocoTestCoverageVerification (wired into `check`). The handful of genuinely untestable lines —
+// network-only constructor paths, fail-safe catch blocks, TOCTOU retry edges — are isolated into
+// members annotated @Generated, which JaCoCo excludes from the count (the annotation's simple name
+// contains "Generated", the marker JaCoCo recognizes since 0.8.2). Each use carries a comment
+// explaining why the member is unreachable from a hermetic unit test.
+tasks.jacocoTestCoverageVerification {
+    dependsOn(tasks.test)
+    violationRules {
+        rule {
+            limit {
+                counter = "LINE"
+                value = "COVEREDRATIO"
+                minimum = "1.0".toBigDecimal()
+            }
+        }
+    }
+}
+
+tasks.named("check") {
+    dependsOn(tasks.jacocoTestCoverageVerification)
+}
 
 spotless {
     java {

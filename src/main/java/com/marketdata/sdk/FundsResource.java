@@ -32,11 +32,9 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>Constructor is package-private (ADR-007) — consumers cannot instantiate.
  */
-public final class FundsResource {
+public final class FundsResource extends ConfiguredResource<FundsResource> {
 
-  private final HttpTransport transport;
   private final JsonResponseParser parser;
-  private final RequestConfig config;
 
   /** Client-facing constructor: registers the wire-format module once, starts with empty config. */
   FundsResource(HttpTransport transport, JsonResponseParser parser) {
@@ -45,40 +43,15 @@ public final class FundsResource {
   }
 
   private FundsResource(HttpTransport transport, JsonResponseParser parser, RequestConfig config) {
-    this.transport = transport;
+    super(transport, config);
     this.parser = parser;
-    this.config = config;
   }
 
-  // ---------- universal parameters (type-preserving + columns) ----------
+  // ---------- universal parameters: inherited from ConfiguredResource ----------
 
-  /** Returns a copy that requests {@code dateformat} on every subsequent call. */
-  public FundsResource dateFormat(DateFormat dateFormat) {
-    return new FundsResource(transport, parser, config.withDateFormat(dateFormat));
-  }
-
-  /** Returns a copy with the data-freshness {@code mode}. */
-  public FundsResource mode(Mode mode) {
-    return new FundsResource(transport, parser, config.withMode(mode));
-  }
-
-  /** Returns a copy with the pagination {@code limit}. */
-  public FundsResource limit(int limit) {
-    return new FundsResource(transport, parser, config.withLimit(limit));
-  }
-
-  /** Returns a copy with the pagination {@code offset}. */
-  public FundsResource offset(int offset) {
-    return new FundsResource(transport, parser, config.withOffset(offset));
-  }
-
-  /**
-   * Returns a copy that projects the response to the given columns (wire field names). Fields not
-   * requested decode to {@code null}; a requested column the API fails to return surfaces as a
-   * {@link com.marketdata.sdk.exception.ParseError} rather than a silent null.
-   */
-  public FundsResource columns(String... columns) {
-    return new FundsResource(transport, parser, config.withColumns(List.of(columns)));
+  @Override
+  FundsResource withConfig(RequestConfig config) {
+    return new FundsResource(transport, parser, config);
   }
 
   // ---------- format facet ----------
@@ -119,17 +92,7 @@ public final class FundsResource {
 
   private <D, R> java.util.concurrent.CompletableFuture<R> execute(
       RequestSpec spec, Class<D> decodeType, ResponseFactory<D, R> factory) {
-    return transport
-        .executeAsync(spec)
-        .thenApply(
-            env ->
-                factory.create(
-                    parser.parse(env, decodeType, config.columns()), env, spec.format()));
-  }
-
-  @FunctionalInterface
-  interface ResponseFactory<D, R> {
-    R create(D decoded, HttpResponseEnvelope envelope, Format format);
+    return JsonResponses.execute(transport, parser, spec, config.columns(), decodeType, factory);
   }
 
   // ---------- request spec builders (package-private static — reused by the facets) ----------

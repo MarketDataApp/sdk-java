@@ -6,7 +6,6 @@ import com.marketdata.sdk.stocks.StockNewsRequest;
 import com.marketdata.sdk.stocks.StockPricesRequest;
 import com.marketdata.sdk.stocks.StockQuoteRequest;
 import com.marketdata.sdk.stocks.StockQuotesRequest;
-import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -78,14 +77,6 @@ public final class StocksHtmlResource {
   }
 
   private CompletableFuture<HtmlResponse> executeHtml(RequestSpec.Builder b) {
-    config.applyTo(b);
-    b.format(Format.HTML);
-    RequestSpec spec = b.build();
-    return transport
-        .executeAsync(spec)
-        .thenApply(
-            env ->
-                new HtmlResponse(
-                    new String(env.body(), StandardCharsets.UTF_8), env, spec.format()));
+    return TextResponses.execute(transport, config, b, Format.HTML, HtmlResponse::new);
   }
 }
