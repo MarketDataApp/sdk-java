@@ -1,0 +1,7 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "Market Data Java & Kotlin SDK",
+  "description": "Official JVM SDK for the Market Data API, with idiomatic support for both Java and Kotlin consumers.",
+  "folders": ["docs"],
+  "excludeFolders": ["docs/adr"]
+}
