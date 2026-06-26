@@ -3,7 +3,6 @@ package com.marketdata.sdk;
 import com.marketdata.sdk.options.OptionsChainRequest;
 import com.marketdata.sdk.options.OptionsExpirationsRequest;
 import com.marketdata.sdk.options.OptionsQuoteRequest;
-import com.marketdata.sdk.options.OptionsStrikesRequest;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -43,14 +42,6 @@ public final class OptionsHtmlResource {
 
   public HtmlResponse quote(OptionsQuoteRequest request) {
     return transport.joinSync(quoteAsync(request));
-  }
-
-  public CompletableFuture<HtmlResponse> strikesAsync(OptionsStrikesRequest request) {
-    return executeHtml(OptionsResource.strikesSpec(request));
-  }
-
-  public HtmlResponse strikes(OptionsStrikesRequest request) {
-    return transport.joinSync(strikesAsync(request));
   }
 
   public CompletableFuture<HtmlResponse> expirationsAsync(OptionsExpirationsRequest request) {

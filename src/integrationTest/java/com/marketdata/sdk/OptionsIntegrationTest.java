@@ -3,7 +3,6 @@ package com.marketdata.sdk;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.marketdata.sdk.options.ExpirationFilter;
-import com.marketdata.sdk.options.ExpirationStrikes;
 import com.marketdata.sdk.options.OptionQuote;
 import com.marketdata.sdk.options.OptionSide;
 import com.marketdata.sdk.options.OptionsChainRequest;
@@ -11,7 +10,6 @@ import com.marketdata.sdk.options.OptionsExpirationsRequest;
 import com.marketdata.sdk.options.OptionsLookupRequest;
 import com.marketdata.sdk.options.OptionsQuoteRequest;
 import com.marketdata.sdk.options.OptionsQuotesRequest;
-import com.marketdata.sdk.options.OptionsStrikesRequest;
 import com.marketdata.sdk.options.StrikeRange;
 import java.time.LocalDate;
 import java.util.List;
@@ -89,17 +87,6 @@ class OptionsIntegrationTest {
     assertThat(resp.values()).as("AAPL has options expirations year-round").isNotEmpty();
     assertThat(resp.updated()).isNotNull();
     assertThat(resp.updated().getZone().getId()).isEqualTo("America/New_York");
-  }
-
-  @Test
-  void strikesReturnsStrikesPerExpiration() {
-    OptionsStrikesResponse resp = client.options().strikes(OptionsStrikesRequest.of(UNDERLYING));
-
-    assertThat(resp.statusCode()).isIn(200, 203);
-    assertThat(resp.values()).isNotEmpty();
-    ExpirationStrikes first = resp.values().get(0);
-    assertThat(first.strikes()).as("first expiration's strike ladder is non-empty").isNotEmpty();
-    assertThat(first.expiration().getZone().getId()).isEqualTo("America/New_York");
   }
 
   @Test

@@ -192,10 +192,7 @@ public final class MarketDataClient implements AutoCloseable {
     return utilities;
   }
 
-  /**
-   * Options endpoints: {@code lookup}, {@code expirations}, {@code strikes}, {@code quotes}, {@code
-   * chain}.
-   */
+  /** Options endpoints: {@code lookup}, {@code expirations}, {@code quotes}, {@code chain}. */
   public OptionsResource options() {
     return options;
   }
