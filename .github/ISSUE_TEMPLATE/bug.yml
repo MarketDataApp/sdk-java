@@ -1,0 +1,146 @@
+name: Bug Report
+description: Report a bug in the Market Data Java & Kotlin SDK
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please fill out all required fields to help us reproduce and fix the issue.
+
+        **Important:** The SDK returns data exactly as the API provides it. Before reporting, please verify the behavior you're seeing differs from what the [API documentation](https://www.marketdata.app/docs/api) describes.
+
+  - type: checkboxes
+    id: api-docs-verified
+    attributes:
+      label: API Documentation Verification
+      description: Confirm you've checked the API documentation before reporting this as an SDK bug.
+      options:
+        - label: I have reviewed the [API documentation](https://www.marketdata.app/docs/api) for this endpoint
+          required: true
+        - label: The behavior I'm reporting differs from what the API documentation describes (not just unexpected to me)
+          required: true
+
+  - type: dropdown
+    id: language
+    attributes:
+      label: Language
+      description: Which language are you calling the SDK from?
+      options:
+        - Java
+        - Kotlin
+        - Other JVM language
+    validations:
+      required: true
+
+  - type: dropdown
+    id: endpoint
+    attributes:
+      label: SDK Resource
+      description: Which part of the SDK is affected?
+      options:
+        - stocks
+        - options
+        - markets
+        - funds
+        - utilities
+        - Client (general)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: method
+    attributes:
+      label: Method
+      description: Which method are you calling? (e.g., candles, quote, chain)
+      placeholder: candles
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction Code
+      description: Complete, runnable Java or Kotlin code that demonstrates the bug. Must be self-contained.
+      placeholder: |
+        try (var client = new MarketDataClient()) {
+            var resp = client.stocks().candles(
+                StockCandlesRequest.builder(StockResolution.DAILY, "AAPL")
+                    .from(LocalDate.parse("2024-01-01"))
+                    .build());
+            // Bug: ...
+        }
+      render: java
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should happen?
+      placeholder: The method should return candle data for the specified date range.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happens? Include any error messages and stack traces.
+      placeholder: |
+        com.marketdata.sdk.exception.ParseError: ...
+        	at com.marketdata.sdk....
+    validations:
+      required: true
+
+  - type: input
+    id: sdk-version
+    attributes:
+      label: SDK Version
+      description: The `app.marketdata:marketdata-sdk-java` version declared in your build.gradle(.kts) or pom.xml
+      placeholder: "1.0.0"
+    validations:
+      required: true
+
+  - type: input
+    id: jdk-version
+    attributes:
+      label: JDK Version
+      description: Run `java -version` to find this
+      placeholder: "17.0.10"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: build-tool
+    attributes:
+      label: Build Tool
+      options:
+        - Gradle (Kotlin DSL)
+        - Gradle (Groovy DSL)
+        - Maven
+        - Other
+    validations:
+      required: false
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      multiple: true
+      options:
+        - macOS
+        - Windows
+        - Linux
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional Context
+      description: Any other relevant information (config, workarounds tried, etc.)
+    validations:
+      required: false

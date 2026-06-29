@@ -1,9 +1,39 @@
-# Market Data Java SDK
+<div align="center">
 
-Java SDK for the [Market Data API](https://www.marketdata.app/). **Pre-release**
-— the `utilities`, `options`, and `stocks` resources are implemented; `funds`
-and `markets` are forthcoming. The build, package layout, configuration cascade,
-exception taxonomy, and Kotlin-interop foundations are in place.
+# Market Data Java &amp; Kotlin SDK v1.0
+### Access Financial Data with Ease
+
+> This is the official JVM SDK for [Market Data](https://www.marketdata.app/), built for **Java and Kotlin** alike. It provides developers with a powerful, easy-to-use interface to obtain real-time and historical financial data. Ideal for building financial applications, trading bots, and investment strategies.
+
+[![Tests](https://github.com/MarketDataApp/sdk-java/actions/workflows/main.yml/badge.svg)](https://github.com/MarketDataApp/sdk-java/actions/workflows/main.yml)
+[![Coverage](https://codecov.io/gh/MarketDataApp/sdk-java/graph/badge.svg)](https://codecov.io/gh/MarketDataApp/sdk-java)
+[![License](https://img.shields.io/github/license/MarketDataApp/sdk-java.svg)](https://github.com/MarketDataApp/sdk-java/blob/main/LICENSE)
+[![Maven Central](https://img.shields.io/maven-central/v/app.marketdata/marketdata-sdk-java)](https://central.sonatype.com/artifact/app.marketdata/marketdata-sdk-java)
+[![Java](https://img.shields.io/badge/Java-17%20%7C%2021%20%7C%2025-007396.svg?logo=openjdk&logoColor=white)](https://adoptium.net/)
+[![Kotlin](https://img.shields.io/badge/Kotlin-first--class-7F52FF.svg?logo=kotlin&logoColor=white)](https://kotlinlang.org/)
+
+#### Connect With The Market Data Community
+
+[![Website](https://img.shields.io/badge/Website-marketdata.app-blue)](https://www.marketdata.app/)
+[![Discord](https://img.shields.io/badge/Discord-join%20chat-7389D8.svg?logo=discord&logoColor=ffffff)](https://discord.com/invite/GmdeAVRtnT)
+[![Twitter](https://img.shields.io/twitter/follow/MarketDataApp?style=social)](https://twitter.com/MarketDataApp)
+[![Helpdesk](https://img.shields.io/badge/Support-Ticketing-ff69b4.svg?logo=TicketTailor&logoColor=white)](https://www.marketdata.app/dashboard/)
+
+</div>
+
+## Features
+
+- **First-Class Kotlin Support**: Every public type is `@NullMarked` (JSpecify), so Kotlin sees real nullable / non-null types instead of platform types — no Kotlin artifact, no coroutines dependency, idiomatic from both languages
+- **Sync & Async Parity**: Every endpoint offers a blocking method and a `CompletableFuture` variant, bridgeable to Kotlin coroutines via `await()`
+- **Real-time Stock Data**: Prices, quotes, candles (OHLCV), earnings, and news
+- **Options Trading Data**: Complete options chains, expirations, strikes, quotes, and lookup
+- **Mutual Funds**: Historical candles and pricing data
+- **Market Status**: Real-time market open/closed status for multiple countries
+- **Multiple Output Formats**: Typed objects, JSON, CSV, or HTML
+- **Built-in Retry Logic**: Automatic retry with exponential backoff for reliable data fetching
+- **Rate Limit Tracking**: Per-response and client-level rate-limit snapshots
+- **Type-Safe**: Records, a sealed exception hierarchy, and builder-based request objects
+- **Zero Config**: Works out of the box with sensible defaults
 
 ## Requirements
 
@@ -12,16 +42,14 @@ exception taxonomy, and Kotlin-interop foundations are in place.
 - **Jackson 2.18+** on the runtime classpath. Pulled transitively;
   consumers may align to a newer 2.x.
 
-## Install (planned)
+## Install
 
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("app.marketdata:marketdata-sdk-java:0.1.0")
+    implementation("app.marketdata:marketdata-sdk-java:1.0.0")
 }
 ```
-
-Coordinates are placeholders until the first publication to Maven Central.
 
 ## Quick start
 
@@ -284,8 +312,9 @@ hierarchy and carry support context (`requestId`, `requestUrl`,
 tickets:
 
 ```java
-try {
-    // call endpoint method (forthcoming)
+try (var client = new MarketDataClient()) {
+    var resp = client.stocks().quote(StockQuotesRequest.of("AAPL"));
+    System.out.println(resp.values());
 } catch (RateLimitError e) {
     System.err.println(e.getSupportInfo());
 }

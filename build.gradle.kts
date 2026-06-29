@@ -12,9 +12,9 @@ plugins {
 group = "app.marketdata"
 
 // Version is overridable from the command line so a manual Central Portal
-// validation run can use a real release version (e.g. `-PsdkVersion=0.1.0`)
+// validation run can use a real release version (e.g. `-PsdkVersion=1.0.0`)
 // without committing it. Default stays on the in-development SNAPSHOT.
-version = (findProperty("sdkVersion") as String?) ?: "0.1.0-SNAPSHOT"
+version = (findProperty("sdkVersion") as String?) ?: "1.0.0-SNAPSHOT"
 
 // ADR-002: minimum JDK 17, build with --release 17, single bytecode level.
 java {
@@ -199,9 +199,12 @@ mavenPublishing {
 
     coordinates(group.toString(), "marketdata-sdk-java", version.toString())
     pom {
-        name.set("Market Data Java SDK")
-        description.set("Java SDK for the Market Data API.")
-        url.set("https://github.com/MarketDataApp/sdk-java")
+        name.set("Market Data Java & Kotlin SDK")
+        description.set(
+            "Official Java & Kotlin SDK for the Market Data API — real-time and " +
+                "historical financial data: stocks, options, mutual funds, and market status."
+        )
+        url.set("https://www.marketdata.app/docs/sdk/java")
         inceptionYear.set("2026")
 
         licenses {
@@ -222,6 +225,10 @@ mavenPublishing {
             url.set("https://github.com/MarketDataApp/sdk-java")
             connection.set("scm:git:git://github.com/MarketDataApp/sdk-java.git")
             developerConnection.set("scm:git:ssh://git@github.com/MarketDataApp/sdk-java.git")
+        }
+        issueManagement {
+            system.set("GitHub")
+            url.set("https://github.com/MarketDataApp/sdk-java/issues")
         }
     }
 }

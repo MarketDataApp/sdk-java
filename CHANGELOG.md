@@ -7,119 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-- Default retry attempts corrected from 3 to 4 (one initial + three retries) to
-  match SDK requirements §9.3 ("max 3 retries, yielding 4 total attempts").
-- `.env` parser now strips trailing inline `# comment` markers (quote-aware: a
-  `#` inside single/double quotes or adjacent to value chars stays part of the
-  value). Previously a line like `MARKETDATA_TOKEN=abc # prod` produced the
-  literal value `abc # prod`, which passes `validateApiKey` (printable ASCII)
-  and surfaces later as a confusing `AuthenticationError` far from the .env
-  source that caused it.
-- `RequestHeaders` canonical constructor now rejects a `null` `headers` map
-  with a clear `NullPointerException` naming the field, replacing the bare
-  `Map.copyOf(null)` NPE that left consumers hunting for the offending
-  argument. The wire-format deserializer additionally intercepts a top-level
-  JSON `null` body via `JsonDeserializer#getNullValue` and surfaces it as a
-  `ParseError` carrying the endpoint URL, status, and request id — preventing
-  a malformed `/headers/` response from manifesting as an opaque NPE further
-  down the call stack.
+## [1.0.0] - 2026-06-29
+
+First stable release of the Market Data Java &amp; Kotlin SDK — a single JVM
+artifact, idiomatic from both Java and Kotlin, covering the full v1 API surface
+with sync + async parity on every endpoint.
 
 ### Added
-- **Markets resource** (`client.markets()`) — the single markets endpoint,
-  `status`, in sync + async form: the exchange open/closed calendar ("was/is
-  the market open on these days?"), distinct from `utilities().status()` (the
-  API's own service health). Takes a Builder-based `MarketStatusRequest` where
-  *every* parameter is optional — a bare `of()` returns today's status, US
-  calendar; window is `date` xor `from`/`to` xor `to`+`countback`, plus
-  `country` (two-digit ISO 3166; the backend serves US today and answers
-  `no_data` for others). Rows are `MarketStatus(date, status)` with derived
-  `isOpen()`/`isClosed()` predicates; a `status` cell comes back null for days
-  outside the backend's holiday-calendar coverage and decodes to null (the
-  Option A column guarantee still applies to the column itself). Universal
-  params (`dateFormat`/`mode`/`limit`/`offset`/`columns`) as configured
-  copies, CSV facet via `asCsv()` with the `human`/`headers` shaping params,
-  and the same nullable-fields + `columns` + Option A decoding contract as
-  stocks/options.
-- **Funds resource** (`client.funds()`) — the single funds endpoint, `candles`,
-  in sync + async form, taking a Builder-based `FundCandlesRequest` (window:
-  `date` xor `from`/`to`/`countback`). Fund candles are NAV series: OHLC only
-  (no volume column), daily-and-up resolutions only — `FundResolution` models
-  `DAILY`/`WEEKLY`/`MONTHLY`/`YEARLY` and `days/weeks/months/years(n)`, with no
-  intraday factories (the API rejects intraday tokens for funds) and therefore
-  no §12 auto-chunking. Universal params (`dateFormat`/`mode`/`limit`/`offset`/
-  `columns`) as configured copies, CSV facet via `asCsv()` with the
-  `human`/`headers` shaping params, and the same nullable-fields + `columns` +
-  Option A decoding contract as stocks/options.
-- **Stocks resource** (`client.stocks()`) — six endpoints, each in sync + async
-  form: `candles`, `quote` (single symbol), `quotes` and `prices` (multi-symbol,
-  batched into one request — one row per symbol, not a fan-out map like
-  `options.quotes`), `news`, and `earnings`. Every endpoint takes a Builder-based
-  per-endpoint request object. Candle resolution is a `StockResolution` value
-  type (`DAILY`, `minutes(15)`, `hours(1)`, …) rather than an enum, since the API
-  accepts an open-ended family of resolutions. Quote/price numeric fields are
-  nullable (the backend nulls them for a closed/illiquid market); the OHLC and
-  52-week columns are opt-in via `candle` / `week52`. `news` exposes the feed's
-  scalar `updated()` off the response (distinct from each article's
-  `publicationDate`); `earnings` tolerates the nullable fundamentals/report fields
-  on synthesized forward-quarter rows. Mixed date/timestamp wire shapes (a daily
-  candle's date-only `t` vs. an intraday full timestamp) decode uniformly. Carries
-  the same universal-parameter setters, `columns` projection (with the Option A
-  strict guarantee), and `asCsv()` facet as `options`. Intraday candle requests
-  spanning more than ~one year are **auto-split** into year-sized sub-requests,
-  fetched concurrently through the 50-permit pool and merged into one response
-  (SDK requirements §12), on both the typed and CSV paths.
-- **Per-response rate limits** — every `MarketDataResponse` now exposes
-  `rateLimit()` returning a `RateLimitSnapshot` parsed from that response's own
-  `x-api-ratelimit-*` headers (request-scoped, SDK requirements §8.2), distinct
-  from the client-level `MarketDataClient.getRateLimits()`. Applies to every
-  resource (options/utilities/stocks) and the CSV/HTML responses.
-- **Options resource** (`client.options()`) — all six endpoints, each in sync +
-  async form: `lookup`, `expirations`, `strikes`, `quote` (single contract),
-  `quotes` (multi-contract fan-out returning a per-symbol
-  `Map<String, OptionsQuotesResponse>`), and `chain`. Every endpoint takes a
-  Builder-based per-endpoint request object (no `String` convenience overloads)
-  and returns a named typed response (`OptionsChainResponse`,
-  `OptionsLookupResponse`, …) implementing `MarketDataResponse<T>` — the payload
-  is reached via `values()`. The `chain` request models its mutually-exclusive
-  expiration and strike groups as sealed types (`ExpirationFilter`,
-  `StrikeFilter`) so the exclusivity is compiler-enforced. Covers the `rho` greek
-  (decoded as an optional, nullable column — absent on some feeds) plus the
-  `Greek` enum with `presentGreeks()` / `greek(Greek)` accessors, the
-  `expiration=all` filter (the full chain vs. the default front-month), and the
-  `countback` historical-window parameter (validated: positive, and mutually
-  exclusive with `date`/`from`). Universal parameters
-  (`dateFormat`/`mode`/`limit`/`offset`) and `columns` projection are set fluently
-  on the resource; a non-requested column decodes to `null`, while a required
-  column you *did* request that the API omits raises a `ParseError` (Option A).
-  The `asCsv()` facet returns CSV (`CsvResponse`) for every endpoint and adds the
-  output-shaping `human` / `headers` params.
-- Project scaffold per ADRs 001–007: Gradle Kotlin DSL build, JDK 17 toolchain,
-  `integrationTest` source set, Spotless + JaCoCo, Vanniktech Maven Publish.
-- `MarketDataClient` skeleton with two public constructors — a no-arg one
-  for production (everything resolved from the cascade) and a 4-arg one
-  (`apiKey`, `baseUrl`, `apiVersion`, `validateOnStartup`) for tests and
-  short-lived runtimes. Default base URL (`https://api.marketdata.app`),
-  default API version (`v1`), 99 s request / 2 s connect timeouts, HTTP/2,
-  demo mode, `validateOnStartup` toggle, and a 50-permit concurrency
-  semaphore (wiring lands with the request layer).
-- Configuration cascade: explicit constructor parameters → `MARKETDATA_*`
-  environment variables → `.env` file in CWD → built-in defaults.
-- Sealed `MarketDataException` hierarchy with the seven canonical subtypes
+
+- **`MarketDataClient`** — no-arg constructor (everything resolved from the
+  configuration cascade) and a 4-arg constructor for tests/short-lived runtimes.
+  Single shared `HttpClient` (HTTP/2), 99 s request / 2 s connect timeouts,
+  `close()` for resource release, and `getRateLimits()`.
+- **Configuration cascade** — explicit constructor parameters → `MARKETDATA_*`
+  environment variables → `.env` in the working directory → built-in defaults.
+  `baseUrl` / `apiVersion` are normalized and validated at construction.
+- **Demo mode** — without a token the client omits the `Authorization` header
+  and serves public, read-only endpoints; `validateOnStartup` verifies auth on
+  construction otherwise.
+- **Options resource** (`client.options()`) — `lookup`, `expirations`,
+  `strikes`, `quote`, `quotes` (per-symbol fan-out map), and `chain` with the
+  full filter surface (sealed `ExpirationFilter` / `StrikeFilter`, greeks,
+  `expiration=all`, `countback`).
+- **Stocks resource** (`client.stocks()`) — `candles`, `quote`, `quotes` and
+  `prices` (batched multi-symbol), `news`, and `earnings`. `StockResolution`
+  value type for open-ended resolutions; intraday windows over ~1 year are
+  auto-split, fetched concurrently, and merged.
+- **Markets resource** (`client.markets()`) — `status`, the exchange
+  open/closed calendar with `date` / `from`-`to` / `countback` windowing and
+  `country` selection.
+- **Funds resource** (`client.funds()`) — `candles`, NAV OHLC series at
+  daily-and-up resolutions (`FundResolution`).
+- **Utilities resource** (`client.utilities()`) — service `status` and auth
+  validation.
+- **Universal parameters & formats** — `dateFormat` / `mode` / `limit` /
+  `offset` / `columns` set fluently on every resource (immutable configured
+  copies), plus an `asCsv()` facet (with `human` / `headers` shaping) for every
+  endpoint. `columns` projection enforces the Option A strict-decoding contract.
+- **Reliability** — retry with exponential backoff (4 total attempts,
+  `Retry-After` honored), client-level and per-response rate-limit snapshots
+  with preflight, `/status/` stale-while-revalidate cache gating retries, and a
+  50-permit async concurrency pool.
+- **Sealed `MarketDataException` hierarchy** — seven canonical subtypes
   (`AuthenticationError`, `BadRequestError`, `NotFoundError`, `RateLimitError`,
   `ServerError`, `NetworkError`, `ParseError`), each carrying support context
-  (`requestId`, `requestUrl`, `statusCode`, `timestamp`) and a
-  `getSupportInfo()` helper.
-- `RateLimitSnapshot` record exposed via `MarketDataClient.getRateLimits()`.
-- JSpecify `@NullMarked` on every public package; JSpecify on `compileOnlyApi`
-  so consumers get the annotations at compile time without a runtime dep.
-- Token redaction utility (`Tokens`, package-private in the SDK root) for
-  log output.
-- MIT license; SDK version auto-detected from the JAR manifest
-  (`Implementation-Version`).
-- Single-package architecture per ADR-007: every infra class
-  (`Configuration`, `EnvVars`, `Tokens`, `Version`) lives in
-  `com.marketdata.sdk` as package-private. The `internal/` subpackage
-  was removed; the consumer's compiler cannot reference these types,
-  closing the "internal type leaks via constructor signature" gap that
-  every non-modular Java SDK has.
+  (`requestId`, `requestUrl`, `statusCode`, `timestamp`) and `getSupportInfo()`.
+- **First-class Kotlin interop** — `@NullMarked` (JSpecify) on every public
+  package, no Kotlin-stdlib or coroutines runtime dependency, SAM callbacks, and
+  Kotlin-reserved-word-free public API.
+- **Packaging** — MIT license, SemVer, version auto-detected from the JAR
+  manifest, published to Maven Central as `app.marketdata:marketdata-sdk-java`.
+
+[Unreleased]: https://github.com/MarketDataApp/sdk-java/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/MarketDataApp/sdk-java/releases/tag/v1.0.0

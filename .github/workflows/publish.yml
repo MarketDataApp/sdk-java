@@ -1,17 +1,40 @@
 name: Publish to Maven Central
 
 on:
+  # Manual: publish any version on demand.
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to publish (e.g. 0.1.0, without the 'v')"
+        description: "Version to publish (e.g. 1.0.0, without the 'v')"
         required: true
+        type: string
+      ref:
+        description: "Commit SHA to build & publish from (defaults to the launch commit)"
+        required: false
+        default: ''
         type: string
       release:
         description: "Publish and release. Off = upload to the Portal and stop at VALIDATED for manual review."
         required: true
         type: boolean
         default: false
+  # Chained: invoked by tag-and-release.yml after a release is cut.
+  workflow_call:
+    inputs:
+      version:
+        description: "Version to publish (e.g. 1.0.0, without the 'v')"
+        required: true
+        type: string
+      ref:
+        description: "Commit SHA to build & publish from (defaults to the launch commit)"
+        required: false
+        default: ''
+        type: string
+      release:
+        description: "Publish and release. Off = upload to the Portal and stop at VALIDATED."
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   guard:
@@ -23,13 +46,17 @@ jobs:
       - name: Check latest main.yml conclusion
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          # Build/guard against the explicit commit when given (chained path);
+          # otherwise the commit the workflow was launched from.
+          SHA: ${{ inputs.ref || github.sha }}
         run: |
           conclusion=$(gh api \
-            "repos/${{ github.repository }}/actions/workflows/main.yml/runs?head_sha=${{ github.sha }}&status=completed" \
+            "repos/${REPO}/actions/workflows/main.yml/runs?head_sha=${SHA}&status=completed" \
             --jq '.workflow_runs[0].conclusion // "missing"')
-          echo "main.yml conclusion for ${{ github.sha }}: $conclusion"
+          echo "main.yml conclusion for ${SHA}: $conclusion"
           if [ "$conclusion" != "success" ]; then
-            echo "::error::main.yml is not green for ${{ github.sha }} (got: $conclusion). Run publish from a commit on main whose CI passed."
+            echo "::error::main.yml is not green for ${SHA} (got: $conclusion). Run publish from a commit on main whose CI passed."
             exit 1
           fi
 
@@ -41,6 +68,7 @@ jobs:
       name: maven-central
       url: https://central.sonatype.com/artifact/app.marketdata/marketdata-sdk-java
     env:
+      VERSION: ${{ inputs.version }}
       ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
       ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
       ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
@@ -48,6 +76,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Build from the explicit commit when chained; else the launch commit.
+          ref: ${{ inputs.ref || github.sha }}
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -59,12 +90,12 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build and test
-        run: ./gradlew clean build -PsdkVersion=${{ inputs.version }}
+        run: ./gradlew clean build -PsdkVersion="$VERSION"
 
       - name: Upload to Portal (validate only)
         if: ${{ !inputs.release }}
-        run: ./gradlew publishToMavenCentral -PsdkVersion=${{ inputs.version }}
+        run: ./gradlew publishToMavenCentral -PsdkVersion="$VERSION"
 
       - name: Publish and release
         if: ${{ inputs.release }}
-        run: ./gradlew publishAndReleaseToMavenCentral -PsdkVersion=${{ inputs.version }}
+        run: ./gradlew publishAndReleaseToMavenCentral -PsdkVersion="$VERSION"
