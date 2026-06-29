@@ -32,7 +32,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Install both the matrix JDK (test execution) and JDK 17 (compile +
       # Gradle daemon runtime). Order matters: setup-java sets JAVA_HOME
@@ -89,7 +89,7 @@ jobs:
         java: ['17', '21', '25']
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDKs (test=${{ matrix.java }}, compile/daemon=17)
         uses: actions/setup-java@v4
