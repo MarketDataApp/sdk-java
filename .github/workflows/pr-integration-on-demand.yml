@@ -56,7 +56,7 @@ jobs:
       mode: ${{ steps.matrix.outputs.mode }}
     steps:
       - name: Verify commenter has write permission
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const { data: perm } = await github.rest.repos.getCollaboratorPermissionLevel({
@@ -73,7 +73,7 @@ jobs:
             }
 
       - name: React 👀 to the trigger comment
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             await github.rest.reactions.createForIssueComment({
@@ -85,7 +85,7 @@ jobs:
 
       - name: Resolve PR head SHA
         id: pr
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const { data: pr } = await github.rest.pulls.get({
@@ -209,7 +209,7 @@ jobs:
 
       - name: Comment outcome on the PR
         if: always()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const ok = '${{ needs.integration-tests.result }}' === 'success';
