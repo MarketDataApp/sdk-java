@@ -16,7 +16,7 @@ Add the SDK as a dependency. The published artifact is a single JAR; it does **n
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("app.marketdata:marketdata-sdk-java:0.1.0")
+    implementation("app.marketdata:marketdata-sdk-java:1.0.0")
 }
 ```
 
@@ -25,7 +25,7 @@ dependencies {
 ```groovy
 // build.gradle
 dependencies {
-    implementation 'app.marketdata:marketdata-sdk-java:0.1.0'
+    implementation 'app.marketdata:marketdata-sdk-java:1.0.0'
 }
 ```
 
@@ -35,7 +35,7 @@ dependencies {
 <dependency>
   <groupId>app.marketdata</groupId>
   <artifactId>marketdata-sdk-java</artifactId>
-  <version>0.1.0</version>
+  <version>1.0.0</version>
 </dependency>
 ```
 

@@ -1,10 +1,11 @@
 name: Publish to Maven Central
 
 on:
+  # Manual: publish any version on demand.
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to publish (e.g. 0.1.0, without the 'v')"
+        description: "Version to publish (e.g. 1.0.0, without the 'v')"
         required: true
         type: string
       release:
@@ -12,6 +13,18 @@ on:
         required: true
         type: boolean
         default: false
+  # Chained: invoked by tag-and-release.yml after a release is cut.
+  workflow_call:
+    inputs:
+      version:
+        description: "Version to publish (e.g. 1.0.0, without the 'v')"
+        required: true
+        type: string
+      release:
+        description: "Publish and release. Off = upload to the Portal and stop at VALIDATED."
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   guard:
@@ -41,6 +54,7 @@ jobs:
       name: maven-central
       url: https://central.sonatype.com/artifact/app.marketdata/marketdata-sdk-java
     env:
+      VERSION: ${{ inputs.version }}
       ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
       ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
       ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
@@ -59,12 +73,12 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build and test
-        run: ./gradlew clean build -PsdkVersion=${{ inputs.version }}
+        run: ./gradlew clean build -PsdkVersion="$VERSION"
 
       - name: Upload to Portal (validate only)
         if: ${{ !inputs.release }}
-        run: ./gradlew publishToMavenCentral -PsdkVersion=${{ inputs.version }}
+        run: ./gradlew publishToMavenCentral -PsdkVersion="$VERSION"
 
       - name: Publish and release
         if: ${{ inputs.release }}
-        run: ./gradlew publishAndReleaseToMavenCentral -PsdkVersion=${{ inputs.version }}
+        run: ./gradlew publishAndReleaseToMavenCentral -PsdkVersion="$VERSION"
