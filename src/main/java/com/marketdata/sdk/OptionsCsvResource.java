@@ -4,7 +4,6 @@ import com.marketdata.sdk.options.OptionsChainRequest;
 import com.marketdata.sdk.options.OptionsExpirationsRequest;
 import com.marketdata.sdk.options.OptionsQuoteRequest;
 import com.marketdata.sdk.options.OptionsQuotesRequest;
-import com.marketdata.sdk.options.OptionsStrikesRequest;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -82,14 +81,6 @@ public final class OptionsCsvResource extends FormattedResource<OptionsCsvResour
 
   public Map<String, CsvResponse> quotes(OptionsQuotesRequest request) {
     return transport.joinSync(quotesAsync(request));
-  }
-
-  public CompletableFuture<CsvResponse> strikesAsync(OptionsStrikesRequest request) {
-    return executeCsv(OptionsResource.strikesSpec(request));
-  }
-
-  public CsvResponse strikes(OptionsStrikesRequest request) {
-    return transport.joinSync(strikesAsync(request));
   }
 
   public CompletableFuture<CsvResponse> expirationsAsync(OptionsExpirationsRequest request) {

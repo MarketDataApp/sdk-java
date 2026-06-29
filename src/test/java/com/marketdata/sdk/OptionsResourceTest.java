@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.marketdata.sdk.exception.ParseError;
 import com.marketdata.sdk.options.ExpirationFilter;
-import com.marketdata.sdk.options.ExpirationStrikes;
 import com.marketdata.sdk.options.Greek;
 import com.marketdata.sdk.options.OptionQuote;
 import com.marketdata.sdk.options.OptionSide;
@@ -14,7 +13,6 @@ import com.marketdata.sdk.options.OptionsExpirationsRequest;
 import com.marketdata.sdk.options.OptionsLookupRequest;
 import com.marketdata.sdk.options.OptionsQuoteRequest;
 import com.marketdata.sdk.options.OptionsQuotesRequest;
-import com.marketdata.sdk.options.OptionsStrikesRequest;
 import com.marketdata.sdk.options.StrikeFilter;
 import com.marketdata.sdk.options.StrikeRange;
 import java.net.URI;
@@ -352,160 +350,6 @@ class OptionsResourceTest {
     assertThatThrownBy(() -> options.expirations(OptionsExpirationsRequest.of("AAPL")))
         .isInstanceOf(ParseError.class)
         .hasMessageContaining("non-string, non-numeric");
-  }
-
-  // ---------- strikes: URL & params ----------
-
-  @Test
-  void strikesHitsVersionedEndpoint() {
-    CapturingClient client =
-        okWith("{\"s\":\"ok\",\"updated\":1705449600,\"2025-01-17\":[140,145,150]}");
-    OptionsResource options = resourceWith(client);
-
-    options.strikesAsync(OptionsStrikesRequest.of("AAPL")).join();
-
-    String url = client.captured.get(0).uri().toString();
-    assertThat(url).isEqualTo("http://localhost/v1/options/strikes/AAPL/");
-  }
-
-  @Test
-  void strikesAttachesExpirationAndDateFilters() {
-    CapturingClient client =
-        okWith("{\"s\":\"ok\",\"updated\":1705449600,\"2025-01-17\":[140,145]}");
-    OptionsResource options = resourceWith(client);
-
-    options
-        .strikesAsync(
-            OptionsStrikesRequest.builder("AAPL")
-                .expiration(LocalDate.of(2025, Month.JANUARY, 17))
-                .date(LocalDate.of(2024, Month.DECEMBER, 16))
-                .build())
-        .join();
-
-    String url = client.captured.get(0).uri().toString();
-    assertThat(url)
-        .isEqualTo(
-            "http://localhost/v1/options/strikes/AAPL/?expiration=2025-01-17&date=2024-12-16");
-  }
-
-  // ---------- strikes: response decoding ----------
-
-  @Test
-  void strikesDecodesMultipleExpirations() {
-    ZoneId et = ZoneId.of("America/New_York");
-    CapturingClient client =
-        okWith(
-            "{\"s\":\"ok\",\"updated\":1705449600,"
-                + "\"2025-01-17\":[140.0,145.0,150.0],"
-                + "\"2025-02-21\":[135.0,140.0,145.0,150.0]}");
-    OptionsResource options = resourceWith(client);
-
-    OptionsStrikesResponse resp = options.strikes(OptionsStrikesRequest.of("AAPL"));
-    List<ExpirationStrikes> strikes = resp.values();
-
-    assertThat(strikes).hasSize(2);
-    ExpirationStrikes first = strikes.get(0);
-    assertThat(first.expiration())
-        .isEqualTo(LocalDate.of(2025, Month.JANUARY, 17).atStartOfDay(et));
-    assertThat(first.strikes()).containsExactly(140.0, 145.0, 150.0);
-    ExpirationStrikes second = strikes.get(1);
-    assertThat(second.expiration())
-        .isEqualTo(LocalDate.of(2025, Month.FEBRUARY, 21).atStartOfDay(et));
-    assertThat(second.strikes()).containsExactly(135.0, 140.0, 145.0, 150.0);
-    assertThat(resp.updated()).isNotNull();
-    assertThat(resp.updated().getZone().getId()).isEqualTo("America/New_York");
-  }
-
-  @Test
-  void strikesAcceptsTimestampStringFormatForUpdated() {
-    // The expiration keys are ALWAYS literal ISO dates regardless of dateformat (the backend
-    // emits str(date) for the key, ignoring the format param). Only `updated` honors dateformat.
-    CapturingClient client =
-        okWith("{\"s\":\"ok\",\"updated\":\"2025-01-16 19:00:00 -05:00\",\"2025-01-17\":[150.0]}");
-    OptionsResource options = resourceWith(client);
-
-    OptionsStrikesResponse resp = options.strikes(OptionsStrikesRequest.of("AAPL"));
-    List<ExpirationStrikes> strikes = resp.values();
-    assertThat(strikes).hasSize(1);
-    assertThat(resp.updated()).isNotNull();
-    assertThat(resp.updated().toLocalDate()).isEqualTo(LocalDate.of(2025, Month.JANUARY, 16));
-  }
-
-  // ---------- strikes: envelope handling ----------
-
-  @Test
-  void strikesNoDataEnvelopeYieldsEmptyList() {
-    // The strikes endpoint also attaches nextTime/prevTime hints in no_data envelopes; the
-    // deserializer ignores them (they aren't part of the typed surface).
-    CapturingClient client = okWith("{\"s\":\"no_data\",\"nextTime\":null,\"prevTime\":null}");
-    OptionsResource options = resourceWith(client);
-
-    OptionsStrikesResponse resp = options.strikes(OptionsStrikesRequest.of("BOGUS"));
-    List<ExpirationStrikes> strikes = resp.values();
-    assertThat(strikes).isEmpty();
-    assertThat(resp.updated()).isNull();
-  }
-
-  @Test
-  void strikesErrorEnvelopeSurfacesAsParseError() {
-    CapturingClient client = okWith("{\"s\":\"error\",\"errmsg\":\"Symbol not found\"}");
-    OptionsResource options = resourceWith(client);
-
-    assertThatThrownBy(() -> options.strikes(OptionsStrikesRequest.of("BOGUS")))
-        .isInstanceOf(ParseError.class)
-        .hasMessageContaining("Symbol not found");
-  }
-
-  @Test
-  void strikesMissingUpdatedThrowsParseError() {
-    CapturingClient client = okWith("{\"s\":\"ok\",\"2025-01-17\":[150.0]}");
-    OptionsResource options = resourceWith(client);
-
-    assertThatThrownBy(() -> options.strikes(OptionsStrikesRequest.of("AAPL")))
-        .isInstanceOf(ParseError.class)
-        .hasMessageContaining("updated");
-  }
-
-  @Test
-  void strikesUnrecognizedTopLevelKeyThrowsParseError() {
-    // Strict-by-default — a non-date, non-{s,updated} key signals server change. Surfacing it
-    // gives us a diagnostic breadcrumb instead of silently dropping data.
-    CapturingClient client = okWith("{\"s\":\"ok\",\"updated\":1705449600,\"surprise\":[1.0]}");
-    OptionsResource options = resourceWith(client);
-
-    assertThatThrownBy(() -> options.strikes(OptionsStrikesRequest.of("AAPL")))
-        .isInstanceOf(ParseError.class)
-        .hasMessageContaining("unrecognized top-level key: surprise");
-  }
-
-  @Test
-  void strikesNonNumericStrikeThrowsParseError() {
-    CapturingClient client =
-        okWith("{\"s\":\"ok\",\"updated\":1705449600,\"2025-01-17\":[\"oops\"]}");
-    OptionsResource options = resourceWith(client);
-
-    assertThatThrownBy(() -> options.strikes(OptionsStrikesRequest.of("AAPL")))
-        .isInstanceOf(ParseError.class)
-        .hasMessageContaining("non-numeric strike");
-  }
-
-  @Test
-  void strikesNonArrayExpirationValueThrowsParseError() {
-    CapturingClient client = okWith("{\"s\":\"ok\",\"updated\":1705449600,\"2025-01-17\":150.0}");
-    OptionsResource options = resourceWith(client);
-
-    assertThatThrownBy(() -> options.strikes(OptionsStrikesRequest.of("AAPL")))
-        .isInstanceOf(ParseError.class)
-        .hasMessageContaining("non-array value for expiration");
-  }
-
-  @Test
-  void strikesSyncMirrorsAsync() {
-    CapturingClient client = okWith("{\"s\":\"ok\",\"updated\":1705449600,\"2025-01-17\":[150.0]}");
-    OptionsResource options = resourceWith(client);
-
-    List<ExpirationStrikes> strikes = options.strikes(OptionsStrikesRequest.of("AAPL")).values();
-    assertThat(strikes).hasSize(1);
   }
 
   // ---------- quote (singular): URL & params ----------
@@ -882,7 +726,6 @@ class OptionsResourceTest {
 
     assertThat(csv.chain(OptionsChainRequest.of("AAPL")).csv()).contains("a,b");
     assertThat(csv.quote(OptionsQuoteRequest.of("AAPL250117C00150000")).csv()).contains("a,b");
-    assertThat(csv.strikes(OptionsStrikesRequest.of("AAPL")).csv()).contains("a,b");
     assertThat(csv.expirations(OptionsExpirationsRequest.of("AAPL")).csv()).contains("a,b");
 
     Map<String, CsvResponse> fanout =
@@ -899,7 +742,6 @@ class OptionsResourceTest {
 
     assertThat(html.chain(OptionsChainRequest.of("AAPL")).html()).contains("<html>");
     assertThat(html.quote(OptionsQuoteRequest.of("AAPL250117C00150000")).html()).contains("<html>");
-    assertThat(html.strikes(OptionsStrikesRequest.of("AAPL")).html()).contains("<html>");
     assertThat(html.expirations(OptionsExpirationsRequest.of("AAPL")).html()).contains("<html>");
   }
 

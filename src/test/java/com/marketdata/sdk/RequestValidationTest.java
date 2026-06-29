@@ -10,7 +10,6 @@ import com.marketdata.sdk.options.OptionsExpirationsRequest;
 import com.marketdata.sdk.options.OptionsLookupRequest;
 import com.marketdata.sdk.options.OptionsQuoteRequest;
 import com.marketdata.sdk.options.OptionsQuotesRequest;
-import com.marketdata.sdk.options.OptionsStrikesRequest;
 import com.marketdata.sdk.stocks.StockCandlesRequest;
 import com.marketdata.sdk.stocks.StockEarningsRequest;
 import com.marketdata.sdk.stocks.StockNewsRequest;
@@ -134,8 +133,6 @@ class RequestValidationTest {
 
   @Test
   void optionsRequestsRejectEmptyInputs() {
-    assertThatThrownBy(() -> OptionsStrikesRequest.of(""))
-        .isInstanceOf(IllegalArgumentException.class);
     assertThatThrownBy(() -> OptionsExpirationsRequest.of(""))
         .isInstanceOf(IllegalArgumentException.class);
     assertThatThrownBy(() -> OptionsLookupRequest.of(""))

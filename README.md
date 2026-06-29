@@ -64,7 +64,6 @@ is uniform across the SDK regardless of how many parameters an endpoint has.
 |--------|---------|
 | `lookup` | Resolve a human description (`"AAPL 1/16/2026 $200 Call"`) to an OCC symbol |
 | `expirations` | Expiration dates for an underlying |
-| `strikes` | Strike ladder per expiration |
 | `quote` | Quote for a single OCC option symbol |
 | `quotes` | Quotes for many symbols — fans out concurrently, returns a per-symbol map |
 | `chain` | Full option chain with the rich filter surface |

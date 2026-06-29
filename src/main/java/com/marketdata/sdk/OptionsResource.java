@@ -17,8 +17,6 @@ import com.marketdata.sdk.options.OptionsLookupRequest;
 import com.marketdata.sdk.options.OptionsQuoteRequest;
 import com.marketdata.sdk.options.OptionsQuotes;
 import com.marketdata.sdk.options.OptionsQuotesRequest;
-import com.marketdata.sdk.options.OptionsStrikes;
-import com.marketdata.sdk.options.OptionsStrikesRequest;
 import com.marketdata.sdk.options.StrikeFilter;
 import java.io.IOException;
 import java.time.LocalDate;
@@ -115,21 +113,6 @@ public final class OptionsResource extends ConfiguredResource<OptionsResource> {
     return transport.joinSync(expirationsAsync(request));
   }
 
-  /** Async: fetch the strike prices available for each expiration on the request's underlying. */
-  public CompletableFuture<OptionsStrikesResponse> strikesAsync(OptionsStrikesRequest request) {
-    RequestSpec.Builder b = strikesSpec(request);
-    config.applyTo(b);
-    return execute(
-        b.build(),
-        OptionsStrikes.class,
-        (d, env, fmt) -> new OptionsStrikesResponse(d.expirations(), d.updated(), env, fmt));
-  }
-
-  /** Sync wrapper for {@link #strikesAsync(OptionsStrikesRequest)}. */
-  public OptionsStrikesResponse strikes(OptionsStrikesRequest request) {
-    return transport.joinSync(strikesAsync(request));
-  }
-
   /** Async: fetch the current (or historical) quote for a single OCC option symbol. */
   public CompletableFuture<OptionsQuotesResponse> quoteAsync(OptionsQuoteRequest request) {
     RequestSpec.Builder b =
@@ -222,18 +205,6 @@ public final class OptionsResource extends ConfiguredResource<OptionsResource> {
         RequestSpec.get("options/expirations/" + PathSegments.encode(request.symbol()));
     if (request.strike() != null) {
       b.query("strike", request.strike());
-    }
-    if (request.date() != null) {
-      b.query("date", DateTimeFormatter.ISO_LOCAL_DATE.format(request.date()));
-    }
-    return b;
-  }
-
-  static RequestSpec.Builder strikesSpec(OptionsStrikesRequest request) {
-    RequestSpec.Builder b =
-        RequestSpec.get("options/strikes/" + PathSegments.encode(request.symbol()));
-    if (request.expiration() != null) {
-      b.query("expiration", DateTimeFormatter.ISO_LOCAL_DATE.format(request.expiration()));
     }
     if (request.date() != null) {
       b.query("date", DateTimeFormatter.ISO_LOCAL_DATE.format(request.date()));
@@ -379,7 +350,6 @@ public final class OptionsResource extends ConfiguredResource<OptionsResource> {
     SimpleModule m = new SimpleModule("marketdata-options");
     m.addDeserializer(OptionsLookup.class, new OptionsLookupDeserializer());
     m.addDeserializer(OptionsExpirations.class, new OptionsExpirationsDeserializer());
-    m.addDeserializer(OptionsStrikes.class, new OptionsStrikesDeserializer());
     m.addDeserializer(OptionsQuotes.class, optionRowsDeserializer(OptionsQuotes::new));
     m.addDeserializer(OptionsChain.class, optionRowsDeserializer(OptionsChain::new));
     return m;
