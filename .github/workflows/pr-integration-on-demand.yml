@@ -151,7 +151,7 @@ jobs:
       # only supports JDKs up to 23 as its daemon runtime). The matrix
       # JDK is still installed and registered as a toolchain target.
       - name: Set up JDKs (test=${{ matrix.java }}, compile/daemon=17)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: |
