@@ -33,6 +33,11 @@ public final class OptionsQuotesRequest {
     this.countback = b.countback;
   }
 
+  /** Shortcut for {@code builder(first, rest...).build()}. */
+  public static OptionsQuotesRequest of(String first, String... rest) {
+    return builder(first, rest).build();
+  }
+
   /**
    * Start a builder with one or more option symbols. At least one symbol is required; duplicates
    * are kept (each one results in its own HTTP call).

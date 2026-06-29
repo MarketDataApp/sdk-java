@@ -28,6 +28,11 @@ public final class StockQuotesRequest {
     this.week52 = b.week52;
   }
 
+  /** Shortcut for {@code builder(first, rest...).build()}. */
+  public static StockQuotesRequest of(String first, String... rest) {
+    return builder(first, rest).build();
+  }
+
   /** Start a builder with one or more ticker symbols. At least one is required. */
   public static Builder builder(String first, String... rest) {
     Builder b = new Builder();

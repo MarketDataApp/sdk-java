@@ -38,6 +38,16 @@ class RequestValidationTest {
   }
 
   @Test
+  void stockQuotesOfFactoryCarriesSymbolsAndDefaultsOptionals() {
+    StockQuotesRequest r = StockQuotesRequest.of("AAPL", "MSFT");
+
+    assertThat(r.symbols()).containsExactly("AAPL", "MSFT");
+    assertThat(r.extended()).isNull();
+    assertThat(r.candle()).isNull();
+    assertThat(r.week52()).isNull();
+  }
+
+  @Test
   void stockCandlesCountbackSetterIsCarried() {
     StockCandlesRequest r =
         StockCandlesRequest.builder(StockResolution.DAILY, "AAPL").to(TODAY).countback(5).build();
@@ -112,6 +122,14 @@ class RequestValidationTest {
             .build();
 
     assertThat(r.from()).isEqualTo(TODAY.minusDays(1));
+  }
+
+  @Test
+  void optionsQuotesOfFactoryCarriesSymbolsAndDefaultsOptionals() {
+    OptionsQuotesRequest r = OptionsQuotesRequest.of("AAPL250620C00200000", "AAPL250620P00200000");
+
+    assertThat(r.optionSymbols()).containsExactly("AAPL250620C00200000", "AAPL250620P00200000");
+    assertThat(r.from()).isNull();
   }
 
   @Test
