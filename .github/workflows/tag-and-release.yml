@@ -108,12 +108,21 @@ jobs:
     name: Tag and GitHub Release
     runs-on: ubuntu-latest
     needs: gate
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ inputs.ref }}
+
+      # Resolve inputs.ref to a concrete commit SHA so the tag, the GitHub
+      # Release, and the chained Maven Central build all point at the SAME
+      # commit — even if the workflow was launched from a different branch.
+      - name: Resolve commit SHA
+        id: resolve
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Verify tag does not already exist
         shell: bash
@@ -154,7 +163,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ inputs.version }}
-          TARGET_REF: ${{ inputs.ref }}
+          TARGET_REF: ${{ steps.resolve.outputs.sha }}
           IS_PRERELEASE: ${{ inputs.prerelease }}
         shell: bash
         run: |
@@ -186,5 +195,8 @@ jobs:
     uses: ./.github/workflows/publish.yml
     with:
       version: ${{ inputs.version }}
+      # Build & publish the exact commit that was tagged/released, not the
+      # workflow's launch commit (github.sha) — Maven Central is immutable.
+      ref: ${{ needs.release.outputs.sha }}
       release: true
     secrets: inherit

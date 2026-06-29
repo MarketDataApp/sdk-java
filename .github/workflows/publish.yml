@@ -8,6 +8,11 @@ on:
         description: "Version to publish (e.g. 1.0.0, without the 'v')"
         required: true
         type: string
+      ref:
+        description: "Commit SHA to build & publish from (defaults to the launch commit)"
+        required: false
+        default: ''
+        type: string
       release:
         description: "Publish and release. Off = upload to the Portal and stop at VALIDATED for manual review."
         required: true
@@ -19,6 +24,11 @@ on:
       version:
         description: "Version to publish (e.g. 1.0.0, without the 'v')"
         required: true
+        type: string
+      ref:
+        description: "Commit SHA to build & publish from (defaults to the launch commit)"
+        required: false
+        default: ''
         type: string
       release:
         description: "Publish and release. Off = upload to the Portal and stop at VALIDATED."
@@ -36,13 +46,17 @@ jobs:
       - name: Check latest main.yml conclusion
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          # Build/guard against the explicit commit when given (chained path);
+          # otherwise the commit the workflow was launched from.
+          SHA: ${{ inputs.ref || github.sha }}
         run: |
           conclusion=$(gh api \
-            "repos/${{ github.repository }}/actions/workflows/main.yml/runs?head_sha=${{ github.sha }}&status=completed" \
+            "repos/${REPO}/actions/workflows/main.yml/runs?head_sha=${SHA}&status=completed" \
             --jq '.workflow_runs[0].conclusion // "missing"')
-          echo "main.yml conclusion for ${{ github.sha }}: $conclusion"
+          echo "main.yml conclusion for ${SHA}: $conclusion"
           if [ "$conclusion" != "success" ]; then
-            echo "::error::main.yml is not green for ${{ github.sha }} (got: $conclusion). Run publish from a commit on main whose CI passed."
+            echo "::error::main.yml is not green for ${SHA} (got: $conclusion). Run publish from a commit on main whose CI passed."
             exit 1
           fi
 
@@ -62,6 +76,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Build from the explicit commit when chained; else the launch commit.
+          ref: ${{ inputs.ref || github.sha }}
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
