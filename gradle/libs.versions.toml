@@ -6,7 +6,7 @@ junit-platform = "1.11.4"
 assertj = "3.27.0"
 
 spotless = "8.7.0"
-vanniktech-publish = "0.30.0"
+vanniktech-publish = "0.37.0"
 
 [libraries]
 jspecify = { module = "org.jspecify:jspecify", version.ref = "jspecify" }
