@@ -46,7 +46,7 @@ jobs:
       # external user commenting on a fork PR could burn our CI minutes
       # and potentially exfiltrate secrets via a malicious build.
       - name: Verify commenter has write permission
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const { data: perm } = await github.rest.repos.getCollaboratorPermissionLevel({
@@ -64,7 +64,7 @@ jobs:
 
       # Visible feedback to the commenter that we picked up the trigger.
       - name: React 👀 to the trigger comment
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             await github.rest.reactions.createForIssueComment({
@@ -79,7 +79,7 @@ jobs:
       # firing on closed PRs is almost always a mistake.
       - name: Resolve PR head SHA
         id: pr
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const { data: pr } = await github.rest.pulls.get({
@@ -146,7 +146,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Comment outcome
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const ok = '${{ needs.verify.result }}' === 'success';
