@@ -106,7 +106,7 @@ jobs:
     steps:
       # Check out exactly the PR's HEAD commit, not the merge ref.
       - name: Checkout PR head
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.guard.outputs.head_sha }}
 

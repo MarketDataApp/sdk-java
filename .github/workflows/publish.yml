@@ -75,7 +75,7 @@ jobs:
       ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_KEY_PASSWORD }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # Build from the explicit commit when chained; else the launch commit.
           ref: ${{ inputs.ref || github.sha }}
