@@ -1,5 +1,3 @@
-import com.vanniktech.maven.publish.SonatypeHost
-
 plugins {
     `java-library`
     jacoco
@@ -194,7 +192,7 @@ spotless {
 //   - ORG_GRADLE_PROJECT_signingInMemoryKey / _signingInMemoryKeyPassword
 //     (optionally _signingInMemoryKeyId)
 mavenPublishing {
-    publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL, automaticRelease = false)
+    publishToMavenCentral(automaticRelease = false)
     signAllPublications()
 
     coordinates(group.toString(), "marketdata-sdk-java", version.toString())
