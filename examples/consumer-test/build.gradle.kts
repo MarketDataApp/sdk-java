@@ -14,7 +14,7 @@ kotlin {
 }
 
 dependencies {
-  implementation("com.marketdata:marketdata-sdk-java:0.1.0-SNAPSHOT")
+  implementation("app.marketdata:marketdata-sdk-java:0.1.0-SNAPSHOT")
 }
 
 // Default `./gradlew run` lands on the stocks resource example (live API).

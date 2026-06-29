@@ -17,7 +17,7 @@ exception taxonomy, and Kotlin-interop foundations are in place.
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("com.marketdata:marketdata-sdk-java:0.1.0")
+    implementation("app.marketdata:marketdata-sdk-java:0.1.0")
 }
 ```
 
