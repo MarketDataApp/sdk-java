@@ -58,7 +58,7 @@ jobs:
       # configures `threshold: 5%` so a PR fails the Codecov status check
       # if line coverage drops more than 5 pp vs the base branch.
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: build/reports/jacoco/test/jacocoTestReport.xml
