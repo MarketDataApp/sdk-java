@@ -41,7 +41,7 @@ jobs:
       # setup-java still exports JAVA_HOME_<version>_<arch> for both, and
       # setup-gradle registers them as toolchain candidates.
       - name: Set up JDKs (test=${{ matrix.java }}, compile/daemon=17)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: |
@@ -92,7 +92,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up JDKs (test=${{ matrix.java }}, compile/daemon=17)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: |
