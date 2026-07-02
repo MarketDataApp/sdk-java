@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Hardened Gradle build integrity: pinned the Gradle distribution checksum
+  (`distributionSha256Sum`) and added a `gradle/actions/wrapper-validation` step
+  to the PR and publish workflows so a tampered wrapper cannot execute in CI.
+- `Configuration.toString()` now redacts the API key via `Tokens.redact` instead
+  of printing it verbatim (a record's generated `toString` would have leaked the
+  raw token if the object were ever logged).
+- Untrusted strings from API responses (`errmsg`, malformed date/timestamp
+  cells) are now sanitized before being embedded in exception/log messages,
+  preventing CR/LF log-forging and ANSI-escape terminal spoofing.
+
 ## [1.0.0] - 2026-06-29
 
 First stable release of the Market Data Java &amp; Kotlin SDK — a single JVM

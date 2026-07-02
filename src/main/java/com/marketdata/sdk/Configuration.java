@@ -25,6 +25,27 @@ record Configuration(
   private static final Pattern API_VERSION_PATTERN = Pattern.compile("[A-Za-z0-9._-]+");
 
   /**
+   * Redact the API key. A record's compiler-generated {@code toString()} prints every component
+   * verbatim, which would leak the raw token the moment this object is interpolated into a log line
+   * or debugger output; override it so {@code apiKey} is always redacted via {@link Tokens#redact}.
+   * The remaining fields are not secret and stay visible for diagnostics.
+   */
+  @Override
+  public String toString() {
+    return "Configuration[apiKey="
+        + Tokens.redact(apiKey)
+        + ", baseUrl="
+        + baseUrl
+        + ", apiVersion="
+        + apiVersion
+        + ", loggingLevel="
+        + loggingLevel
+        + ", dateFormat="
+        + dateFormat
+        + "]";
+  }
+
+  /**
    * Convenience overload that discards any {@link DotEnvLoader.Warning}s. Used by tests and any
    * call site that does not need to replay them through a freshly-configured logger.
    */
