@@ -122,7 +122,7 @@ jobs:
             17
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6.2.0
 
       - name: Test on JDK ${{ matrix.java }}
         run: ./gradlew test -PtestJdk=${{ matrix.java }} --stacktrace
