@@ -1,5 +1,5 @@
 [versions]
-jspecify = "1.0.0"
+jspecify = "1.0.1"
 jackson = "2.22.1"
 junit = "5.11.4"
 junit-platform = "1.14.4"
