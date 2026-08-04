@@ -41,7 +41,9 @@ final class StockNewsDeserializer extends JsonDeserializer<StockNews> {
     String envelopeStatus = root.path(ENVELOPE_STATUS).asText("");
     if (ENVELOPE_ERROR.equals(envelopeStatus)) {
       throw new JsonMappingException(
-          p, "API responded with error: " + root.path(ENVELOPE_ERRMSG).asText("(no errmsg field)"));
+          p,
+          "API responded with error: "
+              + LogSafe.sanitize(root.path(ENVELOPE_ERRMSG).asText("(no errmsg field)")));
     }
     if (ENVELOPE_NO_DATA.equals(envelopeStatus)) {
       return new StockNews(List.of(), null);

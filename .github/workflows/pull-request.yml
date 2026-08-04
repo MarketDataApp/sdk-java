@@ -28,6 +28,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # Verify gradle-wrapper.jar matches an official Gradle release checksum
+      # before it is ever executed, so a tampered wrapper committed to a branch
+      # can't run arbitrary code in CI. (The distribution zip itself is pinned
+      # via distributionSha256Sum in gradle-wrapper.properties.)
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
       # PRs only run on JDK 17 (the minimum target). Forward-compat
       # regressions on JDK 21/25 are caught post-merge by main.yml.
       - name: Set up JDK 17
@@ -36,8 +43,9 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # Validates the wrapper jar hash and caches Gradle home + wrapper
-      # dists between runs.
+      # Caches Gradle home + wrapper dists between runs. (Wrapper-jar integrity
+      # is checked by the Validate Gradle wrapper step above; the distribution
+      # zip is verified against distributionSha256Sum.)
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 

@@ -96,7 +96,7 @@ final class ParallelArrays {
     String envelopeStatus = root.path(ENVELOPE_STATUS).asText("");
     if (ENVELOPE_ERROR.equals(envelopeStatus)) {
       String errmsg = root.path(ENVELOPE_ERRMSG).asText("(no errmsg field)");
-      throw new JsonMappingException(p, "API responded with error: " + errmsg);
+      throw new JsonMappingException(p, "API responded with error: " + LogSafe.sanitize(errmsg));
     }
     if (ENVELOPE_NO_DATA.equals(envelopeStatus)) {
       return List.of();

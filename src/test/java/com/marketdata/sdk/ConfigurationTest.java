@@ -44,6 +44,22 @@ class ConfigurationTest {
   }
 
   @Test
+  void toString_redacts_the_api_key_but_keeps_other_fields() {
+    Configuration config =
+        new Configuration(
+            "supersecrettoken1234567890", "https://api.marketdata.app", "v1", "INFO", "timestamp");
+
+    String rendered = config.toString();
+
+    // The token must never appear verbatim; only the redacted marker + last 4 chars.
+    assertThat(rendered).doesNotContain("supersecrettoken");
+    assertThat(rendered).contains(Tokens.redact("supersecrettoken1234567890"));
+    // Non-secret fields stay visible for diagnostics.
+    assertThat(rendered).contains("https://api.marketdata.app");
+    assertThat(rendered).contains("v1");
+  }
+
+  @Test
   void resolve_falls_back_to_env_when_explicit_missing(@TempDir Path tmp) {
     Configuration config =
         Configuration.resolve(

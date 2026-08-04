@@ -32,7 +32,9 @@ final class OptionsLookupDeserializer extends JsonDeserializer<OptionsLookup> {
     JsonNode root = p.readValueAsTree();
     if (ENVELOPE_ERROR.equals(root.path(ENVELOPE_STATUS).asText(""))) {
       throw new JsonMappingException(
-          p, "API responded with error: " + root.path(ENVELOPE_ERRMSG).asText("(no errmsg field)"));
+          p,
+          "API responded with error: "
+              + LogSafe.sanitize(root.path(ENVELOPE_ERRMSG).asText("(no errmsg field)")));
     }
     JsonNode node = root.get(OPTION_SYMBOL_KEY);
     if (node == null || !node.isTextual()) {

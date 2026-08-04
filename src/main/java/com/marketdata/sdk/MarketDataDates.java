@@ -78,7 +78,8 @@ final class MarketDataDates {
         return LocalDate.parse(node.asText());
       } catch (DateTimeParseException e) {
         throw new JsonMappingException(
-            p, "non-ISO date string for field " + fieldName + ": " + node.asText());
+            p,
+            "non-ISO date string for field " + fieldName + ": " + LogSafe.sanitize(node.asText()));
       }
     }
     if (!node.isNumber()) {
@@ -115,7 +116,11 @@ final class MarketDataDates {
           return LocalDate.parse(text).atStartOfDay(MARKET_ZONE);
         } catch (DateTimeParseException dateOnly) {
           throw new JsonMappingException(
-              p, "non-conforming date/timestamp string for field " + fieldName + ": " + text);
+              p,
+              "non-conforming date/timestamp string for field "
+                  + fieldName
+                  + ": "
+                  + LogSafe.sanitize(text));
         }
       }
     }
@@ -142,7 +147,11 @@ final class MarketDataDates {
             .withZoneSameInstant(MARKET_ZONE);
       } catch (DateTimeParseException e) {
         throw new JsonMappingException(
-            p, "non-conforming timestamp string for field " + fieldName + ": " + node.asText());
+            p,
+            "non-conforming timestamp string for field "
+                + fieldName
+                + ": "
+                + LogSafe.sanitize(node.asText()));
       }
     }
     if (!node.isNumber()) {
