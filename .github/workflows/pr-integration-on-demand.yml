@@ -151,7 +151,7 @@ jobs:
       # only supports JDKs up to 23 as its daemon runtime). The matrix
       # JDK is still installed and registered as a toolchain target.
       - name: Set up JDKs (test=${{ matrix.java }}, compile/daemon=17)
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: |
@@ -159,7 +159,7 @@ jobs:
             17
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
       - name: Run integration tests against live API
         env:
@@ -174,7 +174,7 @@ jobs:
 
       - name: Upload integration-test reports on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: integration-test-reports-jdk${{ matrix.java }}
           path: |
