@@ -1,4 +1,4 @@
-# Authentication
+# Authentication (Java SDK)
 
 The Market Data API uses a **Bearer Token** for authentication. The token is required for almost every request. Your token should have been e-mailed to you when you first signed up for an account. If you do not have a token or have lost your sign-up email, request a new token from the [Market Data Dashboard](https://www.marketdata.app/dashboard/).
 
@@ -41,7 +41,7 @@ setx MARKETDATA_TOKEN "your_api_token"
 
 The SDK automatically loads a `.env` file from your working directory at startup. Create a file named `.env` in your project root:
 
-```env title=".env"
+```ini title=".env"
 MARKETDATA_TOKEN=your_api_token
 ```
 
@@ -111,7 +111,7 @@ MarketDataClient("your_token_here", null, null, true).use { client ->
 ```
 
 > [!NOTE]
-> **Demo mode**
+> **[Demo mode]**
 >
 > If no token is found anywhere in the cascade, the SDK runs in **demo mode** — startup validation is skipped and you can call the free, public endpoints (such as `AAPL` quotes and `utilities().status()`).
 

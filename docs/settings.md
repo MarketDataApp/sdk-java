@@ -1,4 +1,4 @@
-# Settings
+# Settings (Java SDK)
 
 The Java SDK lets you customize API requests through **universal parameters** — settings such as date format, data mode, column projection, and CSV shaping that apply across endpoints. These are configured per resource, and some can also be set globally through environment variables.
 

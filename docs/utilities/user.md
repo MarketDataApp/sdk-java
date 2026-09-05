@@ -1,4 +1,4 @@
-# User
+# User (Java SDK)
 
 Retrieve your account details — including how much of your daily request quota remains. This is the same endpoint the SDK calls on startup to validate your token.
 
@@ -11,7 +11,7 @@ UtilitiesUserResponse user()
 CompletableFuture<UtilitiesUserResponse> userAsync()
 ```
 
-#### Returns
+### Returns
 
 `UtilitiesUserResponse` wrapping a `User`, which exposes your plan and quota — for example `requestsRemaining()` and `requestsLimit()`.
 

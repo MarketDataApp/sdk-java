@@ -1,4 +1,4 @@
-# Candles
+# Fund Candles (Java SDK)
 
 Retrieve a mutual fund's NAV (net asset value) OHLC series.
 

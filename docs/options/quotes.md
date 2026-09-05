@@ -1,4 +1,4 @@
-# Quotes
+# Option Quotes (Java SDK)
 
 Retrieve quotes (bid, ask, last, greeks, etc.) for one or more option contracts by OCC symbol.
 
@@ -42,7 +42,7 @@ OptionsQuotesRequest.builder(String first, String... rest)
 
 #### Returns
 
-`OptionsQuotesResponse` wraps `List<OptionQuote>`. See [Chain](./chain.md#optionquote) for the full `OptionQuote` record (price fields plus greeks).
+`OptionsQuotesResponse` wraps `List<OptionQuote>`. See [Chain](./chain.md) for the full `OptionQuote` record (price fields plus greeks).
 
 ## Examples
 
@@ -58,13 +58,13 @@ try (MarketDataClient client = new MarketDataClient()) {
 
   // Single contract.
   OptionQuote q = client.options()
-      .quote(OptionsQuoteRequest.of("AAPL260116C00200000"))
+      .quote(OptionsQuoteRequest.of("AAPL271217C00300000"))
       .values().get(0);
   System.out.println("last=" + q.last() + " iv=" + q.iv() + " delta=" + q.delta());
 
   // Multiple contracts — one request each, keyed by symbol.
   var quotes = client.options().quotes(
-      OptionsQuotesRequest.of("AAPL260116C00200000", "AAPL260116C00210000"));
+      OptionsQuotesRequest.of("AAPL271217C00300000", "AAPL271217C00310000"));
   quotes.forEach((sym, resp) ->
       System.out.println(sym + " → " + resp.values().size() + " row(s)"));
 }
@@ -78,7 +78,7 @@ import com.marketdata.sdk.options.OptionsQuoteRequest
 
 MarketDataClient().use { client ->
     val q = client.options()
-        .quote(OptionsQuoteRequest.of("AAPL260116C00200000"))
+        .quote(OptionsQuoteRequest.of("AAPL271217C00300000"))
         .values()[0]
     println("last=${q.last()} iv=${q.iv()} delta=${q.delta()}")
 }
