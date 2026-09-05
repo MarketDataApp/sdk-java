@@ -1,4 +1,4 @@
-# Status
+# Market Status (Java SDK)
 
 Retrieve the exchange open/closed calendar — whether the market was (or will be) open on a given day.
 

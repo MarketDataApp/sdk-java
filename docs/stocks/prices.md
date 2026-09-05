@@ -1,4 +1,4 @@
-# Prices
+# Prices (Java SDK)
 
 Retrieve the latest price (mid, change) for one or more stock symbols — a lighter payload than a full quote.
 
