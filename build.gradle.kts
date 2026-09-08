@@ -67,13 +67,51 @@ val integrationTestTask = tasks.register<Test>("integrationTest") {
     testClassesDirs = integrationTest.output.classesDirs
     classpath = integrationTest.runtimeClasspath
     useJUnitPlatform()
-    onlyIf {
-        System.getenv("MARKETDATA_RUN_INTEGRATION_TESTS") == "true"
-    }
     shouldRunAfter(tasks.test)
+
+    // A verification task that can report success without having verified
+    // anything is worse than no task at all. `failOnNoDiscoveredTests` is
+    // Gradle's default, but it is pinned here because this task's entire
+    // contract is "green means the live API was exercised".
+    failOnNoDiscoveredTests = true
+
+    // SDK requirements §13: the live suite must never skip silently. This
+    // task used to `onlyIf` itself out of existence whenever the gate env
+    // var was absent, so `./gradlew integrationTest` printed BUILD
+    // SUCCESSFUL having run zero tests. Reaching this task means someone
+    // asked for it by name (nothing depends on it implicitly any more), so
+    // a missing gate or token is a failure, not a skip.
+    doFirst {
+        val missing = buildList {
+            if (System.getenv("MARKETDATA_RUN_INTEGRATION_TESTS") != "true") {
+                add("MARKETDATA_RUN_INTEGRATION_TESTS must be set to 'true' (ADR-003 opt-in gate)")
+            }
+            if (System.getenv("MARKETDATA_TOKEN").isNullOrBlank()) {
+                add("MARKETDATA_TOKEN must hold a live Market Data API token")
+            }
+        }
+        if (missing.isNotEmpty()) {
+            throw GradleException(
+                missing.joinToString(
+                    prefix = "Cannot run integration tests against the live API:\n  - ",
+                    separator = "\n  - ",
+                ),
+            )
+        }
+    }
 }
 
-tasks.check { dependsOn(integrationTestTask) }
+// The integrationTest *task* is deliberately NOT wired into `check`. It used
+// to be, which meant every `./gradlew build` on a PR pulled it in, found no
+// gate env var, skipped it, and reported a green build for a suite that never
+// ran (#68). `check`/`build` are now hermetic unit verification; the live
+// suite is only ever invoked explicitly, which is what all three CI workflows
+// already do.
+//
+// Compiling the integration sources stays in `check`, though: without it a PR
+// could break the integration suite and no CI job would notice until someone
+// ran it on demand, long after review.
+tasks.check { dependsOn(integrationTest.classesTaskName) }
 
 dependencies {
     // ADR-001 §2.1: JSpecify nullability annotations are compile-time only.

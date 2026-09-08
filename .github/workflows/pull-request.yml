@@ -65,8 +65,17 @@ jobs:
           fail_ci_if_error: true
 
   # NOTE: integration tests are NOT run automatically on PR open/sync.
-  # They are required for merge but only fire when a reviewer comments
-  # `integrationtest` (JDK 17) or `integrationtestfull` (matrix 17/21/25)
-  # — see .github/workflows/pr-integration-on-demand.yml. Branch-protection
-  # rules should require the "Integration tests pass" check name produced
-  # by that workflow before allowing merge to main.
+  # They only fire when a reviewer comments `/integrationtest` (JDK 17) or
+  # `/integrationtestfull` (matrix 17/21/25) — see
+  # .github/workflows/pr-integration-on-demand.yml.
+  #
+  # `./gradlew build` above compiles the integration source set (so a PR that
+  # breaks it fails here) but does not execute it. It used to pull the
+  # integrationTest *task* in via `check`, where the task silently skipped
+  # itself for lack of the gate env var — every PR therefore reported a green
+  # integration suite that had never run (#68). The task now fails instead of
+  # skipping, and `check` no longer depends on it.
+  #
+  # Enforcement lives in branch protection, not here: `main` must list the
+  # "Integration tests pass" check produced by the on-demand workflow as a
+  # required status check. Without that entry the live suite is advisory.

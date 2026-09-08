@@ -337,12 +337,16 @@ install — the wrapper downloads the right Gradle version on first run.
 
 ```bash
 ./gradlew build               # compile + unit tests + spotless + jacoco
+                              # (compiles the integration suite, does not run it)
 ./gradlew test                # unit tests only
 ./gradlew spotlessApply       # auto-format
 ./gradlew jacocoTestReport    # coverage report → build/reports/jacoco/
 
-# Integration tests hit the live API — gated by env var.
-MARKETDATA_RUN_INTEGRATION_TESTS=true ./gradlew integrationTest
+# Integration tests hit the live API, so they are opt-in: both the gate and a
+# token are required. The task fails — rather than skipping quietly — when
+# either is missing, so a green run always means the live API was exercised.
+MARKETDATA_RUN_INTEGRATION_TESTS=true MARKETDATA_TOKEN=<your-token> \
+  ./gradlew integrationTest
 ```
 
 On PRs, integration tests are not run automatically (live-API quota +
