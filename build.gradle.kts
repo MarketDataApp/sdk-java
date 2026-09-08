@@ -84,6 +84,11 @@ dependencies {
     // consumers see typed records, not Jackson types directly.
     implementation(libs.jackson.databind)
 
+    // The BOM aligns Jupiter and Platform to a single version so the two can
+    // never drift apart (see the note in gradle/libs.versions.toml). It is
+    // applied to testImplementation, which integrationTestImplementation
+    // extends, so the integration source set inherits the same alignment.
+    testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj.core)
     testRuntimeOnly(libs.junit.platform.launcher)

@@ -1,8 +1,13 @@
 [versions]
 jspecify = "1.0.1"
 jackson = "2.22.2"
-junit = "5.11.4"
-junit-platform = "1.14.4"
+# Single key for the whole JUnit stack. Jupiter and Platform ship in lockstep
+# (Platform 6.x + Jupiter 6.x + Vintage 6.x) but are versioned independently
+# (Platform 1.x vs Jupiter 5.x pre-6). Keeping two catalog keys let Dependabot
+# bump one artifact without the other, which is how #28 proposed Platform 6
+# underneath Jupiter 5 — an unsupported skew. The BOM below is now the only
+# source of JUnit versions, so a partial bump is no longer expressible.
+junit = "6.1.3"
 assertj = "3.27.7"
 
 spotless = "8.10.1"
@@ -12,8 +17,11 @@ vanniktech-publish = "0.37.0"
 jspecify = { module = "org.jspecify:jspecify", version.ref = "jspecify" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
 
-junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
-junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junit-platform" }
+# Versions come from junit-bom (applied as a platform in build.gradle.kts),
+# so these two entries are deliberately version-less.
+junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 assertj-core = { module = "org.assertj:assertj-core", version.ref = "assertj" }
 
 [plugins]
