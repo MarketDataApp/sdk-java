@@ -1,4 +1,4 @@
-# Installation
+# Installation (Java SDK)
 
 This guide will help you install the Market Data Java SDK and configure it for your project.
 

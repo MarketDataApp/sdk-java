@@ -1,13 +1,13 @@
-# Client
+# Client (Java SDK)
 
 The `MarketDataClient` is the entry point to the SDK. It handles API requests, response parsing, rate-limit tracking, retries with exponential backoff, and logging. A single client gives you access to all five resources: stocks, options, funds, markets, and utilities.
 
 The client is immutable, thread-safe, and `AutoCloseable`. Create one per application (it holds a shared HTTP client and a 50-request concurrency pool) and close it when you're done.
 
-### Get Started Quickly
+## Get Started Quickly
 
 1. Review the [authentication documentation](./authentication.md) to learn how to set your API token.
-2. Create a [`MarketDataClient`](#MarketDataClient) and use it to make requests.
+2. Create a [`MarketDataClient`](#marketdataclient) and use it to make requests.
 3. Reach a resource through `client.stocks()`, `client.options()`, etc.
 4. Track your [rate limit](#rate-limits) to see how many API credits remain.
 5. Configure [Settings](./settings.md) to customize output format, date format, and other universal parameters.
@@ -82,7 +82,7 @@ MarketDataClient("your_token", null, null, false).use { client ->
 ```
 
 > [!NOTE]
-> **Fail-fast configuration**
+> **[Fail-fast configuration]**
 >
 > A misconfigured base URL or API version is rejected with an `IllegalArgumentException` **at construction**, not later on the first request. Tokens are never printed in full — the client's `toString()` redacts them (long tokens show only the last four characters; short ones are hidden entirely).
 
@@ -235,7 +235,7 @@ client.stocks().quoteAsync(StockQuoteRequest.of("AAPL"))
 ```
 
 > [!NOTE]
-> **`join()` vs `get()`**
+> **[`join()` vs `get()`]**
 >
 > To block on a future, prefer **`join()`** — it throws an unchecked `CompletionException`. `get()` does the same thing but throws the checked `ExecutionException` (plus `InterruptedException`), forcing a `try/catch`. Both wrap the underlying cause identically, so `join()` is usually the friendlier choice.
 

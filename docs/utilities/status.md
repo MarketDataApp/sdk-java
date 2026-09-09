@@ -1,4 +1,4 @@
-# Status
+# API Status (Java SDK)
 
 Retrieve the health of the Market Data API's services — a handy liveness check.
 
@@ -14,7 +14,7 @@ UtilitiesStatusResponse status()
 CompletableFuture<UtilitiesStatusResponse> statusAsync()
 ```
 
-#### Returns
+### Returns
 
 `UtilitiesStatusResponse` wrapping `List<ServiceStatus>`. Each `ServiceStatus` exposes the service name, a status string, an `online()` flag, uptime percentiles, and an updated timestamp.
 
