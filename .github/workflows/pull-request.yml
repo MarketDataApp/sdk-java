@@ -1,5 +1,4 @@
-name: Pull Request
-
+name: Tests
 # Triggers only on pull request lifecycle events:
 #   - opened       (PR creation)
 #   - synchronize  (push to the PR branch while the PR is open)
