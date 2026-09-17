@@ -1,4 +1,4 @@
-# Quotes
+# Stock Quotes (Java SDK)
 
 Retrieve real-time quotes (bid, ask, mid, last, volume, etc.) for one or more stock symbols.
 

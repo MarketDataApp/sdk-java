@@ -1,4 +1,4 @@
-# News
+# News (Java SDK)
 
 Retrieve news articles for a stock symbol.
 

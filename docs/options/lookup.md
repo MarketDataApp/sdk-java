@@ -1,4 +1,4 @@
-# Lookup
+# Lookup (Java SDK)
 
 Turn a human-readable option description into a well-formed OCC option symbol.
 
@@ -33,7 +33,7 @@ try (MarketDataClient client = new MarketDataClient()) {
   String occSymbol = client.options()
       .lookup(OptionsLookupRequest.of("AAPL 1/16/2026 $200 Call"))
       .values();
-  System.out.println("Resolved to: " + occSymbol); // AAPL260116C00200000
+  System.out.println("Resolved to: " + occSymbol); // AAPL271217C00300000
 }
 ```
 

@@ -1,4 +1,4 @@
-# Headers
+# Headers (Java SDK)
 
 Echo back the HTTP headers the server received for your request — useful for confirming your `Authorization` header actually reached the API. Sensitive values are redacted in the response.
 
@@ -11,7 +11,7 @@ UtilitiesHeadersResponse headers()
 CompletableFuture<UtilitiesHeadersResponse> headersAsync()
 ```
 
-#### Returns
+### Returns
 
 `UtilitiesHeadersResponse` wrapping `Map<String, String>` — the headers the server received, lower-cased keys to values (sensitive values redacted server-side).
 

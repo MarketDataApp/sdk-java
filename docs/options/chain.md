@@ -1,4 +1,4 @@
-# Chain
+# Option Chain (Java SDK)
 
 Retrieve a full option chain for an underlying, with a rich set of filters. The chain is where most option workflows start.
 

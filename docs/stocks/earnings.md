@@ -1,4 +1,4 @@
-# Earnings
+# Earnings (Java SDK)
 
 Retrieve historical and upcoming earnings data (EPS actuals, estimates, surprises) for a stock symbol.
 
