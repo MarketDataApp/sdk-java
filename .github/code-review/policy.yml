@@ -22,6 +22,12 @@ mode: fallback
 gate: true
 require_ci_green: true
 
+# Pull requests opened by the SDK-sync pipeline (MarketData-App/sdk-bot), which acts as
+# the GitHub App `marketdata-sdk-sync`. The bot reviews members of the organisation and
+# nobody else, and an App is not a member: without this entry its pull requests would get
+# no review, no comment and no check run.
+trusted_authors: ["marketdata-sdk-sync[bot]"]
+
 # No REVIEW.md here yet, so this repository gets the bot's language-agnostic
 # default review. A sdk-java-specific REVIEW.md is worth writing once someone who
 # knows this codebase has read a few reviews and can say what the model keeps
