@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Options `?dte` filter as string** (API 2.0.0) — `DteFilter` sealed type
+  (`exact()`, `list()`, `range()`, `comparison()`) models the new string-valued
+  `?dte=` parameter on `options.chain()`, supporting single values, comma-delimited
+  lists, ranges (`start-end`), and comparison operators. `ExpirationFilter.dte(DteFilter)`
+  accepts the new sealed type; `ExpirationFilter.dte(int)` still works (delegates to
+  `exact()`).
+
+### Changed
+
+- `ExpirationFilter.Dte` record now wraps a `DteFilter` instead of raw `int days`.
+
+### Removed
+
+- `ExpirationFilter.Dte.days()` accessor — use `DteFilter` methods on the
+  filter itself instead. Callers passing `int` to `ExpirationFilter.dte()` need
+  no changes; callers inspecting `Dte.days()` should adapt to the new
+  `DteFilter` sealed type.
+
 ## [1.0.0] - 2026-06-29
 
 First stable release of the Market Data Java &amp; Kotlin SDK — a single JVM

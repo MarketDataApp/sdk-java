@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.module.SimpleModule;
+import com.marketdata.sdk.options.DteFilter;
 import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.OptionQuote;
 import com.marketdata.sdk.options.OptionsChain;
@@ -28,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -311,7 +313,7 @@ public final class OptionsResource extends ConfiguredResource<OptionsResource> {
     if (f instanceof ExpirationFilter.OnDate v) {
       b.query("expiration", DateTimeFormatter.ISO_LOCAL_DATE.format(v.date()));
     } else if (f instanceof ExpirationFilter.Dte v) {
-      b.query("dte", v.days());
+      b.query("dte", dteFilterWireValue(v.filter()));
     } else if (f instanceof ExpirationFilter.Between v) {
       b.query("from", DateTimeFormatter.ISO_LOCAL_DATE.format(v.from()));
       b.query("to", DateTimeFormatter.ISO_LOCAL_DATE.format(v.to()));
@@ -323,6 +325,20 @@ public final class OptionsResource extends ConfiguredResource<OptionsResource> {
     }
     // ExpirationFilter is sealed and every variant is handled above; Java 17 can't prove that in
     // an if-chain, but there is no reachable else, so no defensive throw is needed.
+  }
+
+  private static String dteFilterWireValue(DteFilter f) {
+    if (f instanceof DteFilter.Exact v) {
+      return Integer.toString(v.days());
+    } else if (f instanceof DteFilter.ListOf v) {
+      return v.days().stream().map(String::valueOf).collect(Collectors.joining(","));
+    } else if (f instanceof DteFilter.Range v) {
+      return v.min() + "-" + v.max();
+    }
+    // DteFilter is sealed; the only remaining variant is Comparison. The cast documents that
+    // exhaustiveness (Java 17 can't prove it in an if-chain) and fails fast if a variant is added.
+    DteFilter.Comparison v = (DteFilter.Comparison) f;
+    return v.operator().wireValue() + v.days();
   }
 
   private static String strikeFilterWireValue(StrikeFilter f) {

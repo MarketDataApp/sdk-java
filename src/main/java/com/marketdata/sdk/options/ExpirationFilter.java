@@ -39,12 +39,22 @@ public sealed interface ExpirationFilter
     return new All();
   }
 
-  /** Days-to-expiration filter — wire form {@code ?dte=N}. */
+  /**
+   * Days-to-expiration filter, single value — wire form {@code ?dte=N}. Shorthand for {@link
+   * #dte(DteFilter)} with {@link DteFilter#exact(int)}.
+   */
   static Dte dte(int days) {
-    if (days < 0) {
-      throw new IllegalArgumentException("dte must be non-negative");
-    }
-    return new Dte(days);
+    return new Dte(DteFilter.exact(days));
+  }
+
+  /**
+   * Days-to-expiration filter accepting any of the API's four syntactic forms — see {@link
+   * DteFilter} ({@link DteFilter#exact}, {@link DteFilter#list}, {@link DteFilter#range}, {@link
+   * DteFilter#comparison}).
+   */
+  static Dte dte(DteFilter filter) {
+    Objects.requireNonNull(filter, "filter");
+    return new Dte(filter);
   }
 
   /**
@@ -77,7 +87,7 @@ public sealed interface ExpirationFilter
     }
   }
 
-  record Dte(int days) implements ExpirationFilter {}
+  record Dte(DteFilter filter) implements ExpirationFilter {}
 
   record Between(LocalDate from, LocalDate to) implements ExpirationFilter {}
 
