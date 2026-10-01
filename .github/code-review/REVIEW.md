@@ -47,9 +47,13 @@ Not breaking:
 - a new permitted subtype of a `sealed` interface or class, which is the same
   case as a new enum constant: an exhaustive `switch` or `when` gains a case to
   handle. List the new type as added; the sealed parent is not changed
-- a new client-side check that only rejects values the current API already
-  rejects: no call that works today stops working. It goes in the CHANGELOG
-  under `### Changed`, not as a break
+- a client-side check on a new method or type: there is no existing call to
+  break
+- a new client-side check on an existing method that only rejects values the
+  current API already rejects, only if it fails with the error type the API's
+  rejection already produces (`BadRequestError`). Failing with any other type,
+  such as `IllegalArgumentException`, changes the error a working caller
+  handles, and is breaking
 
 The version comes from the `sdkVersion` Gradle property at release time, not
 from a file in the tree. The bump is therefore declared in `CHANGELOG.md` and in
