@@ -3,6 +3,10 @@
 
 ## 9. The public surface of this SDK
 
+One question decides: does an existing caller stop compiling, stop linking, or
+see a call that works today against the current API fail or behave
+differently? If not, the change is additive and is not breaking.
+
 The surface is every `public` and `protected` type, method, constructor and
 field under `src/main/java`. The artifact is published to Maven Central as
 `app.marketdata`, and it is idiomatic from both Java and Kotlin, so a change
@@ -31,9 +35,21 @@ Breaking, for this SDK:
 
 - a return type changed at all, widened included. The return type is part of
   the method descriptor, so existing compiled callers stop linking
+- a change in behaviour that makes a call that works today against the current
+  API fail, or return something different: a default value changed, a field
+  dropped from a response model, a value the API accepts that the SDK now
+  rejects
 
-Not breaking: a new overload, a new `default` interface method, a new type, a
-new enum constant at the end of the list.
+Not breaking:
+
+- a new overload, a new `default` interface method, a new type, a new enum
+  constant at the end of the list
+- a new permitted subtype of a `sealed` interface or class, which is the same
+  case as a new enum constant: an exhaustive `switch` or `when` gains a case to
+  handle. List the new type as added; the sealed parent is not changed
+- a new client-side check that only rejects values the current API already
+  rejects: no call that works today stops working. It goes in the CHANGELOG
+  under `### Changed`, not as a break
 
 The version comes from the `sdkVersion` Gradle property at release time, not
 from a file in the tree. The bump is therefore declared in `CHANGELOG.md` and in
