@@ -68,7 +68,6 @@ public sealed interface ExpirationFilter
     Objects.requireNonNull(days, "days");
     List<Integer> copy = new ArrayList<>(days.length);
     for (int day : days) {
-      validateDteDays(day);
       copy.add(day);
     }
     return new DteList(List.copyOf(copy));
@@ -79,11 +78,6 @@ public sealed interface ExpirationFilter
    * not exceed {@code max}. Mirrors {@link StrikeFilter}'s syntax.
    */
   static DteRange dteRange(int min, int max) {
-    validateDteDays(min);
-    validateDteDays(max);
-    if (min > max) {
-      throw new IllegalArgumentException("min must be <= max");
-    }
     return new DteRange(min, max);
   }
 
@@ -92,8 +86,6 @@ public sealed interface ExpirationFilter
    * Mirrors {@link StrikeFilter}'s syntax.
    */
   static DteComparison dteComparison(DteOperator operator, int days) {
-    Objects.requireNonNull(operator, "operator");
-    validateDteDays(days);
     return new DteComparison(operator, days);
   }
 
@@ -141,12 +133,28 @@ public sealed interface ExpirationFilter
   record DteList(List<Integer> days) implements ExpirationFilter {
     public DteList {
       days = List.copyOf(days);
+      for (int day : days) {
+        validateDteDays(day);
+      }
     }
   }
 
-  record DteRange(int min, int max) implements ExpirationFilter {}
+  record DteRange(int min, int max) implements ExpirationFilter {
+    public DteRange {
+      validateDteDays(min);
+      validateDteDays(max);
+      if (min > max) {
+        throw new IllegalArgumentException("min must be <= max");
+      }
+    }
+  }
 
-  record DteComparison(DteOperator operator, int days) implements ExpirationFilter {}
+  record DteComparison(DteOperator operator, int days) implements ExpirationFilter {
+    public DteComparison {
+      Objects.requireNonNull(operator, "operator");
+      validateDteDays(days);
+    }
+  }
 
   /**
    * Comparison operators accepted by the {@code dte} parameter. Mirrors {@link

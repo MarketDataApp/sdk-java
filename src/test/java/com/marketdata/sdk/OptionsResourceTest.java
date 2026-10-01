@@ -1366,6 +1366,28 @@ class OptionsResourceTest {
         .hasMessageContaining("dte must be at most 36500");
   }
 
+  // ---------- chain: dte string syntax (compact constructors) ----------
+
+  @Test
+  void dteRangeRecordConstructorRejectsMinGreaterThanMax() {
+    assertThatThrownBy(() -> new ExpirationFilter.DteRange(45, 0))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("min must be <= max");
+  }
+
+  @Test
+  void dteListRecordConstructorRejectsNegativeElement() {
+    assertThatThrownBy(() -> new ExpirationFilter.DteList(List.of(-1)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be non-negative");
+  }
+
+  @Test
+  void dteComparisonRecordConstructorRejectsNullOperator() {
+    assertThatThrownBy(() -> new ExpirationFilter.DteComparison(null, -1))
+        .isInstanceOf(NullPointerException.class);
+  }
+
   // ---------- chain: dte string syntax (sync/async parity) ----------
 
   @Test

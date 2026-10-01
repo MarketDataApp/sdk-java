@@ -20,10 +20,16 @@ OptionsChainRequest.builder(String symbol)
 
     // Expiration selection (sealed ExpirationFilter — pick one):
     .expirationFilter(ExpirationFilter.onDate(LocalDate date))
-    .expirationFilter(ExpirationFilter.dte(int days))          // days-to-expiration
+    .expirationFilter(ExpirationFilter.dte(int days))          // days-to-expiration, e.g. ?dte=30
+    .expirationFilter(ExpirationFilter.dteList(int... days))   // comma list, e.g. ?dte=15,30,45
+    .expirationFilter(ExpirationFilter.dteRange(int min, int max))   // closed range, e.g. ?dte=0-45
+    .expirationFilter(ExpirationFilter.dteComparison(DteOperator operator, int days))
+                                                                 // comparison, e.g. ?dte=>=30
     .expirationFilter(ExpirationFilter.between(LocalDate from, LocalDate to))
     .expirationFilter(ExpirationFilter.all())                  // every expiration
     // (if omitted, the API narrows to the front month)
+    // dte/dteList/dteRange/dteComparison values must be non-negative and at most 36500 days;
+    // dteRange additionally requires min <= max. DteOperator is GT, GTE, LT, or LTE.
 
     // Strike selection (sealed StrikeFilter — pick one):
     .strikeFilter(StrikeFilter.exact(double price))
