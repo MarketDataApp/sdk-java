@@ -1227,6 +1227,170 @@ class OptionsResourceTest {
         .hasMessageContaining("min must be <= max");
   }
 
+  // ---------- chain: dte string syntax (wire forms) ----------
+
+  @Test
+  void dteSingleValueRendersBareNumber() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL").expirationFilter(ExpirationFilter.dte(30)).build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=30");
+  }
+
+  @Test
+  void dteCommaSeparatedListRendersJoinedValues() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dteList(15, 30, 45))
+                .build())
+        .join();
+
+    String decodedUri =
+        java.net.URLDecoder.decode(
+            client.captured.get(0).uri().toString(), java.nio.charset.StandardCharsets.UTF_8);
+    assertThat(decodedUri).contains("dte=15,30,45");
+  }
+
+  @Test
+  void dteClosedRangeRendersAsDashed() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dteRange(0, 45))
+                .build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=0-45");
+  }
+
+  @Test
+  void dteComparisonOperatorRendersWithOperatorPrefix() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(
+                    ExpirationFilter.dteComparison(ExpirationFilter.DteOperator.GTE, 30))
+                .build())
+        .join();
+
+    // "%3E%3D" is the URL-encoded ">=" — mirrors the strike comparison encoding.
+    assertThat(client.captured.get(0).uri().toString()).contains("dte=%3E%3D30");
+  }
+
+  // ---------- chain: dte legacy single-int factory (regression) ----------
+
+  @Test
+  void legacyDteIntFactoryAndRecordShapeUnchanged() {
+    // Binary/source compatibility: dte(int) must keep returning a Dte record whose sole component
+    // is the int it was given, and must keep rejecting negative input with the original message.
+    ExpirationFilter.Dte d = ExpirationFilter.dte(45);
+    assertThat(d.days()).isEqualTo(45);
+
+    assertThatThrownBy(() -> ExpirationFilter.dte(-1))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be non-negative");
+  }
+
+  // ---------- chain: dte string syntax (validation) ----------
+
+  @Test
+  void dteSingleValueRejectsAbove36500() {
+    assertThatThrownBy(() -> ExpirationFilter.dte(36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be at most 36500");
+  }
+
+  @Test
+  void dteListRejectsNegativeElement() {
+    assertThatThrownBy(() -> ExpirationFilter.dteList(15, -1, 45))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be non-negative");
+  }
+
+  @Test
+  void dteListRejectsElementAbove36500() {
+    assertThatThrownBy(() -> ExpirationFilter.dteList(15, 36501, 45))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be at most 36500");
+  }
+
+  @Test
+  void dteRangeRejectsMinGreaterThanMax() {
+    assertThatThrownBy(() -> ExpirationFilter.dteRange(45, 0))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("min must be <= max");
+  }
+
+  @Test
+  void dteRangeRejectsNegativeMin() {
+    assertThatThrownBy(() -> ExpirationFilter.dteRange(-1, 45))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be non-negative");
+  }
+
+  @Test
+  void dteRangeRejectsMaxAbove36500() {
+    assertThatThrownBy(() -> ExpirationFilter.dteRange(0, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be at most 36500");
+  }
+
+  @Test
+  void dteComparisonRejectsNegativeValue() {
+    assertThatThrownBy(() -> ExpirationFilter.dteComparison(ExpirationFilter.DteOperator.GTE, -1))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be non-negative");
+  }
+
+  @Test
+  void dteComparisonRejectsValueAbove36500() {
+    assertThatThrownBy(() -> ExpirationFilter.dteComparison(ExpirationFilter.DteOperator.LT, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be at most 36500");
+  }
+
+  // ---------- chain: dte string syntax (sync/async parity) ----------
+
+  @Test
+  void dteRangeSyncMirrorsAsyncWireRequest() {
+    CapturingClient asyncClient = okWith(CANNED_CHAIN_BODY);
+    resourceWith(asyncClient)
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dteRange(0, 45))
+                .build())
+        .join();
+    assertThat(asyncClient.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=0-45");
+
+    CapturingClient syncClient = okWith(CANNED_CHAIN_BODY);
+    resourceWith(syncClient)
+        .chain(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dteRange(0, 45))
+                .build());
+
+    assertThat(syncClient.captured.get(0).uri().toString())
+        .isEqualTo(asyncClient.captured.get(0).uri().toString());
+  }
+
   // ---------- helpers ----------
 
   private static CapturingClient okWith(String body) {

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Options `dte` parameter enhancements** (API 2.0.0) — `ExpirationFilter` now
+  supports comma-separated lists (`dteList`), ranges (`dteRange`), and comparison
+  operators (`dteComparison` with `DteOperator.GT/GTE/LT/LTE`) for richer
+  expiration filtering. `MAX_DTE_DAYS` constant (36500) documents the valid range.
+
+### Changed
+
+- **Options `dte(int)` validation** (API 2.0.0) — now enforces an upper bound of
+  36500 days; calls passing larger values will throw `BadRequestError`. Migrate
+  by clamping values to the valid range or using the new `dteRange` / `dteList`
+  factories.
+
 ## [1.0.0] - 2026-06-29
 
 First stable release of the Market Data Java &amp; Kotlin SDK — a single JVM

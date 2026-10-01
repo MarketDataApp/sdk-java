@@ -1,6 +1,8 @@
 package com.marketdata.sdk.options;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -14,13 +16,26 @@ import java.util.Objects;
  * <p>Additive expiration-type predicates ({@code weekly}/{@code monthly}/{@code quarterly}/{@code
  * am}/{@code pm}) are not part of this hierarchy — they intersect freely with any variant and stay
  * as separate booleans on the request builder.
+ *
+ * <p>The {@code dte} axis itself accepts four wire syntaxes — a single value ({@link #dte(int)}), a
+ * comma-separated list ({@link #dteList}), a closed range ({@link #dteRange}), and a comparison
+ * operator ({@link #dteComparison}), mirroring {@link StrikeFilter}'s syntax. {@code dte(int)}
+ * keeps its original signature and {@link Dte} record shape unchanged — the new syntaxes are
+ * additive variants rather than a retyping, so existing callers and compiled callers are
+ * unaffected.
  */
 public sealed interface ExpirationFilter
     permits ExpirationFilter.OnDate,
         ExpirationFilter.Dte,
+        ExpirationFilter.DteList,
+        ExpirationFilter.DteRange,
+        ExpirationFilter.DteComparison,
         ExpirationFilter.Between,
         ExpirationFilter.MonthYear,
         ExpirationFilter.All {
+
+  /** The API's upper bound on any individual {@code dte} value, in days (~100 years). */
+  int MAX_DTE_DAYS = 36500;
 
   /** A specific expiration date — wire form {@code ?expiration=YYYY-MM-DD}. */
   static OnDate onDate(LocalDate date) {
@@ -41,10 +56,54 @@ public sealed interface ExpirationFilter
 
   /** Days-to-expiration filter — wire form {@code ?dte=N}. */
   static Dte dte(int days) {
+    validateDteDays(days);
+    return new Dte(days);
+  }
+
+  /**
+   * Days-to-expiration comma-separated list — wire form {@code ?dte=15,30,45}. Selects the closest
+   * expiration for each value, deduplicated by the API. Mirrors {@link StrikeFilter}'s syntax.
+   */
+  static DteList dteList(int... days) {
+    Objects.requireNonNull(days, "days");
+    List<Integer> copy = new ArrayList<>(days.length);
+    for (int day : days) {
+      validateDteDays(day);
+      copy.add(day);
+    }
+    return new DteList(List.copyOf(copy));
+  }
+
+  /**
+   * Days-to-expiration closed range — wire form {@code ?dte=min-max}, inclusive. {@code min} must
+   * not exceed {@code max}. Mirrors {@link StrikeFilter}'s syntax.
+   */
+  static DteRange dteRange(int min, int max) {
+    validateDteDays(min);
+    validateDteDays(max);
+    if (min > max) {
+      throw new IllegalArgumentException("min must be <= max");
+    }
+    return new DteRange(min, max);
+  }
+
+  /**
+   * Days-to-expiration comparison — wire form {@code ?dte=operator+days} (e.g. {@code >=30}).
+   * Mirrors {@link StrikeFilter}'s syntax.
+   */
+  static DteComparison dteComparison(DteOperator operator, int days) {
+    Objects.requireNonNull(operator, "operator");
+    validateDteDays(days);
+    return new DteComparison(operator, days);
+  }
+
+  private static void validateDteDays(int days) {
     if (days < 0) {
       throw new IllegalArgumentException("dte must be non-negative");
     }
-    return new Dte(days);
+    if (days > MAX_DTE_DAYS) {
+      throw new IllegalArgumentException("dte must be at most " + MAX_DTE_DAYS);
+    }
   }
 
   /**
@@ -78,6 +137,38 @@ public sealed interface ExpirationFilter
   }
 
   record Dte(int days) implements ExpirationFilter {}
+
+  record DteList(List<Integer> days) implements ExpirationFilter {
+    public DteList {
+      days = List.copyOf(days);
+    }
+  }
+
+  record DteRange(int min, int max) implements ExpirationFilter {}
+
+  record DteComparison(DteOperator operator, int days) implements ExpirationFilter {}
+
+  /**
+   * Comparison operators accepted by the {@code dte} parameter. Mirrors {@link
+   * StrikeFilter.Operator}.
+   */
+  enum DteOperator {
+    GT(">"),
+    GTE(">="),
+    LT("<"),
+    LTE("<=");
+
+    private final String wireValue;
+
+    DteOperator(String wireValue) {
+      this.wireValue = wireValue;
+    }
+
+    /** The wire-form prefix the API expects, e.g. {@code ">="}. */
+    public String wireValue() {
+      return wireValue;
+    }
+  }
 
   record Between(LocalDate from, LocalDate to) implements ExpirationFilter {}
 
