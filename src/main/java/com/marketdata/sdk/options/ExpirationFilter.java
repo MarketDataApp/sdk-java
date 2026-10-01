@@ -56,7 +56,6 @@ public sealed interface ExpirationFilter
 
   /** Days-to-expiration filter — wire form {@code ?dte=N}. */
   static Dte dte(int days) {
-    validateDteDays(days);
     return new Dte(days);
   }
 
@@ -128,7 +127,11 @@ public sealed interface ExpirationFilter
     }
   }
 
-  record Dte(int days) implements ExpirationFilter {}
+  record Dte(int days) implements ExpirationFilter {
+    public Dte {
+      validateDteDays(days);
+    }
+  }
 
   record DteList(List<Integer> days) implements ExpirationFilter {
     public DteList {

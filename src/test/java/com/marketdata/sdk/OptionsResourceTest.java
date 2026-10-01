@@ -1369,6 +1369,13 @@ class OptionsResourceTest {
   // ---------- chain: dte string syntax (compact constructors) ----------
 
   @Test
+  void dteRecordConstructorRejectsAbove36500() {
+    assertThatThrownBy(() -> new ExpirationFilter.Dte(36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be at most 36500");
+  }
+
+  @Test
   void dteRangeRecordConstructorRejectsMinGreaterThanMax() {
     assertThatThrownBy(() -> new ExpirationFilter.DteRange(45, 0))
         .isInstanceOf(IllegalArgumentException.class)
