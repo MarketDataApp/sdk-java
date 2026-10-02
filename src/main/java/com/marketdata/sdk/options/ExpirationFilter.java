@@ -1,6 +1,5 @@
 package com.marketdata.sdk.options;
 
-import com.marketdata.sdk.Generated;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Objects;
@@ -54,50 +53,40 @@ public sealed interface ExpirationFilter
 
   /**
    * Days-to-expiration list — wire form {@code ?dte=15,30,45}. Selects the closest expiration for
-   * each value (deduplicated server-side).
+   * each value (deduplicated server-side). Each value must be between 0 and 36500 inclusive; dte
+   * and {@code from}/{@code to} are mutually exclusive — this sealed type has no variant that
+   * carries both.
    */
   static DteList dteList(List<Integer> days) {
-    Objects.requireNonNull(days, "days");
-    if (days.isEmpty()) {
-      throw new IllegalArgumentException("days must not be empty");
-    }
-    for (int d : days) {
-      validateDte(d);
-    }
-    return new DteList(List.copyOf(days));
+    return new DteList(days);
   }
 
   /**
    * Days-to-expiration range — wire form {@code ?dte=0-45}. Matches every expiration whose dte
-   * falls within the bounds, inclusive. {@code min} must not exceed {@code max}.
+   * falls within the bounds, inclusive. {@code min} must not exceed {@code max}, and both bounds
+   * must be between 0 and 36500 inclusive; dte and {@code from}/{@code to} are mutually exclusive —
+   * this sealed type has no variant that carries both.
    */
   static DteRange dteRange(int min, int max) {
-    validateDte(min);
-    validateDte(max);
-    if (min > max) {
-      throw new IllegalArgumentException("min must be <= max");
-    }
     return new DteRange(min, max);
   }
 
   /**
    * Days-to-expiration comparison — wire form {@code ?dte=>=30}. Matches every expiration whose dte
-   * satisfies {@code operator days}.
+   * satisfies {@code operator days}. {@code days} must be between 0 and 36500 inclusive; dte and
+   * {@code from}/{@code to} are mutually exclusive — this sealed type has no variant that carries
+   * both.
    */
-  // @Generated: the null-operator guard is unreachable through the public comparison factory,
-  // which always supplies a non-null Operator from the typed enum.
-  @Generated
   static DteComparison dteComparison(Operator operator, int days) {
-    if (operator == null) {
-      throw new IllegalArgumentException("operator must not be null");
-    }
-    validateDte(days);
     return new DteComparison(operator, days);
   }
 
   private static void validateDte(int days) {
     if (days < 0) {
       throw new IllegalArgumentException("dte must be non-negative");
+    }
+    if (days > 36500) {
+      throw new IllegalArgumentException("dte must not exceed 36500");
     }
   }
 
@@ -152,11 +141,37 @@ public sealed interface ExpirationFilter
 
   record Dte(int days) implements ExpirationFilter {}
 
-  record DteList(List<Integer> days) implements ExpirationFilter {}
+  record DteList(List<Integer> days) implements ExpirationFilter {
+    public DteList {
+      Objects.requireNonNull(days, "days");
+      if (days.isEmpty()) {
+        throw new IllegalArgumentException("days must not be empty");
+      }
+      days = List.copyOf(days);
+      for (int d : days) {
+        validateDte(d);
+      }
+    }
+  }
 
-  record DteRange(int min, int max) implements ExpirationFilter {}
+  record DteRange(int min, int max) implements ExpirationFilter {
+    public DteRange {
+      validateDte(min);
+      validateDte(max);
+      if (min > max) {
+        throw new IllegalArgumentException("min must be <= max");
+      }
+    }
+  }
 
-  record DteComparison(Operator operator, int days) implements ExpirationFilter {}
+  record DteComparison(Operator operator, int days) implements ExpirationFilter {
+    public DteComparison {
+      if (operator == null) {
+        throw new IllegalArgumentException("operator must not be null");
+      }
+      validateDte(days);
+    }
+  }
 
   record Between(LocalDate from, LocalDate to) implements ExpirationFilter {}
 

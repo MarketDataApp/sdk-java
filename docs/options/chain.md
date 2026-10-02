@@ -99,7 +99,9 @@ try (MarketDataClient client = new MarketDataClient()) {
           .side(OptionSide.CALL)
           .build());
 
-  // dte also accepts a comma-separated list, an inclusive range, or a comparison.
+  // dte also accepts a comma-separated list, an inclusive range, or a comparison. Every dte
+  // value must be between 0 and 36500 inclusive; dte and from/to are mutually exclusive (the
+  // sealed ExpirationFilter has no variant carrying both, so the compiler enforces it).
   var dteRange = client.options().chain(
       OptionsChainRequest.builder("AAPL")
           .expirationFilter(ExpirationFilter.dteRange(0, 45))

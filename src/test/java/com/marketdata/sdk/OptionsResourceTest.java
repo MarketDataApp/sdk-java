@@ -1313,6 +1313,13 @@ class OptionsResourceTest {
   }
 
   @Test
+  void expirationFilterDteListRejectsValueAboveMaximum() {
+    assertThatThrownBy(() -> ExpirationFilter.dteList(List.of(15, 36501)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must not exceed 36500");
+  }
+
+  @Test
   void expirationFilterDteRangeRejectsMinGreaterThanMax() {
     assertThatThrownBy(() -> ExpirationFilter.dteRange(45, 0))
         .isInstanceOf(IllegalArgumentException.class)
@@ -1327,10 +1334,31 @@ class OptionsResourceTest {
   }
 
   @Test
+  void expirationFilterDteRangeRejectsMaxAboveMaximum() {
+    assertThatThrownBy(() -> ExpirationFilter.dteRange(0, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must not exceed 36500");
+  }
+
+  @Test
   void expirationFilterDteComparisonRejectsNegativeValue() {
     assertThatThrownBy(() -> ExpirationFilter.dteComparison(ExpirationFilter.Operator.LT, -1))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("dte must be non-negative");
+  }
+
+  @Test
+  void expirationFilterDteComparisonRejectsValueAboveMaximum() {
+    assertThatThrownBy(() -> ExpirationFilter.dteComparison(ExpirationFilter.Operator.LT, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must not exceed 36500");
+  }
+
+  @Test
+  void expirationFilterDteComparisonRejectsNullOperator() {
+    assertThatThrownBy(() -> ExpirationFilter.dteComparison(null, 30))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("operator must not be null");
   }
 
   @Test
