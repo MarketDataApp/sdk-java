@@ -20,7 +20,10 @@ OptionsChainRequest.builder(String symbol)
 
     // Expiration selection (sealed ExpirationFilter — pick one):
     .expirationFilter(ExpirationFilter.onDate(LocalDate date))
-    .expirationFilter(ExpirationFilter.dte(int days))          // days-to-expiration
+    .expirationFilter(ExpirationFilter.dte(int days))          // days-to-expiration, closest match
+    .expirationFilter(ExpirationFilter.dteList(List<Integer> days))       // closest match per value
+    .expirationFilter(ExpirationFilter.dteRange(int min, int max))        // inclusive dte range
+    .expirationFilter(ExpirationFilter.dteComparison(ExpirationFilter.Operator op, int days))
     .expirationFilter(ExpirationFilter.between(LocalDate from, LocalDate to))
     .expirationFilter(ExpirationFilter.all())                  // every expiration
     // (if omitted, the API narrows to the front month)
@@ -94,6 +97,12 @@ try (MarketDataClient client = new MarketDataClient()) {
           .expirationFilter(ExpirationFilter.dte(45))
           .strikeFilter(StrikeFilter.range(150, 250))
           .side(OptionSide.CALL)
+          .build());
+
+  // dte also accepts a comma-separated list, an inclusive range, or a comparison.
+  var dteRange = client.options().chain(
+      OptionsChainRequest.builder("AAPL")
+          .expirationFilter(ExpirationFilter.dteRange(0, 45))
           .build());
 }
 ```
