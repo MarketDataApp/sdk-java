@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Days-to-expiration filters on options chain** — `ExpirationFilter.dteList(List)`,
+  `ExpirationFilter.dteRange(int, int)`, and `ExpirationFilter.dteComparison(Operator, int)`
+  add three new syntactic forms for the `?dte` parameter (list, range, and comparison-operator
+  queries), mirroring the strike-filter variants. The `Operator` enum carries `GT`, `GTE`,
+  `LT`, `LTE` with `wireValue()` accessors. Responds to Market Data API 2.0.0.
+
 ## [1.0.0] - 2026-06-29
 
 First stable release of the Market Data Java &amp; Kotlin SDK — a single JVM

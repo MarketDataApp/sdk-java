@@ -134,6 +134,73 @@ class OptionsIntegrationTest {
   }
 
   @Test
+  void chainDteListNarrowsToClosestExpirationsPerValue() {
+    // dteList selects the closest expiration to each requested value, deduplicated — so the
+    // returned dte values need not equal 7/30/60 exactly, but there should be at most one
+    // expiration per requested value.
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dteList(List.of(7, 30, 60)))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    long distinctDte = chain.stream().map(OptionQuote::dte).distinct().count();
+    for (OptionQuote q : chain) {
+      assertThat(q.dte()).isNotNull();
+    }
+    assertThat(distinctDte)
+        .as("one closest expiration per requested value, deduplicated")
+        .isBetween(1L, 3L);
+  }
+
+  @Test
+  void chainDteRangeReturnsExpirationsWithinBounds() {
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dteRange(0, 45))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    for (OptionQuote q : chain) {
+      assertThat(q.dte()).isNotNull();
+      assertThat(q.dte()).isBetween(0, 45);
+    }
+  }
+
+  @Test
+  void chainDteComparisonReturnsExpirationsSatisfyingOperator() {
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(
+                        ExpirationFilter.dteComparison(ExpirationFilter.Operator.GTE, 30))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    for (OptionQuote q : chain) {
+      assertThat(q.dte()).isNotNull();
+      assertThat(q.dte()).isGreaterThanOrEqualTo(30);
+    }
+  }
+
+  @Test
   void chainDecodesOptionalRhoColumn() {
     // rho is an optional column: the live feed may or may not populate it. Assert the SDK decodes
     // whatever comes back without error — every row's rho is either null (omitted) or a finite
