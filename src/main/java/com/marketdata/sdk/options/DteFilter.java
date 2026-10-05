@@ -1,6 +1,5 @@
 package com.marketdata.sdk.options;
 
-import com.marketdata.sdk.Generated;
 import java.util.List;
 import java.util.Objects;
 
@@ -25,35 +24,16 @@ public sealed interface DteFilter permits DteFilter.Values, DteFilter.Range, Dte
    * days} must not be empty.
    */
   static Values values(List<Integer> days) {
-    Objects.requireNonNull(days, "days");
-    if (days.isEmpty()) {
-      throw new IllegalArgumentException("days must be non-empty");
-    }
-    for (int d : days) {
-      validateDays(d);
-    }
     return new Values(days);
   }
 
   /** Match every expiration whose dte falls in {@code [min, max]} inclusive. */
   static Range range(int min, int max) {
-    validateDays(min);
-    validateDays(max);
-    if (min > max) {
-      throw new IllegalArgumentException("min must be <= max");
-    }
     return new Range(min, max);
   }
 
   /** Match dte satisfying {@code operator days} (e.g. {@code >= 30}). */
-  // @Generated: the null-operator guard is unreachable through the public comparison factories,
-  // which always supply a non-null Operator from the typed enum.
-  @Generated
   static Comparison comparison(Operator operator, int days) {
-    if (operator == null) {
-      throw new IllegalArgumentException("operator must not be null");
-    }
-    validateDays(days);
     return new Comparison(operator, days);
   }
 
@@ -87,11 +67,33 @@ public sealed interface DteFilter permits DteFilter.Values, DteFilter.Range, Dte
 
   record Values(List<Integer> days) implements DteFilter {
     public Values {
+      Objects.requireNonNull(days, "days");
+      if (days.isEmpty()) {
+        throw new IllegalArgumentException("days must be non-empty");
+      }
       days = List.copyOf(days);
+      for (int d : days) {
+        validateDays(d);
+      }
     }
   }
 
-  record Range(int min, int max) implements DteFilter {}
+  record Range(int min, int max) implements DteFilter {
+    public Range {
+      validateDays(min);
+      validateDays(max);
+      if (min > max) {
+        throw new IllegalArgumentException("min must be <= max");
+      }
+    }
+  }
 
-  record Comparison(Operator operator, int days) implements DteFilter {}
+  record Comparison(Operator operator, int days) implements DteFilter {
+    public Comparison {
+      if (operator == null) {
+        throw new IllegalArgumentException("operator must not be null");
+      }
+      validateDays(days);
+    }
+  }
 }

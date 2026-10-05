@@ -1371,6 +1371,34 @@ class OptionsResourceTest {
   }
 
   @Test
+  void dteFilterComparisonRejectsNullOperator() {
+    assertThatThrownBy(() -> DteFilter.comparison(null, 30))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("operator must not be null");
+  }
+
+  @Test
+  void dteFilterValuesRecordConstructorRejectsEmptyList() {
+    assertThatThrownBy(() -> new DteFilter.Values(List.of()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("non-empty");
+  }
+
+  @Test
+  void dteFilterRangeRecordConstructorRejectsReversedRange() {
+    assertThatThrownBy(() -> new DteFilter.Range(45, 0))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("min must be <= max");
+  }
+
+  @Test
+  void dteFilterComparisonRecordConstructorRejectsNullOperator() {
+    assertThatThrownBy(() -> new DteFilter.Comparison(null, 30))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("operator must not be null");
+  }
+
+  @Test
   void expirationFilterBetweenRejectsReversedDates() {
     assertThatThrownBy(
             () ->
