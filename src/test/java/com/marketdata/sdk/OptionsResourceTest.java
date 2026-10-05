@@ -2,8 +2,10 @@ package com.marketdata.sdk;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.params.provider.Arguments.arguments;
 
 import com.marketdata.sdk.exception.ParseError;
+import com.marketdata.sdk.options.DteFilter;
 import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.Greek;
 import com.marketdata.sdk.options.OptionQuote;
@@ -30,7 +32,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 class OptionsResourceTest {
 
@@ -976,6 +982,100 @@ class OptionsResourceTest {
   }
 
   @Test
+  void chainDteFilterExactTranslatesToSingleValue() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dte(DteFilter.exact(30)))
+                .build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=30");
+  }
+
+  @Test
+  void chainDteFilterValuesTranslatesToCommaSeparatedList() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dte(DteFilter.values(15, 30, 45)))
+                .build())
+        .join();
+
+    // The query encoder percent-encodes "," like other reserved characters (see the strike
+    // comparison test below) — the wire value is still the comma-separated list, just encoded.
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=15%2C30%2C45");
+  }
+
+  @Test
+  void chainDteFilterRangeTranslatesToClosedRange() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dte(DteFilter.range(0, 45)))
+                .build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=0-45");
+  }
+
+  @ParameterizedTest
+  @MethodSource("dteComparisonOperators")
+  void chainDteFilterComparisonTranslatesToOperatorPrefix(
+      DteFilter.Operator operator, String encodedPrefix) {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dte(DteFilter.comparison(operator, 30)))
+                .build())
+        .join();
+
+    // The query encoder percent-encodes the reserved operator characters (">" -> %3E, "<" ->
+    // %3C, "=" -> %3D) — one case per Operator constant so every wireValue() prefix is exercised.
+    assertThat(client.captured.get(0).uri().toString()).contains("dte=" + encodedPrefix + "30");
+  }
+
+  static Stream<Arguments> dteComparisonOperators() {
+    return Stream.of(
+        arguments(DteFilter.Operator.GT, "%3E"),
+        arguments(DteFilter.Operator.GTE, "%3E%3D"),
+        arguments(DteFilter.Operator.LT, "%3C"),
+        arguments(DteFilter.Operator.LTE, "%3C%3D"));
+  }
+
+  @Test
+  void chainDteFilterRangeSyncAndAsyncProduceIdenticalRequest() {
+    OptionsChainRequest request =
+        OptionsChainRequest.builder("AAPL")
+            .expirationFilter(ExpirationFilter.dte(DteFilter.range(0, 45)))
+            .build();
+    String expected = "http://localhost/v1/options/chain/AAPL/?dte=0-45";
+
+    CapturingClient asyncClient = okWith(CANNED_CHAIN_BODY);
+    resourceWith(asyncClient).chainAsync(request).join();
+    assertThat(asyncClient.captured.get(0).uri().toString()).isEqualTo(expected);
+
+    CapturingClient syncClient = okWith(CANNED_CHAIN_BODY);
+    resourceWith(syncClient).chain(request);
+    assertThat(syncClient.captured.get(0).uri().toString()).isEqualTo(expected);
+  }
+
+  @Test
   void chainExpirationFilterBetweenTranslatesToFromTo() {
     CapturingClient client = okWith(CANNED_CHAIN_BODY);
     OptionsResource options = resourceWith(client);
@@ -1225,6 +1325,55 @@ class OptionsResourceTest {
     assertThatThrownBy(() -> StrikeFilter.range(160, 140))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("min must be <= max");
+  }
+
+  @Test
+  void dteFilterExactRejectsBelowMin() {
+    assertThatThrownBy(() -> DteFilter.exact(-1))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("days must be in 0..36500");
+  }
+
+  @Test
+  void dteFilterExactRejectsAboveMax() {
+    assertThatThrownBy(() -> DteFilter.exact(36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("days must be in 0..36500");
+  }
+
+  @Test
+  void dteFilterRangeRejectsMinGreaterThanMax() {
+    assertThatThrownBy(() -> DteFilter.range(45, 0))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("min must be <= max");
+  }
+
+  @Test
+  void dteFilterRangeRejectsOutOfBoundsMin() {
+    assertThatThrownBy(() -> DteFilter.range(-1, 45))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("days must be in 0..36500");
+  }
+
+  @Test
+  void dteFilterValuesRejectsEmptyList() {
+    assertThatThrownBy(() -> DteFilter.values())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("values must not be empty");
+  }
+
+  @Test
+  void dteFilterValuesRejectsOutOfBoundsValue() {
+    assertThatThrownBy(() -> DteFilter.values(15, -1, 45))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("days must be in 0..36500");
+  }
+
+  @Test
+  void dteFilterComparisonRejectsAboveMax() {
+    assertThatThrownBy(() -> DteFilter.comparison(DteFilter.Operator.LT, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("days must be in 0..36500");
   }
 
   // ---------- helpers ----------

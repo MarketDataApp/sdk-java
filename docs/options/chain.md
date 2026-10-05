@@ -20,7 +20,8 @@ OptionsChainRequest.builder(String symbol)
 
     // Expiration selection (sealed ExpirationFilter — pick one):
     .expirationFilter(ExpirationFilter.onDate(LocalDate date))
-    .expirationFilter(ExpirationFilter.dte(int days))          // days-to-expiration
+    .expirationFilter(ExpirationFilter.dte(int days))          // days-to-expiration, single value
+    .expirationFilter(ExpirationFilter.dte(DteFilter filter))  // dte: list / range / comparison
     .expirationFilter(ExpirationFilter.between(LocalDate from, LocalDate to))
     .expirationFilter(ExpirationFilter.all())                  // every expiration
     // (if omitted, the API narrows to the front month)
@@ -39,6 +40,8 @@ OptionsChainRequest.builder(String symbol)
     .date(LocalDate date)               // historical chain
     .build()
 ```
+
+`DteFilter` itself is a sealed type with four forms — `DteFilter.exact(int days)`, `DteFilter.values(int... days)` (comma-separated, deduplicated server-side), `DteFilter.range(int min, int max)` (closed range), and `DteFilter.comparison(DteFilter.Operator op, int days)` (`>`, `>=`, `<`, `<=`) — the same syntax the API uses for `strike`.
 
 <a name="optionquote"></a>
 #### Returns
@@ -66,6 +69,7 @@ public record OptionQuote(
 
 ```java
 import com.marketdata.sdk.MarketDataClient;
+import com.marketdata.sdk.options.DteFilter;
 import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.OptionQuote;
 import com.marketdata.sdk.options.OptionSide;
@@ -95,6 +99,13 @@ try (MarketDataClient client = new MarketDataClient()) {
           .strikeFilter(StrikeFilter.range(150, 250))
           .side(OptionSide.CALL)
           .build());
+
+  // DteFilter: every expiration between 0 and 45 days out.
+  var byDteRange = client.options().chain(
+      OptionsChainRequest.builder("AAPL")
+          .expirationFilter(ExpirationFilter.dte(DteFilter.range(0, 45)))
+          .side(OptionSide.CALL)
+          .build());
 }
 ```
 
@@ -102,6 +113,8 @@ try (MarketDataClient client = new MarketDataClient()) {
 
 ```kotlin
 import com.marketdata.sdk.MarketDataClient
+import com.marketdata.sdk.options.DteFilter
+import com.marketdata.sdk.options.ExpirationFilter
 import com.marketdata.sdk.options.OptionSide
 import com.marketdata.sdk.options.OptionsChainRequest
 
@@ -116,5 +129,13 @@ MarketDataClient().use { client ->
     for (c in chain) {
         println("${c.optionSymbol()} strike=${c.strike()} delta=${c.delta()}")
     }
+
+    // DteFilter: every expiration 30 days out or further.
+    val byDte = client.options().chain(
+        OptionsChainRequest.builder("AAPL")
+            .expirationFilter(ExpirationFilter.dte(DteFilter.comparison(DteFilter.Operator.GTE, 30)))
+            .side(OptionSide.CALL)
+            .build())
+        .values()
 }
 ```

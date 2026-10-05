@@ -2,6 +2,7 @@ package com.marketdata.sdk;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.marketdata.sdk.options.DteFilter;
 import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.OptionQuote;
 import com.marketdata.sdk.options.OptionSide;
@@ -131,6 +132,84 @@ class OptionsIntegrationTest {
     assertThat(distinctExpirations)
         .as("expiration=all returns every expiration, not just the front-month")
         .isGreaterThan(1);
+  }
+
+  @Test
+  void chainDteFilterExactReturnsSingleClosestExpiration() {
+    // A single dte value narrows to the one expiration closest to it — the distinguishing
+    // property versus the list/range/comparison forms below.
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dte(DteFilter.exact(30)))
+                    .side(OptionSide.CALL)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    long distinctExpirations = chain.stream().map(OptionQuote::expiration).distinct().count();
+    assertThat(distinctExpirations)
+        .as("a single dte value selects exactly one expiration")
+        .isEqualTo(1);
+  }
+
+  @Test
+  void chainDteFilterValuesReturnsAtMostOneExpirationPerRequestedValue() {
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dte(DteFilter.values(15, 30, 45)))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    long distinctExpirations = chain.stream().map(OptionQuote::expiration).distinct().count();
+    assertThat(distinctExpirations)
+        .as("one expiration per requested dte value, deduplicated")
+        .isBetween(1L, 3L);
+  }
+
+  @Test
+  void chainDteFilterRangeReturnsExpirationsWithinBounds() {
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dte(DteFilter.range(0, 45)))
+                    .side(OptionSide.CALL)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    for (OptionQuote q : chain) {
+      assertThat(q.dte()).isNotNull().isBetween(0, 45);
+    }
+  }
+
+  @Test
+  void chainDteFilterComparisonReturnsExpirationsAboveThreshold() {
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(
+                        ExpirationFilter.dte(DteFilter.comparison(DteFilter.Operator.GTE, 30)))
+                    .side(OptionSide.CALL)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    for (OptionQuote q : chain) {
+      assertThat(q.dte()).isNotNull().isGreaterThanOrEqualTo(30);
+    }
   }
 
   @Test
