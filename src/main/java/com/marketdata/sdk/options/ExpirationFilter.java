@@ -20,7 +20,8 @@ public sealed interface ExpirationFilter
         ExpirationFilter.Dte,
         ExpirationFilter.Between,
         ExpirationFilter.MonthYear,
-        ExpirationFilter.All {
+        ExpirationFilter.All,
+        DteFilter {
 
   /** A specific expiration date — wire form {@code ?expiration=YYYY-MM-DD}. */
   static OnDate onDate(LocalDate date) {
@@ -45,6 +46,15 @@ public sealed interface ExpirationFilter
       throw new IllegalArgumentException("dte must be non-negative");
     }
     return new Dte(days);
+  }
+
+  /**
+   * Days-to-expiration filter, comma-list / range / comparison forms — wire forms {@code
+   * ?dte=15,30,45}, {@code ?dte=0-45}, {@code ?dte=>=30}. Pass-through kept under the {@code
+   * dte(...)} name for discoverability; see {@link DteFilter} for the factories.
+   */
+  static DteFilter dte(DteFilter filter) {
+    return Objects.requireNonNull(filter, "filter");
   }
 
   /**

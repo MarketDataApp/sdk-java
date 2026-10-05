@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.marketdata.sdk.exception.ParseError;
+import com.marketdata.sdk.options.DteFilter;
 import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.Greek;
 import com.marketdata.sdk.options.OptionQuote;
@@ -976,6 +977,73 @@ class OptionsResourceTest {
   }
 
   @Test
+  void chainExpirationFilterDteValuesTranslatesToCommaSeparatedDte() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dte(DteFilter.values(15, 30, 45)))
+                .build())
+        .join();
+
+    // The comma is URL-encoded on the wire, so decode before asserting (same convention as the
+    // columns param).
+    String decodedUri =
+        java.net.URLDecoder.decode(
+            client.captured.get(0).uri().toString(), java.nio.charset.StandardCharsets.UTF_8);
+    assertThat(decodedUri).isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=15,30,45");
+  }
+
+  @Test
+  void chainExpirationFilterDteRangeTranslatesToDashedDte() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dte(DteFilter.range(0, 45)))
+                .build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=0-45");
+  }
+
+  @Test
+  void chainExpirationFilterDteComparisonTranslatesToOperatorPrefixedDte() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(
+                    ExpirationFilter.dte(DteFilter.comparison(DteFilter.Operator.GTE, 30)))
+                .build())
+        .join();
+
+    String url = client.captured.get(0).uri().toString();
+    // "%3E%3D" is the URL-encoded ">=" — the query encoder pushes reserved characters through.
+    assertThat(url).contains("dte=%3E%3D30");
+  }
+
+  @Test
+  void chainExpirationFilterDteRangeSyncMatchesAsyncWire() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+
+    resourceWith(client)
+        .chain(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dte(DteFilter.range(0, 45)))
+                .build());
+
+    assertThat(client.captured.get(0).uri().toString()).contains("dte=0-45");
+  }
+
+  @Test
   void chainExpirationFilterBetweenTranslatesToFromTo() {
     CapturingClient client = okWith(CANNED_CHAIN_BODY);
     OptionsResource options = resourceWith(client);
@@ -1201,6 +1269,34 @@ class OptionsResourceTest {
     assertThatThrownBy(() -> ExpirationFilter.dte(-1))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("dte must be non-negative");
+  }
+
+  @Test
+  void dteFilterValuesRejectsOutOfRangeValue() {
+    assertThatThrownBy(() -> DteFilter.values(15, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be in 0..36500");
+  }
+
+  @Test
+  void dteFilterRangeRejectsMinGreaterThanMax() {
+    assertThatThrownBy(() -> DteFilter.range(45, 0))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("min must be <= max");
+  }
+
+  @Test
+  void dteFilterRangeRejectsOutOfRangeBound() {
+    assertThatThrownBy(() -> DteFilter.range(0, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be in 0..36500");
+  }
+
+  @Test
+  void dteFilterComparisonRejectsOutOfRangeValue() {
+    assertThatThrownBy(() -> DteFilter.comparison(DteFilter.Operator.GTE, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be in 0..36500");
   }
 
   @Test

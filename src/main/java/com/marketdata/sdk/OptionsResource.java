@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.module.SimpleModule;
+import com.marketdata.sdk.options.DteFilter;
 import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.OptionQuote;
 import com.marketdata.sdk.options.OptionsChain;
@@ -28,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -320,6 +322,12 @@ public final class OptionsResource extends ConfiguredResource<OptionsResource> {
       b.query("year", v.year());
     } else if (f instanceof ExpirationFilter.All) {
       b.query("expiration", "all");
+    } else if (f instanceof DteFilter.Values v) {
+      b.query("dte", v.days().stream().map(String::valueOf).collect(Collectors.joining(",")));
+    } else if (f instanceof DteFilter.Range v) {
+      b.query("dte", v.min() + "-" + v.max());
+    } else if (f instanceof DteFilter.Comparison v) {
+      b.query("dte", v.operator().wireValue() + v.days());
     }
     // ExpirationFilter is sealed and every variant is handled above; Java 17 can't prove that in
     // an if-chain, but there is no reachable else, so no defensive throw is needed.

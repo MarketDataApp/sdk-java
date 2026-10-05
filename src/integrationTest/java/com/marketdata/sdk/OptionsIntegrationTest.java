@@ -2,6 +2,7 @@ package com.marketdata.sdk;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.marketdata.sdk.options.DteFilter;
 import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.OptionQuote;
 import com.marketdata.sdk.options.OptionSide;
@@ -131,6 +132,67 @@ class OptionsIntegrationTest {
     assertThat(distinctExpirations)
         .as("expiration=all returns every expiration, not just the front-month")
         .isGreaterThan(1);
+  }
+
+  @Test
+  void chainDteValuesReturnsClosestExpirationPerValueDeduplicated() {
+    // Each requested value maps to the closest available expiration, deduplicated — so the
+    // distinct expiration count is at most the number of requested values.
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dte(DteFilter.values(7, 14, 30)))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    long distinctExpirations = chain.stream().map(OptionQuote::expiration).distinct().count();
+    assertThat(distinctExpirations)
+        .as("closest expiration per requested value, deduplicated")
+        .isBetween(1L, 3L);
+  }
+
+  @Test
+  void chainDteRangeReturnsExpirationsWithinBounds() {
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dte(DteFilter.range(0, 45)))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    for (OptionQuote q : chain) {
+      assertThat(q.dte()).isNotNull().isBetween(0, 45);
+    }
+  }
+
+  @Test
+  void chainDteComparisonReturnsExpirationsSatisfyingOperator() {
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(
+                        ExpirationFilter.dte(DteFilter.comparison(DteFilter.Operator.GTE, 30)))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    for (OptionQuote q : chain) {
+      assertThat(q.dte()).isNotNull().isGreaterThanOrEqualTo(30);
+    }
   }
 
   @Test
