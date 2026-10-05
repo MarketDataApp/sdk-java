@@ -18,6 +18,7 @@ import java.util.Objects;
 public sealed interface ExpirationFilter
     permits ExpirationFilter.OnDate,
         ExpirationFilter.Dte,
+        ExpirationFilter.DteSyntax,
         ExpirationFilter.Between,
         ExpirationFilter.MonthYear,
         ExpirationFilter.All {
@@ -39,12 +40,22 @@ public sealed interface ExpirationFilter
     return new All();
   }
 
-  /** Days-to-expiration filter — wire form {@code ?dte=N}. */
+  /** Days-to-expiration filter, single value — wire form {@code ?dte=N}. */
   static Dte dte(int days) {
     if (days < 0) {
       throw new IllegalArgumentException("dte must be non-negative");
     }
     return new Dte(days);
+  }
+
+  /**
+   * Days-to-expiration filter using the extended {@link DteFilter} syntax (comma-separated list,
+   * closed range, or comparison) — wire forms {@code ?dte=15,30,45}, {@code ?dte=0-45}, {@code
+   * ?dte=>=30}. The plain single-value form stays on {@link #dte(int)}.
+   */
+  static DteSyntax dte(DteFilter filter) {
+    Objects.requireNonNull(filter, "filter");
+    return new DteSyntax(filter);
   }
 
   /**
@@ -78,6 +89,8 @@ public sealed interface ExpirationFilter
   }
 
   record Dte(int days) implements ExpirationFilter {}
+
+  record DteSyntax(DteFilter filter) implements ExpirationFilter {}
 
   record Between(LocalDate from, LocalDate to) implements ExpirationFilter {}
 

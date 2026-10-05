@@ -20,7 +20,10 @@ OptionsChainRequest.builder(String symbol)
 
     // Expiration selection (sealed ExpirationFilter — pick one):
     .expirationFilter(ExpirationFilter.onDate(LocalDate date))
-    .expirationFilter(ExpirationFilter.dte(int days))          // days-to-expiration
+    .expirationFilter(ExpirationFilter.dte(int days))          // days-to-expiration, single value
+    .expirationFilter(ExpirationFilter.dte(DteFilter.values(List.of(15, 30, 45))))  // ?dte=15,30,45
+    .expirationFilter(ExpirationFilter.dte(DteFilter.range(0, 45)))                 // ?dte=0-45
+    .expirationFilter(ExpirationFilter.dte(DteFilter.comparison(DteFilter.Operator.GTE, 30)))  // ?dte=>=30
     .expirationFilter(ExpirationFilter.between(LocalDate from, LocalDate to))
     .expirationFilter(ExpirationFilter.all())                  // every expiration
     // (if omitted, the API narrows to the front month)
@@ -66,6 +69,7 @@ public record OptionQuote(
 
 ```java
 import com.marketdata.sdk.MarketDataClient;
+import com.marketdata.sdk.options.DteFilter;
 import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.OptionQuote;
 import com.marketdata.sdk.options.OptionSide;
@@ -94,6 +98,20 @@ try (MarketDataClient client = new MarketDataClient()) {
           .expirationFilter(ExpirationFilter.dte(45))
           .strikeFilter(StrikeFilter.range(150, 250))
           .side(OptionSide.CALL)
+          .build());
+
+  // Extended dte syntax: comma list, closed range, or comparison — ?dte=15,30,45 / ?dte=0-45 / ?dte=>=30.
+  var dteList = client.options().chain(
+      OptionsChainRequest.builder("AAPL")
+          .expirationFilter(ExpirationFilter.dte(DteFilter.values(List.of(15, 30, 45))))
+          .build());
+  var dteRange = client.options().chain(
+      OptionsChainRequest.builder("AAPL")
+          .expirationFilter(ExpirationFilter.dte(DteFilter.range(0, 45)))
+          .build());
+  var dteComparison = client.options().chain(
+      OptionsChainRequest.builder("AAPL")
+          .expirationFilter(ExpirationFilter.dte(DteFilter.comparison(DteFilter.Operator.GTE, 30)))
           .build());
 }
 ```
