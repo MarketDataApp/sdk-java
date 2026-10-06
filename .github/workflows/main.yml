@@ -77,7 +77,8 @@ jobs:
 
   # SDK requirements §13: integration tests run mandatorily on every push
   # to main (release-pipeline gate) on the full forward-compat matrix.
-  # On PRs they're triggered on demand instead — see
+  # Pull requests run them on JDK 17 only — see the `integration` job in
+  # pull-request.yml — and on the full matrix on demand, see
   # pr-integration-on-demand.yml.
   integration-tests:
     name: Integration tests (live API, JDK ${{ matrix.java }})
