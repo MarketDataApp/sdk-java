@@ -203,7 +203,7 @@ jobs:
     # The single context branch protection requires. It always reports, so it is
     # always a decision rather than a silence.
     name: Tests passed
-    needs: [changes, verify]
+    needs: [changes, verify, integration]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -213,9 +213,15 @@ jobs:
         env:
           CODE: ${{ needs.changes.outputs.code }}
           R0: ${{ needs.verify.result }}
+          R1: ${{ needs.integration.result }}
+          # The negation of the last two clauses of the `integration` job's
+          # `if:`, evaluated by the same expression engine so the two cannot
+          # disagree: `true` for dependabot and for a fork.
+          NO_SECRETS: ${{ github.actor == 'dependabot[bot]' || github.event.pull_request.head.repo.full_name != github.repository }}
         run: |
           echo "gate said code=${CODE:-<nothing: the gate itself failed>}"
           echo "verify: ${R0}"
+          echo "integration: ${R1} (pull request without secrets: ${NO_SECRETS})"
 
           # Two classes of job, because they skip for different reasons.
           #
@@ -233,6 +239,24 @@ jobs:
                 fi
                 ;;
               *) echo "A required job reported: $result"; exit 1 ;;
+            esac
+          done
+
+          # LIVE jobs need the API token, so they have one more acceptable skip:
+          # a pull request from dependabot or from a fork, which cannot read
+          # repository secrets. Nothing else is accepted, and a FAILURE always
+          # fails: that includes the job refusing to run without its token on a
+          # pull request that should have had one.
+          for result in "${R1}"; do
+            case "$result" in
+              success) ;;
+              skipped)
+                if [ "$CODE" != "false" ] && [ "$NO_SECRETS" != "true" ]; then
+                  echo "The live suite was skipped, and neither the gate nor a pull request without secrets explains it."
+                  exit 1
+                fi
+                ;;
+              *) echo "The live suite reported: $result"; exit 1 ;;
             esac
           done
 
