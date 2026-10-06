@@ -345,9 +345,15 @@ install — the wrapper downloads the right Gradle version on first run.
 MARKETDATA_RUN_INTEGRATION_TESTS=true ./gradlew integrationTest
 ```
 
-On PRs, integration tests are not run automatically (live-API quota +
-CI minutes). A reviewer with `write` access triggers them by posting a
-slash-command on the **first line** of a PR comment:
+Every pull request runs the integration tests against the live API on
+JDK 17, and their result is part of the required `Tests passed` check.
+Two kinds of pull request skip them: one that only changes documentation,
+and one from a fork or from dependabot, which cannot read the API token.
+
+A reviewer with `write` access can also run them by posting a
+slash-command on the **first line** of a PR comment — for the full JDK
+matrix, for a fork or dependabot pull request, or to run them again
+without a new push:
 
 - `/integrationtest` — JDK 17 only.
 - `/integrationtestfull` — full matrix `{17, 21, 25}`.
