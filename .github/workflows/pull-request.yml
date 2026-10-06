@@ -149,16 +149,22 @@ jobs:
     # these three and no other:
     #   1. the gate did not say "documentation only", so a markdown change
     #      spends no live API quota. `!= 'false'` so a failed gate still runs;
-    #   2. not dependabot, and
-    #   3. not a fork: neither receives repository secrets on `pull_request`.
-    #      They skip this JOB, which shows as "skipped" in the checks, not as
-    #      a green run that tested nothing. A maintainer can still run the
-    #      suite for them with `/integrationtest`.
+    #   2. the pull request was not opened by dependabot, and
+    #   3. it does not come from a fork: neither receives repository secrets
+    #      on `pull_request`. They skip this JOB, which shows as "skipped" in
+    #      the checks, not as a green run that tested nothing.
+    # Clause 2 reads the AUTHOR of the pull request, not `github.actor`, which
+    # is whoever triggered this run. A maintainer who reopens a dependabot
+    # pull request becomes the actor, and the run then does receive the
+    # token, so a test on the actor would send a freshly bumped dependency's
+    # code to the live API without anybody having decided to. A dependabot
+    # pull request never runs the suite on its own, whoever triggers the run;
+    # a maintainer runs it for one, or for a fork, with `/integrationtest`.
     # A head repository that has since been deleted reads as empty, which is
     # not this repository, so it skips too.
     if: >-
       needs.changes.outputs.code != 'false' &&
-      github.actor != 'dependabot[bot]' &&
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     # Every test talks to the live API; without a cap one hung request would
@@ -216,8 +222,9 @@ jobs:
           R1: ${{ needs.integration.result }}
           # The negation of the last two clauses of the `integration` job's
           # `if:`, evaluated by the same expression engine so the two cannot
-          # disagree: `true` for dependabot and for a fork.
-          NO_SECRETS: ${{ github.actor == 'dependabot[bot]' || github.event.pull_request.head.repo.full_name != github.repository }}
+          # disagree: `true` for a pull request opened by dependabot, whoever
+          # triggered this run, and for a fork.
+          NO_SECRETS: ${{ github.event.pull_request.user.login == 'dependabot[bot]' || github.event.pull_request.head.repo.full_name != github.repository }}
         run: |
           echo "gate said code=${CODE:-<nothing: the gate itself failed>}"
           echo "verify: ${R0}"
@@ -243,10 +250,10 @@ jobs:
           done
 
           # LIVE jobs need the API token, so they have one more acceptable skip:
-          # a pull request from dependabot or from a fork, which cannot read
-          # repository secrets. Nothing else is accepted, and a FAILURE always
-          # fails: that includes the job refusing to run without its token on a
-          # pull request that should have had one.
+          # a pull request opened by dependabot or coming from a fork, which
+          # never runs the suite on its own. Nothing else is accepted, and a
+          # FAILURE always fails: that includes the job refusing to run without
+          # its token on a pull request that should have had one.
           for result in "${R1}"; do
             case "$result" in
               success) ;;
