@@ -131,12 +131,73 @@ jobs:
           files: build/reports/jacoco/test/jacocoTestReport.xml
           fail_ci_if_error: true
 
-  # NOTE: integration tests are NOT run automatically on PR open/sync.
-  # They are required for merge but only fire when a reviewer comments
-  # `integrationtest` (JDK 17) or `integrationtestfull` (matrix 17/21/25)
-  # — see .github/workflows/pr-integration-on-demand.yml. Branch-protection
-  # rules should require the "Integration tests pass" check name produced
-  # by that workflow before allowing merge to main.
+  integration:
+    name: Integration tests (live API, JDK 17)
+    # SDK requirements §13: the live suite runs on every pull request. JDK 17
+    # only, like `/integrationtest`; the full {17, 21, 25} matrix stays in
+    # main.yml and behind `/integrationtestfull`.
+    #
+    # `needs: changes` and NOT `needs: verify`. The code review starts when
+    # this workflow completes and reads the result of this job, so running the
+    # two side by side is what keeps the wait at the longer of them rather
+    # than their sum. The live suite takes about two minutes and a build that
+    # does not compile fails here before a single request is sent, so the
+    # quota a red `verify` would have saved is small. sdk-py, sdk-csharp,
+    # sdk-go and sdk-php gate their live job on `changes` alone as well.
+    needs: changes
+    # Three conditions, and `Tests passed` below accepts a skip for exactly
+    # these three and no other:
+    #   1. the gate did not say "documentation only", so a markdown change
+    #      spends no live API quota. `!= 'false'` so a failed gate still runs;
+    #   2. not dependabot, and
+    #   3. not a fork: neither receives repository secrets on `pull_request`.
+    #      They skip this JOB, which shows as "skipped" in the checks, not as
+    #      a green run that tested nothing. A maintainer can still run the
+    #      suite for them with `/integrationtest`.
+    # A head repository that has since been deleted reads as empty, which is
+    # not this repository, so it skips too.
+    if: >-
+      needs.changes.outputs.code != 'false' &&
+      github.actor != 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    # Every test talks to the live API; without a cap one hung request would
+    # hold the runner until the 6-hour default.
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # SDK requirements §17.3: a missing token fails the job, never skips it.
+      - name: Run integration tests against live API
+        env:
+          MARKETDATA_TOKEN: ${{ secrets.MARKETDATA_TOKEN }}
+          MARKETDATA_RUN_INTEGRATION_TESTS: 'true'
+        run: |
+          if [ -z "$MARKETDATA_TOKEN" ]; then
+            echo "::error::MARKETDATA_TOKEN secret is missing; the live integration suite fails rather than skips (SDK requirements 17.3)."
+            exit 1
+          fi
+          ./gradlew integrationTest -PtestJdk=17 --stacktrace
+
+      - name: Upload integration-test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-reports-jdk17
+          path: |
+            build/reports/tests/integrationTest/
+            build/test-results/integrationTest/
+          retention-days: 14
 
   tests-passed:
     # The single context branch protection requires. It always reports, so it is
