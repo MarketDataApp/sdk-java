@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Extended dte parameter syntax** for `/v1/options/chain/` (Market Data API 2.0.0) —
+  `DteFilter` sealed interface with three forms (`Values` for comma-separated lists,
+  `Range` for closed ranges, `Comparison` for operator-based filtering) and an additive
+  `ExpirationFilter.dte(DteFilter)` overload alongside the single-value `dte(int)`.
+  `DteFilter.Operator` enum (`GT`, `GTE`, `LT`, `LTE`) with `wireValue()` accessors;
+  `MAX_DAYS` constant (36500); factory methods `values(List)`, `range(int, int)`,
+  `comparison(Operator, int)` with full validation (non-negative, within bounds).
+
 ## [1.0.0] - 2026-06-29
 
 First stable release of the Market Data Java &amp; Kotlin SDK — a single JVM
