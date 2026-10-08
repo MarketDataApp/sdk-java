@@ -2,6 +2,7 @@ package com.marketdata.examples.resources;
 
 import com.marketdata.sdk.MarketDataClient;
 import com.marketdata.sdk.exception.AuthenticationError;
+import com.marketdata.sdk.options.DteFilter;
 import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.OptionQuote;
 import com.marketdata.sdk.options.OptionSide;
@@ -50,6 +51,19 @@ public final class OptionsAdvancedExample {
               .build())
           .values().stream().map(OptionQuote::expiration).distinct().count();
       System.out.println("ExpirationFilter.all() spans " + spans + " distinct expirations");
+
+      // DteFilter: the richer dte syntax — comma-separated list, closed range, or comparison
+      // operator (same syntax as StrikeFilter.Operator) — for expirations a plain dte(int) can't
+      // express on its own.
+      long leaps = client.options().chain(
+          OptionsChainRequest.builder("AAPL")
+              .expirationFilter(
+                  ExpirationFilter.dte(DteFilter.comparison(StrikeFilter.Operator.GTE, 180)))
+              .side(OptionSide.CALL)
+              .strikeLimit(1)
+              .build())
+          .values().size();
+      System.out.println("Contracts at least 180 days out: " + leaps);
 
       if (chain.size() < 2) {
         System.out.println("Not enough contracts to demo the rest — try a more liquid underlying.");

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`DteFilter` sealed type** — v2.0.0 widened the chain endpoint's `?dte=`
+  parameter to support comma-separated values, closed ranges, and comparison
+  operators (matching `StrikeFilter` syntax). Includes three record forms
+  (`Values`, `Range`, `Comparison`) and static factories `values(int, int...)`,
+  `range(int, int)`, and `comparison(StrikeFilter.Operator, int)`. Integrated
+  via new `ExpirationFilter.dte(DteFilter)` overload; single-value `dte`
+  remains via `ExpirationFilter.dte(int)`.
+
 ## [1.0.0] - 2026-06-29
 
 First stable release of the Market Data Java &amp; Kotlin SDK — a single JVM

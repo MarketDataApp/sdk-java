@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.marketdata.sdk.exception.ParseError;
+import com.marketdata.sdk.options.DteFilter;
 import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.Greek;
 import com.marketdata.sdk.options.OptionQuote;
@@ -975,6 +976,116 @@ class OptionsResourceTest {
         .isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=30");
   }
 
+  // ---------- chain: dte filter forms (v2.0.0 — dte widened from integer to string) ----------
+
+  @Test
+  void chainExpirationFilterDteValuesTranslatesToCommaSeparatedDte() {
+    // Comma-separated list: "selects the closest expiration for each value, deduplicated."
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dte(DteFilter.values(15, 30, 45)))
+                .build())
+        .join();
+
+    // Comma is URL-encoded (%2C) by the transport's encoder, so decode before asserting.
+    String decodedUri =
+        java.net.URLDecoder.decode(
+            client.captured.get(0).uri().toString(), java.nio.charset.StandardCharsets.UTF_8);
+    assertThat(decodedUri).isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=15,30,45");
+  }
+
+  @Test
+  void chainExpirationFilterDteRangeTranslatesToDashedDte() {
+    // Closed range, inclusive: "A closed range (0-45) ... returns every expiration whose dte
+    // falls within the bounds, inclusive."
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dte(DteFilter.range(0, 45)))
+                .build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=0-45");
+  }
+
+  @Test
+  void chainExpirationFilterDteComparisonGtTranslatesToOperatorPrefixedDte() {
+    // Comparison operator: "the syntax matches strike and delta" — same 4-operator closed set as
+    // StrikeFilter.Operator.
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(
+                    ExpirationFilter.dte(DteFilter.comparison(StrikeFilter.Operator.GT, 30)))
+                .build())
+        .join();
+
+    // "%3E" is the URL-encoded ">".
+    assertThat(client.captured.get(0).uri().toString()).contains("dte=%3E30");
+  }
+
+  @Test
+  void chainExpirationFilterDteComparisonGteTranslatesToOperatorPrefixedDte() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(
+                    ExpirationFilter.dte(DteFilter.comparison(StrikeFilter.Operator.GTE, 30)))
+                .build())
+        .join();
+
+    // "%3E%3D" is the URL-encoded ">=" — matches the API description's own example (>=30).
+    assertThat(client.captured.get(0).uri().toString()).contains("dte=%3E%3D30");
+  }
+
+  @Test
+  void chainExpirationFilterDteComparisonLtTranslatesToOperatorPrefixedDte() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(
+                    ExpirationFilter.dte(DteFilter.comparison(StrikeFilter.Operator.LT, 45)))
+                .build())
+        .join();
+
+    // "%3C" is the URL-encoded "<" — matches the API description's own example (<45).
+    assertThat(client.captured.get(0).uri().toString()).contains("dte=%3C45");
+  }
+
+  @Test
+  void chainExpirationFilterDteComparisonLteTranslatesToOperatorPrefixedDte() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(
+                    ExpirationFilter.dte(DteFilter.comparison(StrikeFilter.Operator.LTE, 45)))
+                .build())
+        .join();
+
+    // "%3C%3D" is the URL-encoded "<=".
+    assertThat(client.captured.get(0).uri().toString()).contains("dte=%3C%3D45");
+  }
+
   @Test
   void chainExpirationFilterBetweenTranslatesToFromTo() {
     CapturingClient client = okWith(CANNED_CHAIN_BODY);
@@ -1225,6 +1336,77 @@ class OptionsResourceTest {
     assertThatThrownBy(() -> StrikeFilter.range(160, 140))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("min must be <= max");
+  }
+
+  // ---------- DteFilter: sealed type factory validation (v2.0.0) ----------
+
+  @Test
+  void dteFilterValuesRejectsNegativeDay() {
+    assertThatThrownBy(() -> DteFilter.values(30, -1))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be non-negative");
+  }
+
+  @Test
+  void dteFilterValuesCanonicalConstructorRejectsEmptyList() {
+    // The static factory can't build an empty list (its first value is mandatory), but the
+    // record's public canonical constructor is a separate path that must refuse it too — an
+    // empty list would otherwise render as the invalid wire value "?dte=".
+    assertThatThrownBy(() -> new DteFilter.Values(List.of()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("days must not be empty");
+  }
+
+  @Test
+  void dteFilterValuesCanonicalConstructorRejectsNullElement() {
+    // Arrays.asList (unlike List.of) permits a null element, so this exercises the canonical
+    // constructor's own guard rather than List.of's built-in null rejection.
+    assertThatThrownBy(() -> new DteFilter.Values(java.util.Arrays.asList(30, null)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("days must not contain null elements");
+  }
+
+  @Test
+  void dteFilterValuesRejectsDayAboveMaximum() {
+    // "Values are whole numbers of days, at most 36500."
+    assertThatThrownBy(() -> DteFilter.values(30, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be at most 36500");
+  }
+
+  @Test
+  void dteFilterRangeRejectsMinGreaterThanMax() {
+    assertThatThrownBy(() -> DteFilter.range(45, 0))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("min must be <= max");
+  }
+
+  @Test
+  void dteFilterRangeRejectsNegativeMin() {
+    assertThatThrownBy(() -> DteFilter.range(-1, 45))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be non-negative");
+  }
+
+  @Test
+  void dteFilterRangeRejectsMaxAboveMaximum() {
+    assertThatThrownBy(() -> DteFilter.range(0, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be at most 36500");
+  }
+
+  @Test
+  void dteFilterComparisonRejectsNegativeDay() {
+    assertThatThrownBy(() -> DteFilter.comparison(StrikeFilter.Operator.GTE, -1))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be non-negative");
+  }
+
+  @Test
+  void dteFilterComparisonRejectsDayAboveMaximum() {
+    assertThatThrownBy(() -> DteFilter.comparison(StrikeFilter.Operator.LT, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be at most 36500");
   }
 
   // ---------- helpers ----------
