@@ -2,6 +2,7 @@ package com.marketdata.sdk;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.marketdata.sdk.options.DteFilter;
 import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.OptionQuote;
 import com.marketdata.sdk.options.OptionSide;
@@ -10,6 +11,7 @@ import com.marketdata.sdk.options.OptionsExpirationsRequest;
 import com.marketdata.sdk.options.OptionsLookupRequest;
 import com.marketdata.sdk.options.OptionsQuoteRequest;
 import com.marketdata.sdk.options.OptionsQuotesRequest;
+import com.marketdata.sdk.options.StrikeFilter;
 import com.marketdata.sdk.options.StrikeRange;
 import java.time.LocalDate;
 import java.util.List;
@@ -131,6 +133,98 @@ class OptionsIntegrationTest {
     assertThat(distinctExpirations)
         .as("expiration=all returns every expiration, not just the front-month")
         .isGreaterThan(1);
+  }
+
+  @Test
+  void chainDteValuesReturnsExpirationPerValue() {
+    // dte widened from integer to string (v2.0.0): a comma-separated list selects the closest
+    // expiration for each of the 3 requested values, deduplicated — so however AAPL's own
+    // expiration cycle lands, three requested values can resolve to at most three distinct
+    // expirations. That bound (not just "non-empty") is the market-independent consequence of
+    // this specific form, as opposed to any other chain query.
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dte(DteFilter.values(7, 30, 90)))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).as("AAPL has expirations near 7, 30, and 90 days out").isNotEmpty();
+    for (OptionQuote q : chain) {
+      assertThat(q.dte()).isNotNull();
+    }
+    long distinctExpirations = chain.stream().map(OptionQuote::expiration).distinct().count();
+    assertThat(distinctExpirations)
+        .as("3 requested values resolve to at most 3 distinct expirations")
+        .isLessThanOrEqualTo(3);
+  }
+
+  @Test
+  void chainDteSingleValueStillResolvesViaStringHandler() {
+    // Regression: dte's plain-integer form (now parsed by the API's widened string handler)
+    // still resolves to a decoded dte on every row.
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dte(30))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).as("AAPL has an expiration near 30 days out").isNotEmpty();
+    for (OptionQuote q : chain) {
+      assertThat(q.dte()).isNotNull();
+    }
+  }
+
+  @Test
+  void chainDteRangeReturnsExpirationsWithinBounds() {
+    // Closed range, inclusive at both ends.
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dte(DteFilter.range(0, 365)))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).as("AAPL always has expirations within a year").isNotEmpty();
+    for (OptionQuote q : chain) {
+      assertThat(q.dte()).isNotNull();
+      assertThat(q.dte()).isBetween(0, 365);
+    }
+  }
+
+  @Test
+  void chainDteComparisonReturnsExpirationsPastThreshold() {
+    // Comparison operator — "the syntax matches strike and delta".
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(
+                        ExpirationFilter.dte(DteFilter.comparison(StrikeFilter.Operator.GTE, 180)))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).as("AAPL LEAPS extend well past 180 days out").isNotEmpty();
+    for (OptionQuote q : chain) {
+      assertThat(q.dte()).isNotNull();
+      assertThat(q.dte()).isGreaterThanOrEqualTo(180);
+    }
   }
 
   @Test
