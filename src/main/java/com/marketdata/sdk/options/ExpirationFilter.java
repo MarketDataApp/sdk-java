@@ -34,7 +34,11 @@ public sealed interface ExpirationFilter
         ExpirationFilter.All {
 
   /**
-   * Upper bound on a single {@code dte} value, shared by every {@code dte} syntax — per the API.
+   * Upper bound on a single {@code dte} value, per the API. Enforced locally by {@link
+   * #dteList(int...)}, {@link #dteRange(int, int)}, and {@link
+   * #dteComparison(StrikeFilter.Operator, int)}. {@link #dte(int)} predates this bound and does not
+   * check it — a value above it reaches the API and comes back as a server-side rejection rather
+   * than an {@link IllegalArgumentException}.
    */
   int MAX_DTE_DAYS = 36500;
 
@@ -58,6 +62,11 @@ public sealed interface ExpirationFilter
   /**
    * Single days-to-expiration filter — wire form {@code ?dte=N}. Limits the chain to the one
    * expiration whose dte is closest to {@code days}.
+   *
+   * <p>Only rejects a negative {@code days} locally; unlike {@link #dteList(int...)}, {@link
+   * #dteRange(int, int)}, and {@link #dteComparison(StrikeFilter.Operator, int)}, it does not
+   * enforce {@link #MAX_DTE_DAYS} — a value above that bound reaches the API and fails as a server
+   * rejection instead of an {@link IllegalArgumentException}.
    */
   static Dte dte(int days) {
     if (days < 0) {
@@ -69,7 +78,8 @@ public sealed interface ExpirationFilter
   /**
    * Days-to-expiration list filter — wire form {@code ?dte=15,30,45}. The API resolves the closest
    * expiration to each value independently, deduplicated. {@code days} must be non-empty; every
-   * value is validated the same way as {@link #dte(int)}.
+   * value must be non-negative and at most {@link #MAX_DTE_DAYS} — unlike {@link #dte(int)}, both
+   * bounds are enforced locally.
    */
   static DteList dteList(int... days) {
     List<Integer> list = new ArrayList<>(days.length);
@@ -82,7 +92,8 @@ public sealed interface ExpirationFilter
   /**
    * Days-to-expiration range filter — wire form {@code ?dte=0-45}. Returns every expiration whose
    * dte falls in {@code [min, max]} inclusive. {@code min} must not exceed {@code max}; both bounds
-   * are validated the same way as {@link #dte(int)}.
+   * must be non-negative and at most {@link #MAX_DTE_DAYS} — unlike {@link #dte(int)}, the upper
+   * bound is enforced locally.
    */
   static DteRange dteRange(int min, int max) {
     return new DteRange(min, max);
@@ -90,8 +101,9 @@ public sealed interface ExpirationFilter
 
   /**
    * Days-to-expiration comparison filter — wire form {@code ?dte=>=30} / {@code ?dte=<45}. Returns
-   * every expiration whose dte satisfies {@code operator days}. {@code days} is validated the same
-   * way as {@link #dte(int)}.
+   * every expiration whose dte satisfies {@code operator days}. {@code days} must be non-negative
+   * and at most {@link #MAX_DTE_DAYS} — unlike {@link #dte(int)}, the upper bound is enforced
+   * locally.
    */
   static DteComparison dteComparison(StrikeFilter.Operator operator, int days) {
     return new DteComparison(operator, days);
