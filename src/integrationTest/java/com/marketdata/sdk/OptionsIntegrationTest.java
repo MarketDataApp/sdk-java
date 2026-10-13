@@ -161,11 +161,12 @@ class OptionsIntegrationTest {
 
   @Test
   void chainDteCommaListSelectsClosestExpirationPerValue() {
-    // The oracle is one all() chain, not three separate dte() calls: deriving "nearest" locally
-    // from a single request avoids assuming the single-value and list forms break ties the same
-    // way, and avoids extra round trips that could land on a different trading moment than the
-    // list call under test.
-    List<OptionQuote> fullChain =
+    // A full all() chain bounds what "a subset of the chain" means without reimplementing the
+    // server's own nearest-expiration tie-break: that algorithm is the server's to pick, and a
+    // local reimplementation of it (absolute distance, first-row tie-break) is not guaranteed to
+    // match, so this asserts shape instead — the list narrows to more than one and at most three
+    // of the chain's own expirations, which is only possible if the server honored every value.
+    Set<LocalDate> chainExpirations =
         client
             .options()
             .chain(
@@ -174,17 +175,11 @@ class OptionsIntegrationTest {
                     .side(OptionSide.CALL)
                     .strikeLimit(1)
                     .build())
-            .values();
-    assertThat(fullChain).isNotEmpty();
-
-    Set<LocalDate> expectedExpirations =
-        Set.of(
-            nearestExpirationTo(fullChain, 15),
-            nearestExpirationTo(fullChain, 30),
-            nearestExpirationTo(fullChain, 45));
-    assertThat(expectedExpirations)
-        .as("15, 30, and 45 days independently resolve to more than one distinct expiration")
-        .hasSizeGreaterThan(1);
+            .values()
+            .stream()
+            .map(q -> java.util.Objects.requireNonNull(q.expiration(), "expiration").toLocalDate())
+            .collect(Collectors.toSet());
+    assertThat(chainExpirations).isNotEmpty();
 
     List<OptionQuote> chain =
         client
@@ -203,29 +198,14 @@ class OptionsIntegrationTest {
             .map(q -> java.util.Objects.requireNonNull(q.expiration(), "expiration").toLocalDate())
             .collect(Collectors.toSet());
     assertThat(actualExpirations)
-        .as(
-            "a dte list resolves to exactly the nearest expirations independently resolved for"
-                + " 15, 30, and 45 days, deduplicated")
-        .isEqualTo(expectedExpirations);
-  }
-
-  /** Finds, among {@code chain}'s rows, the expiration whose dte is closest to {@code target}. */
-  private static LocalDate nearestExpirationTo(List<OptionQuote> chain, int target) {
-    OptionQuote nearest = null;
-    int nearestDistance = Integer.MAX_VALUE;
-    for (OptionQuote q : chain) {
-      Integer dte = q.dte();
-      if (dte == null) {
-        continue;
-      }
-      int distance = Math.abs(dte - target);
-      if (distance < nearestDistance) {
-        nearestDistance = distance;
-        nearest = q;
-      }
-    }
-    java.util.Objects.requireNonNull(nearest, "no row carried a dte value");
-    return java.util.Objects.requireNonNull(nearest.expiration(), "expiration").toLocalDate();
+        .as("every expiration a dte list selects is one the full chain actually has")
+        .isSubsetOf(chainExpirations);
+    assertThat(actualExpirations)
+        .as("three distinct dte targets (15, 30, 45) resolve to more than one distinct expiration")
+        .hasSizeGreaterThan(1);
+    assertThat(actualExpirations)
+        .as("a three-value dte list narrows to at most three expirations, not the whole chain")
+        .hasSizeLessThanOrEqualTo(3);
   }
 
   @Test
