@@ -15,6 +15,8 @@ import com.marketdata.sdk.options.StrikeRange;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -159,6 +161,10 @@ class OptionsIntegrationTest {
 
   @Test
   void chainDteCommaListSelectsClosestExpirationPerValue() {
+    Set<LocalDate> expectedExpirations =
+        Set.of(
+            nearestExpirationForDte(15), nearestExpirationForDte(30), nearestExpirationForDte(45));
+
     List<OptionQuote> chain =
         client
             .options()
@@ -171,10 +177,30 @@ class OptionsIntegrationTest {
             .values();
 
     assertThat(chain).isNotEmpty();
-    long distinctExpirations = chain.stream().map(OptionQuote::expiration).distinct().count();
-    assertThat(distinctExpirations)
-        .as("a dte list selects at most one nearest expiration per value, deduplicated")
-        .isBetween(1L, 3L);
+    Set<LocalDate> actualExpirations =
+        chain.stream().map(q -> q.expiration().toLocalDate()).collect(Collectors.toSet());
+    assertThat(actualExpirations)
+        .as(
+            "a dte list resolves to exactly the nearest expirations independently resolved for"
+                + " 15, 30, and 45 days, deduplicated")
+        .isEqualTo(expectedExpirations);
+  }
+
+  /** Resolves the single nearest expiration a single-value {@code dte} filter selects. */
+  private LocalDate nearestExpirationForDte(int dte) {
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dte(dte))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).as("dte(%d) resolves to a nearest expiration", dte).isNotEmpty();
+    return chain.get(0).expiration().toLocalDate();
   }
 
   @Test
