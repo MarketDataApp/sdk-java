@@ -27,6 +27,7 @@ import java.time.Month;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -976,6 +977,121 @@ class OptionsResourceTest {
   }
 
   @Test
+  void chainExpirationFilterDteStillAcceptsValuesBeyondTheNewUpperBoundRegression() {
+    // dte's wire type widened to accept list/range/comparison forms, but the pre-existing
+    // single-value factory must not gain a new local upper-bound check: a value over the API's
+    // documented 36500-day max still reaches the wire unchanged, so an existing caller keeps
+    // seeing the same (lack of) local validation — and the same API error type — as before this
+    // change.
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dte(40000))
+                .build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=40000");
+  }
+
+  @Test
+  void chainExpirationFilterDteListTranslatesToCommaSeparatedDteParam() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dteList(15, 30, 45))
+                .build())
+        .join();
+
+    String url =
+        java.net.URLDecoder.decode(
+            client.captured.get(0).uri().toString(), java.nio.charset.StandardCharsets.UTF_8);
+    assertThat(url).isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=15,30,45");
+  }
+
+  @Test
+  void chainExpirationFilterDteRangeTranslatesToDashedDteParam() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dteRange(0, 45))
+                .build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=0-45");
+  }
+
+  @Test
+  void chainExpirationFilterDteComparisonGtTranslatesToOperatorPrefixedDteParam() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator.GT, 30))
+                .build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString()).contains("dte=%3E30");
+  }
+
+  @Test
+  void chainExpirationFilterDteComparisonGteTranslatesToOperatorPrefixedDteParam() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator.GTE, 30))
+                .build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString()).contains("dte=%3E%3D30");
+  }
+
+  @Test
+  void chainExpirationFilterDteComparisonLtTranslatesToOperatorPrefixedDteParam() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator.LT, 45))
+                .build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString()).contains("dte=%3C45");
+  }
+
+  @Test
+  void chainExpirationFilterDteComparisonLteTranslatesToOperatorPrefixedDteParam() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator.LTE, 45))
+                .build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString()).contains("dte=%3C%3D45");
+  }
+
+  @Test
   void chainExpirationFilterBetweenTranslatesToFromTo() {
     CapturingClient client = okWith(CANNED_CHAIN_BODY);
     OptionsResource options = resourceWith(client);
@@ -1201,6 +1317,96 @@ class OptionsResourceTest {
     assertThatThrownBy(() -> ExpirationFilter.dte(-1))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("dte must be non-negative");
+  }
+
+  @Test
+  void expirationFilterDteListRejectsEmpty() {
+    assertThatThrownBy(ExpirationFilter::dteList)
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("must not be empty");
+  }
+
+  @Test
+  void expirationFilterDteListRejectsNegativeValue() {
+    assertThatThrownBy(() -> ExpirationFilter.dteList(30, -1))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be non-negative");
+  }
+
+  @Test
+  void expirationFilterDteListRejectsValueAboveUpperBound() {
+    assertThatThrownBy(() -> ExpirationFilter.dteList(30, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("36500");
+  }
+
+  @Test
+  void expirationFilterDteRangeRejectsMinGreaterThanMax() {
+    assertThatThrownBy(() -> ExpirationFilter.dteRange(45, 0))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("min must be <= max");
+  }
+
+  @Test
+  void expirationFilterDteRangeRejectsNegativeMin() {
+    assertThatThrownBy(() -> ExpirationFilter.dteRange(-1, 45))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be non-negative");
+  }
+
+  @Test
+  void expirationFilterDteRangeRejectsMaxAboveUpperBound() {
+    assertThatThrownBy(() -> ExpirationFilter.dteRange(0, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("36500");
+  }
+
+  @Test
+  void expirationFilterDteComparisonRejectsNegativeDays() {
+    assertThatThrownBy(() -> ExpirationFilter.dteComparison(StrikeFilter.Operator.GTE, -1))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be non-negative");
+  }
+
+  @Test
+  void expirationFilterDteComparisonRejectsDaysAboveUpperBound() {
+    assertThatThrownBy(() -> ExpirationFilter.dteComparison(StrikeFilter.Operator.LT, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("36500");
+  }
+
+  // ---------- new dte-filter records: validation holds on direct construction too ----------
+
+  @Test
+  void dteListRecordRejectsEmptyWhenConstructedDirectly() {
+    assertThatThrownBy(() -> new ExpirationFilter.DteList(List.of()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("must not be empty");
+  }
+
+  @Test
+  void dteListRecordRejectsNullElementWhenConstructedDirectly() {
+    assertThatThrownBy(() -> new ExpirationFilter.DteList(Arrays.asList(30, null)))
+        .isInstanceOf(NullPointerException.class);
+  }
+
+  @Test
+  void dteListRecordRejectsNullListWhenConstructedDirectly() {
+    assertThatThrownBy(() -> new ExpirationFilter.DteList(null))
+        .isInstanceOf(NullPointerException.class);
+  }
+
+  @Test
+  void dteRangeRecordRejectsMinGreaterThanMaxWhenConstructedDirectly() {
+    assertThatThrownBy(() -> new ExpirationFilter.DteRange(45, 0))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("min must be <= max");
+  }
+
+  @Test
+  void dteComparisonRecordRejectsNullOperatorWhenConstructedDirectly() {
+    assertThatThrownBy(() -> new ExpirationFilter.DteComparison(null, 30))
+        .isInstanceOf(NullPointerException.class);
   }
 
   @Test

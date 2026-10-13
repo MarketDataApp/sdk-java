@@ -40,6 +40,15 @@ public final class OptionsAdvancedExample {
           .values();
       System.out.println("Filtered chain: " + chain.size() + " contracts");
 
+      // dte also accepts a comma-separated list, a closed range, and a comparison — on top of the
+      // single value used above.
+      client.options().chain(
+          OptionsChainRequest.builder("AAPL")
+              .expirationFilter(ExpirationFilter.dteRange(0, 45))
+              .side(OptionSide.CALL)
+              .strikeLimit(1)
+              .build());
+
       // ExpirationFilter.all() spans every expiration at once — distinct from omitting the filter,
       // which the API narrows to the front month.
       long spans = client.options().chain(

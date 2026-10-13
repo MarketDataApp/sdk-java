@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Options chain `dte` parameter widening** (API 2.0.0) — the options chain endpoint's
+  `dte` days-to-expiration filter now supports comma-separated lists, closed ranges, and
+  comparisons alongside single values. New sealed `ExpirationFilter` variants `DteList`,
+  `DteRange`, `DteComparison` and their factories `dteList(int...)`, `dteRange(int, int)`,
+  and `dteComparison(StrikeFilter.Operator, int)` expose all four syntaxes; a shared upper
+  bound `MAX_DTE_DAYS` limits values per the API.
+
 ## [1.0.0] - 2026-06-29
 
 First stable release of the Market Data Java &amp; Kotlin SDK — a single JVM
