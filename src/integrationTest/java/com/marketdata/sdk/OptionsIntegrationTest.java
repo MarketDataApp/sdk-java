@@ -161,9 +161,30 @@ class OptionsIntegrationTest {
 
   @Test
   void chainDteCommaListSelectsClosestExpirationPerValue() {
+    // The oracle is one all() chain, not three separate dte() calls: deriving "nearest" locally
+    // from a single request avoids assuming the single-value and list forms break ties the same
+    // way, and avoids extra round trips that could land on a different trading moment than the
+    // list call under test.
+    List<OptionQuote> fullChain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.all())
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+    assertThat(fullChain).isNotEmpty();
+
     Set<LocalDate> expectedExpirations =
         Set.of(
-            nearestExpirationForDte(15), nearestExpirationForDte(30), nearestExpirationForDte(45));
+            nearestExpirationTo(fullChain, 15),
+            nearestExpirationTo(fullChain, 30),
+            nearestExpirationTo(fullChain, 45));
+    assertThat(expectedExpirations)
+        .as("15, 30, and 45 days independently resolve to more than one distinct expiration")
+        .hasSizeGreaterThan(1);
 
     List<OptionQuote> chain =
         client
@@ -178,7 +199,9 @@ class OptionsIntegrationTest {
 
     assertThat(chain).isNotEmpty();
     Set<LocalDate> actualExpirations =
-        chain.stream().map(q -> q.expiration().toLocalDate()).collect(Collectors.toSet());
+        chain.stream()
+            .map(q -> java.util.Objects.requireNonNull(q.expiration(), "expiration").toLocalDate())
+            .collect(Collectors.toSet());
     assertThat(actualExpirations)
         .as(
             "a dte list resolves to exactly the nearest expirations independently resolved for"
@@ -186,21 +209,23 @@ class OptionsIntegrationTest {
         .isEqualTo(expectedExpirations);
   }
 
-  /** Resolves the single nearest expiration a single-value {@code dte} filter selects. */
-  private LocalDate nearestExpirationForDte(int dte) {
-    List<OptionQuote> chain =
-        client
-            .options()
-            .chain(
-                OptionsChainRequest.builder(UNDERLYING)
-                    .expirationFilter(ExpirationFilter.dte(dte))
-                    .side(OptionSide.CALL)
-                    .strikeLimit(1)
-                    .build())
-            .values();
-
-    assertThat(chain).as("dte(%d) resolves to a nearest expiration", dte).isNotEmpty();
-    return chain.get(0).expiration().toLocalDate();
+  /** Finds, among {@code chain}'s rows, the expiration whose dte is closest to {@code target}. */
+  private static LocalDate nearestExpirationTo(List<OptionQuote> chain, int target) {
+    OptionQuote nearest = null;
+    int nearestDistance = Integer.MAX_VALUE;
+    for (OptionQuote q : chain) {
+      Integer dte = q.dte();
+      if (dte == null) {
+        continue;
+      }
+      int distance = Math.abs(dte - target);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearest = q;
+      }
+    }
+    java.util.Objects.requireNonNull(nearest, "no row carried a dte value");
+    return java.util.Objects.requireNonNull(nearest.expiration(), "expiration").toLocalDate();
   }
 
   @Test
