@@ -138,46 +138,50 @@ class OptionsIntegrationTest {
         .isGreaterThan(1);
   }
 
+  /**
+   * A fixed historical trading day for every dte* test below. All {@code dte} forms count days from
+   * the chain request's {@code date} when one is set, so pinning it keeps the results stable
+   * regardless of when the test runs — unlike omitting {@code date}, which computes dte from
+   * "today" and can change at the Eastern-midnight rollover between two requests in the same test.
+   */
+  private static final LocalDate FIXED_CHAIN_DATE = LocalDate.of(2025, 6, 2);
+
   @Test
   void chainDteSingleValueNarrowsToOneExpiration() {
-    // A single dte value selects the one expiration closest to it — not an exact date this test
-    // can predict, but the row count across expirations is checkable: exactly one.
-    List<OptionQuote> chain =
-        client
-            .options()
-            .chain(
-                OptionsChainRequest.builder(UNDERLYING)
-                    .expirationFilter(ExpirationFilter.dte(30))
-                    .side(OptionSide.CALL)
-                    .build())
-            .values();
+    // A single dte value selects the one expiration closest to it. 365 days is far past the
+    // front-month expiration the unfiltered chain returns, so comparing against the unfiltered
+    // baseline settles whether the dte syntax actually reached the server: an ignored dte would
+    // fall back to that same front-month expiration instead of a distinct, far-dated one.
+    Set<ZonedDateTime> baseline = unfilteredChainExpirations();
+    Set<ZonedDateTime> farDte = singleDteExpirations(365);
 
-    assertThat(chain).isNotEmpty();
-    long distinctExpirations = chain.stream().map(OptionQuote::expiration).distinct().count();
-    assertThat(distinctExpirations)
+    assertThat(farDte)
         .as("a single dte value narrows the chain to its one closest expiration")
-        .isEqualTo(1);
+        .hasSize(1);
+    assertThat(farDte)
+        .as("dte(365) must resolve to an expiration the unfiltered (front-month) chain does not")
+        .isNotEqualTo(baseline);
   }
 
   @Test
   void chainDteCommaListMatchesUnionOfSingleDteRequests() {
     // A comma-separated dte list selects the closest expiration for each value, deduplicated.
-    // Comparing against the union of the three corresponding single-dte requests settles whether
-    // the list syntax actually reached the server: if it were ignored, the list call would fall
-    // back to the single front-month expiration, which an unconditional "1..3 expirations"
-    // assertion would not catch (1 is also the front-month default).
+    // Near/mid/far values that must resolve to more than one expiration close the loophole an
+    // ignored dte parameter would otherwise slip through: an ignored list falls back to the single
+    // front-month expiration, failing both the "> 1" and the union-equality assertions below.
     Set<ZonedDateTime> union = new HashSet<>();
     union.addAll(singleDteExpirations(15));
-    union.addAll(singleDteExpirations(30));
-    union.addAll(singleDteExpirations(45));
+    union.addAll(singleDteExpirations(180));
+    union.addAll(singleDteExpirations(365));
 
     List<OptionQuote> chain =
         client
             .options()
             .chain(
                 OptionsChainRequest.builder(UNDERLYING)
-                    .expirationFilter(ExpirationFilter.dteList(15, 30, 45))
+                    .expirationFilter(ExpirationFilter.dteList(15, 180, 365))
                     .side(OptionSide.CALL)
+                    .date(FIXED_CHAIN_DATE)
                     .build())
             .values();
 
@@ -185,11 +189,17 @@ class OptionsIntegrationTest {
     Set<ZonedDateTime> listExpirations =
         chain.stream().map(OptionQuote::expiration).collect(Collectors.toSet());
     assertThat(listExpirations)
-        .as("dte list expirations equal the union of the single-value requests for 15, 30, 45")
+        .as("a list spanning near/mid/far dte values must resolve to more than one expiration")
+        .hasSizeGreaterThan(1);
+    assertThat(listExpirations)
+        .as("dte list expirations equal the union of the single-value requests for 15, 180, 365")
         .isEqualTo(union);
   }
 
-  /** The distinct expirations a single {@code dte(days)} request resolves to. */
+  /**
+   * The distinct expirations a single {@code dte(days)} request resolves to, on {@link
+   * #FIXED_CHAIN_DATE}.
+   */
   private Set<ZonedDateTime> singleDteExpirations(int days) {
     List<OptionQuote> chain =
         client
@@ -198,20 +208,42 @@ class OptionsIntegrationTest {
                 OptionsChainRequest.builder(UNDERLYING)
                     .expirationFilter(ExpirationFilter.dte(days))
                     .side(OptionSide.CALL)
+                    .date(FIXED_CHAIN_DATE)
                     .build())
             .values();
     return chain.stream().map(OptionQuote::expiration).collect(Collectors.toSet());
   }
 
-  @Test
-  void chainDteRangeReturnsOnlyExpirationsWithinBounds() {
+  /**
+   * The distinct expirations the chain resolves to with no expiration filter at all, on {@link
+   * #FIXED_CHAIN_DATE} — the front-month default that an ignored dte parameter would fall back to.
+   */
+  private Set<ZonedDateTime> unfilteredChainExpirations() {
     List<OptionQuote> chain =
         client
             .options()
             .chain(
                 OptionsChainRequest.builder(UNDERLYING)
-                    .expirationFilter(ExpirationFilter.dteRange(0, 45))
                     .side(OptionSide.CALL)
+                    .date(FIXED_CHAIN_DATE)
+                    .build())
+            .values();
+    assertThat(chain).isNotEmpty();
+    return chain.stream().map(OptionQuote::expiration).collect(Collectors.toSet());
+  }
+
+  @Test
+  void chainDteRangeReturnsOnlyExpirationsWithinBounds() {
+    // The lower bound is set above the front-month window so an ignored dte would return rows
+    // outside [90, 365] and fail the per-row assertion below, rather than passing by coincidence.
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dteRange(90, 365))
+                    .side(OptionSide.CALL)
+                    .date(FIXED_CHAIN_DATE)
                     .build())
             .values();
 
@@ -219,21 +251,23 @@ class OptionsIntegrationTest {
     for (OptionQuote q : chain) {
       Integer dte = q.dte();
       assertThat(dte).isNotNull();
-      assertThat(dte.intValue()).isBetween(0, 45);
+      assertThat(dte.intValue()).isBetween(90, 365);
     }
   }
 
   @Test
   void chainDteComparisonReturnsOnlyExpirationsSatisfyingOperator() {
-    // The API documents comparison bounds as inclusive, so LTE is the only operator that stays
-    // correct on a day an AAPL expiration lands exactly on the boundary.
+    // The API documents comparison bounds as inclusive. The threshold is set above the
+    // front-month window so an ignored dte would return rows that violate the >= 90 bound below,
+    // rather than passing by coincidence the way a loose "<= 45" would against the front month.
     List<OptionQuote> chain =
         client
             .options()
             .chain(
                 OptionsChainRequest.builder(UNDERLYING)
-                    .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator.LTE, 45))
+                    .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator.GTE, 90))
                     .side(OptionSide.CALL)
+                    .date(FIXED_CHAIN_DATE)
                     .build())
             .values();
 
@@ -241,7 +275,7 @@ class OptionsIntegrationTest {
     for (OptionQuote q : chain) {
       Integer dte = q.dte();
       assertThat(dte).isNotNull();
-      assertThat(dte.intValue()).isLessThanOrEqualTo(45);
+      assertThat(dte.intValue()).isGreaterThanOrEqualTo(90);
     }
   }
 
