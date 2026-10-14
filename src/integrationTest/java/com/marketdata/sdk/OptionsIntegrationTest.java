@@ -13,8 +13,12 @@ import com.marketdata.sdk.options.OptionsQuotesRequest;
 import com.marketdata.sdk.options.StrikeFilter;
 import com.marketdata.sdk.options.StrikeRange;
 import java.time.LocalDate;
+import java.time.ZonedDateTime;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -156,10 +160,17 @@ class OptionsIntegrationTest {
   }
 
   @Test
-  void chainDteCommaListSpansAtMostOneExpirationPerValue() {
-    // A comma-separated dte list selects the closest expiration for each value, deduplicated —
-    // this test can't predict which expirations without assuming the server's "closest" rule, but
-    // the resulting expiration count is bounded by the number of distinct values requested.
+  void chainDteCommaListMatchesUnionOfSingleDteRequests() {
+    // A comma-separated dte list selects the closest expiration for each value, deduplicated.
+    // Comparing against the union of the three corresponding single-dte requests settles whether
+    // the list syntax actually reached the server: if it were ignored, the list call would fall
+    // back to the single front-month expiration, which an unconditional "1..3 expirations"
+    // assertion would not catch (1 is also the front-month default).
+    Set<ZonedDateTime> union = new HashSet<>();
+    union.addAll(singleDteExpirations(15));
+    union.addAll(singleDteExpirations(30));
+    union.addAll(singleDteExpirations(45));
+
     List<OptionQuote> chain =
         client
             .options()
@@ -171,10 +182,25 @@ class OptionsIntegrationTest {
             .values();
 
     assertThat(chain).isNotEmpty();
-    long distinctExpirations = chain.stream().map(OptionQuote::expiration).distinct().count();
-    assertThat(distinctExpirations)
-        .as("deduplicated closest expirations for 3 requested values")
-        .isBetween(1L, 3L);
+    Set<ZonedDateTime> listExpirations =
+        chain.stream().map(OptionQuote::expiration).collect(Collectors.toSet());
+    assertThat(listExpirations)
+        .as("dte list expirations equal the union of the single-value requests for 15, 30, 45")
+        .isEqualTo(union);
+  }
+
+  /** The distinct expirations a single {@code dte(days)} request resolves to. */
+  private Set<ZonedDateTime> singleDteExpirations(int days) {
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dte(days))
+                    .side(OptionSide.CALL)
+                    .build())
+            .values();
+    return chain.stream().map(OptionQuote::expiration).collect(Collectors.toSet());
   }
 
   @Test
@@ -199,12 +225,14 @@ class OptionsIntegrationTest {
 
   @Test
   void chainDteComparisonReturnsOnlyExpirationsSatisfyingOperator() {
+    // The API documents comparison bounds as inclusive, so LTE is the only operator that stays
+    // correct on a day an AAPL expiration lands exactly on the boundary.
     List<OptionQuote> chain =
         client
             .options()
             .chain(
                 OptionsChainRequest.builder(UNDERLYING)
-                    .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator.LT, 45))
+                    .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator.LTE, 45))
                     .side(OptionSide.CALL)
                     .build())
             .values();
@@ -213,7 +241,7 @@ class OptionsIntegrationTest {
     for (OptionQuote q : chain) {
       Integer dte = q.dte();
       assertThat(dte).isNotNull();
-      assertThat(dte.intValue()).isLessThan(45);
+      assertThat(dte.intValue()).isLessThanOrEqualTo(45);
     }
   }
 

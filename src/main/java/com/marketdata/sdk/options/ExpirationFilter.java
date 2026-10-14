@@ -16,6 +16,10 @@ import java.util.Objects;
  * <p>Additive expiration-type predicates ({@code weekly}/{@code monthly}/{@code quarterly}/{@code
  * am}/{@code pm}) are not part of this hierarchy — they intersect freely with any variant and stay
  * as separate booleans on the request builder.
+ *
+ * <p>All {@code dte}/{@code dteList}/{@code dteRange}/{@code dteComparison} variants count days
+ * from the chain request's {@code date} parameter when one is set (a historical chain), or from
+ * today otherwise.
  */
 public sealed interface ExpirationFilter
     permits ExpirationFilter.OnDate,
@@ -47,6 +51,11 @@ public sealed interface ExpirationFilter
   /**
    * Days-to-expiration, single value — wire form {@code ?dte=N}. Limits the option chain to the
    * expiration date closest to {@code days}.
+   *
+   * <p>The API's documented maximum is 36500. Unlike {@link #dteList(int, int...)}, {@link
+   * #dteRange(int, int)}, and {@link #dteComparison(StrikeFilter.Operator, int)}, this factory does
+   * not enforce that bound locally — a larger value is sent to the wire unchanged and left for the
+   * API to reject.
    */
   static Dte dte(int days) {
     if (days < 0) {
