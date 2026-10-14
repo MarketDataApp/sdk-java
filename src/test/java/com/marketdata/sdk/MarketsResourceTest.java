@@ -336,6 +336,18 @@ class MarketsResourceTest {
   }
 
   @Test
+  void statusRequestRejectsCountbackWithDate() {
+    assertThatThrownBy(
+            () ->
+                MarketStatusRequest.builder()
+                    .date(LocalDate.of(2025, Month.JANUARY, 1))
+                    .countback(5)
+                    .build())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("mutually exclusive");
+  }
+
+  @Test
   void statusRequestRejectsCountbackWithFrom() {
     assertThatThrownBy(
             () ->

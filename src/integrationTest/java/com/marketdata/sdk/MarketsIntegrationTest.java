@@ -90,4 +90,22 @@ class MarketsIntegrationTest {
       }
     }
   }
+
+  @Test
+  void statusCountbackReturnsExactlyNDaysEndingAtTo() {
+    // A bare request (no window params) returns a single day — today. countback=5 paired with
+    // `to` must widen that to exactly 5 calendar days ending at `to`, proving the parameter
+    // reached the wire rather than being ignored.
+    LocalDate to = LocalDate.now();
+
+    MarketStatusResponse unfiltered = client.markets().status(MarketStatusRequest.of());
+    MarketStatusResponse countback =
+        client.markets().status(MarketStatusRequest.builder().to(to).countback(5).build());
+
+    assertThat(countback.statusCode()).isIn(200, 203);
+    assertThat(countback.values()).as("countback=5 returns exactly 5 days ending at `to`").hasSize(5);
+    assertThat(countback.values().size())
+        .as("countback widens the result past the unfiltered single-day default")
+        .isGreaterThan(unfiltered.values().size());
+  }
 }
