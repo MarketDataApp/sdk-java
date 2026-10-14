@@ -1,6 +1,8 @@
 package com.marketdata.sdk.options;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -18,6 +20,9 @@ import java.util.Objects;
 public sealed interface ExpirationFilter
     permits ExpirationFilter.OnDate,
         ExpirationFilter.Dte,
+        ExpirationFilter.DteList,
+        ExpirationFilter.DteRange,
+        ExpirationFilter.DteComparison,
         ExpirationFilter.Between,
         ExpirationFilter.MonthYear,
         ExpirationFilter.All {
@@ -39,12 +44,46 @@ public sealed interface ExpirationFilter
     return new All();
   }
 
-  /** Days-to-expiration filter — wire form {@code ?dte=N}. */
+  /**
+   * Days-to-expiration, single value — wire form {@code ?dte=N}. Limits the option chain to the
+   * expiration date closest to {@code days}.
+   */
   static Dte dte(int days) {
     if (days < 0) {
       throw new IllegalArgumentException("dte must be non-negative");
     }
     return new Dte(days);
+  }
+
+  /**
+   * Days-to-expiration, comma-separated list — wire form {@code ?dte=15,30,45}. Selects the closest
+   * expiration for each value, deduplicated server-side. At least one value is required; each value
+   * must be a non-negative whole number of days, at most 36500.
+   */
+  static DteList dteList(int first, int... rest) {
+    List<Integer> days = new ArrayList<>(rest.length + 1);
+    days.add(first);
+    for (int d : rest) {
+      days.add(d);
+    }
+    return new DteList(days);
+  }
+
+  /**
+   * Days-to-expiration, closed range — wire form {@code ?dte=0-45}. Returns every expiration whose
+   * dte falls within {@code [min, max]} inclusive. {@code min} must not exceed {@code max}.
+   */
+  static DteRange dteRange(int min, int max) {
+    return new DteRange(min, max);
+  }
+
+  /**
+   * Days-to-expiration, comparison — wire form {@code ?dte=>=30} (operator prefix + value). Returns
+   * every expiration whose dte satisfies {@code operator days}. The operator set is shared with
+   * {@link StrikeFilter.Operator} — the two parameters use the same comparison syntax.
+   */
+  static DteComparison dteComparison(StrikeFilter.Operator operator, int days) {
+    return new DteComparison(operator, days);
   }
 
   /**
@@ -71,6 +110,17 @@ public sealed interface ExpirationFilter
     return new MonthYear(year, month);
   }
 
+  /** Validates a single dte value: a non-negative whole number of days, at most 36500. */
+  private static int validateDte(int days) {
+    if (days < 0) {
+      throw new IllegalArgumentException("dte must be non-negative");
+    }
+    if (days > 36500) {
+      throw new IllegalArgumentException("dte must be at most 36500");
+    }
+    return days;
+  }
+
   record OnDate(LocalDate date) implements ExpirationFilter {
     public OnDate {
       Objects.requireNonNull(date, "date");
@@ -78,6 +128,44 @@ public sealed interface ExpirationFilter
   }
 
   record Dte(int days) implements ExpirationFilter {}
+
+  /**
+   * Comma-separated dte list — see {@link #dteList(int, int...)}. Validated on every construction
+   * path, not only the static factory: {@code days} must be non-null, non-empty, and free of null
+   * elements, and every value must be a non-negative whole number of days, at most 36500.
+   */
+  record DteList(List<Integer> days) implements ExpirationFilter {
+    public DteList {
+      Objects.requireNonNull(days, "days");
+      if (days.isEmpty()) {
+        throw new IllegalArgumentException("dte list must not be empty");
+      }
+      for (Integer d : days) {
+        Objects.requireNonNull(d, "dte list must not contain null elements");
+        validateDte(d);
+      }
+      days = List.copyOf(days);
+    }
+  }
+
+  /** Closed dte range — see {@link #dteRange(int, int)}. */
+  record DteRange(int min, int max) implements ExpirationFilter {
+    public DteRange {
+      validateDte(min);
+      validateDte(max);
+      if (min > max) {
+        throw new IllegalArgumentException("min must be <= max");
+      }
+    }
+  }
+
+  /** Dte comparison — see {@link #dteComparison(StrikeFilter.Operator, int)}. */
+  record DteComparison(StrikeFilter.Operator operator, int days) implements ExpirationFilter {
+    public DteComparison {
+      Objects.requireNonNull(operator, "operator");
+      validateDte(days);
+    }
+  }
 
   record Between(LocalDate from, LocalDate to) implements ExpirationFilter {}
 

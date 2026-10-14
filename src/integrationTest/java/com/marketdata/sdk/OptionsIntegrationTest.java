@@ -10,6 +10,7 @@ import com.marketdata.sdk.options.OptionsExpirationsRequest;
 import com.marketdata.sdk.options.OptionsLookupRequest;
 import com.marketdata.sdk.options.OptionsQuoteRequest;
 import com.marketdata.sdk.options.OptionsQuotesRequest;
+import com.marketdata.sdk.options.StrikeFilter;
 import com.marketdata.sdk.options.StrikeRange;
 import java.time.LocalDate;
 import java.util.List;
@@ -131,6 +132,89 @@ class OptionsIntegrationTest {
     assertThat(distinctExpirations)
         .as("expiration=all returns every expiration, not just the front-month")
         .isGreaterThan(1);
+  }
+
+  @Test
+  void chainDteSingleValueNarrowsToOneExpiration() {
+    // A single dte value selects the one expiration closest to it — not an exact date this test
+    // can predict, but the row count across expirations is checkable: exactly one.
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dte(30))
+                    .side(OptionSide.CALL)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    long distinctExpirations = chain.stream().map(OptionQuote::expiration).distinct().count();
+    assertThat(distinctExpirations)
+        .as("a single dte value narrows the chain to its one closest expiration")
+        .isEqualTo(1);
+  }
+
+  @Test
+  void chainDteCommaListSpansAtMostOneExpirationPerValue() {
+    // A comma-separated dte list selects the closest expiration for each value, deduplicated —
+    // this test can't predict which expirations without assuming the server's "closest" rule, but
+    // the resulting expiration count is bounded by the number of distinct values requested.
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dteList(15, 30, 45))
+                    .side(OptionSide.CALL)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    long distinctExpirations = chain.stream().map(OptionQuote::expiration).distinct().count();
+    assertThat(distinctExpirations)
+        .as("deduplicated closest expirations for 3 requested values")
+        .isBetween(1L, 3L);
+  }
+
+  @Test
+  void chainDteRangeReturnsOnlyExpirationsWithinBounds() {
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dteRange(0, 45))
+                    .side(OptionSide.CALL)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    for (OptionQuote q : chain) {
+      Integer dte = q.dte();
+      assertThat(dte).isNotNull();
+      assertThat(dte.intValue()).isBetween(0, 45);
+    }
+  }
+
+  @Test
+  void chainDteComparisonReturnsOnlyExpirationsSatisfyingOperator() {
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator.LT, 45))
+                    .side(OptionSide.CALL)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    for (OptionQuote q : chain) {
+      Integer dte = q.dte();
+      assertThat(dte).isNotNull();
+      assertThat(dte.intValue()).isLessThan(45);
+    }
   }
 
   @Test

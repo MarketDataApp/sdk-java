@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`ExpirationFilter` dte variants** — `dteList(int, int...)`, `dteRange(int, int)`,
+  and `dteComparison(StrikeFilter.Operator, int)` for comma-separated, closed-range,
+  and comparison forms of the `?dte` parameter on `GET /v1/options/chain/` (API 2.0.0).
+
 ## [1.0.0] - 2026-06-29
 
 First stable release of the Market Data Java &amp; Kotlin SDK — a single JVM

@@ -976,6 +976,123 @@ class OptionsResourceTest {
   }
 
   @Test
+  void expirationFilterDteSingleValueAboveNewUpperBoundStillReachesTheWire() {
+    // Regression: dte's wire type changed from integer to string, but the pre-existing
+    // single-value factory gained no new upper-bound check — a value that reached the API before
+    // (and whatever the API does with it) still reaches the API unchanged.
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dte(99999))
+                .build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=99999");
+  }
+
+  @Test
+  void chainExpirationFilterDteListTranslatesToCommaSeparatedDteParam() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dteList(15, 30, 45))
+                .build())
+        .join();
+
+    // "," is not in URLEncoder's safe set, so the comma-separated list encodes each comma as
+    // %2C.
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=15%2C30%2C45");
+  }
+
+  @Test
+  void chainExpirationFilterDteRangeTranslatesToDashedDteParam() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dteRange(0, 45))
+                .build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=0-45");
+  }
+
+  @Test
+  void chainExpirationFilterDteComparisonGtRendersWithOperatorPrefix() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator.GT, 30))
+                .build())
+        .join();
+
+    // "%3E" is the URL-encoded ">".
+    assertThat(client.captured.get(0).uri().toString()).contains("dte=%3E30");
+  }
+
+  @Test
+  void chainExpirationFilterDteComparisonGteRendersWithOperatorPrefix() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator.GTE, 30))
+                .build())
+        .join();
+
+    // "%3E%3D" is the URL-encoded ">=".
+    assertThat(client.captured.get(0).uri().toString()).contains("dte=%3E%3D30");
+  }
+
+  @Test
+  void chainExpirationFilterDteComparisonLtRendersWithOperatorPrefix() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator.LT, 45))
+                .build())
+        .join();
+
+    // "%3C" is the URL-encoded "<".
+    assertThat(client.captured.get(0).uri().toString()).contains("dte=%3C45");
+  }
+
+  @Test
+  void chainExpirationFilterDteComparisonLteRendersWithOperatorPrefix() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator.LTE, 45))
+                .build())
+        .join();
+
+    // "%3C%3D" is the URL-encoded "<=".
+    assertThat(client.captured.get(0).uri().toString()).contains("dte=%3C%3D45");
+  }
+
+  @Test
   void chainExpirationFilterBetweenTranslatesToFromTo() {
     CapturingClient client = okWith(CANNED_CHAIN_BODY);
     OptionsResource options = resourceWith(client);
@@ -1201,6 +1318,79 @@ class OptionsResourceTest {
     assertThatThrownBy(() -> ExpirationFilter.dte(-1))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("dte must be non-negative");
+  }
+
+  @Test
+  void expirationFilterDteListRejectsNegativeValue() {
+    assertThatThrownBy(() -> ExpirationFilter.dteList(30, -5, 45))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be non-negative");
+  }
+
+  @Test
+  void expirationFilterDteListRejectsValueAboveMax() {
+    assertThatThrownBy(() -> ExpirationFilter.dteList(30, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be at most 36500");
+  }
+
+  @Test
+  void expirationFilterDteRangeRejectsMinGreaterThanMax() {
+    assertThatThrownBy(() -> ExpirationFilter.dteRange(45, 0))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("min must be <= max");
+  }
+
+  @Test
+  void expirationFilterDteRangeRejectsNegativeMin() {
+    assertThatThrownBy(() -> ExpirationFilter.dteRange(-1, 45))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be non-negative");
+  }
+
+  @Test
+  void expirationFilterDteRangeRejectsMaxAboveUpperBound() {
+    assertThatThrownBy(() -> ExpirationFilter.dteRange(0, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be at most 36500");
+  }
+
+  @Test
+  void expirationFilterDteComparisonRejectsNegativeValue() {
+    assertThatThrownBy(() -> ExpirationFilter.dteComparison(StrikeFilter.Operator.GT, -1))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be non-negative");
+  }
+
+  @Test
+  void expirationFilterDteComparisonRejectsValueAboveUpperBound() {
+    assertThatThrownBy(() -> ExpirationFilter.dteComparison(StrikeFilter.Operator.LT, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be at most 36500");
+  }
+
+  @Test
+  void expirationFilterDteListRecordRejectsEmptyListDirectly() {
+    // DteList's validation holds on every public construction path — not only the dteList(...)
+    // factory, which can't even express an empty list (its first parameter is mandatory).
+    assertThatThrownBy(() -> new ExpirationFilter.DteList(List.of()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte list must not be empty");
+  }
+
+  @Test
+  void expirationFilterDteListRecordRejectsNullElementDirectly() {
+    List<Integer> daysWithNull = new ArrayList<>();
+    daysWithNull.add(30);
+    daysWithNull.add(null);
+    assertThatThrownBy(() -> new ExpirationFilter.DteList(daysWithNull))
+        .isInstanceOf(NullPointerException.class);
+  }
+
+  @Test
+  void expirationFilterDteListRecordRejectsNullListDirectly() {
+    assertThatThrownBy(() -> new ExpirationFilter.DteList(null))
+        .isInstanceOf(NullPointerException.class);
   }
 
   @Test
