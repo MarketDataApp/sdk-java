@@ -158,9 +158,23 @@ class OptionsIntegrationTest {
 
   @Test
   void chainDteListSelectsMultipleDistinctExpirations() {
-    // A comma-separated dte list selects the closest expiration for each value; well-spaced
-    // values (7, 60, 180 days) land on different expiration cycles, so the result spans more than
-    // the single front-month expiration the unfiltered chain returns.
+    // A comma-separated dte list selects the closest expiration for each value, deduplicated
+    // server-side, so three requested values select at most three distinct expirations.
+    // Well-spaced values (7, 60, 180 days) land on different expiration cycles, so the result also
+    // spans more expirations than the same request without the filter — which returns only the
+    // single front-month expiration — proving the server honored the list rather than ignoring it.
+    List<OptionQuote> unfiltered =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+    long unfilteredDistinctExpirations =
+        unfiltered.stream().map(OptionQuote::expiration).distinct().count();
+
     List<OptionQuote> chain =
         client
             .options()
@@ -174,8 +188,11 @@ class OptionsIntegrationTest {
 
     long distinctExpirations = chain.stream().map(OptionQuote::expiration).distinct().count();
     assertThat(distinctExpirations)
-        .as("a comma-separated dte list spans more than the single front-month expiration")
-        .isGreaterThan(1);
+        .as("a comma-separated dte list selects at most one expiration per requested value")
+        .isLessThanOrEqualTo(3);
+    assertThat(distinctExpirations)
+        .as("the filtered result differs from the unfiltered chain's single front-month expiration")
+        .isGreaterThan(unfilteredDistinctExpirations);
   }
 
   @Test

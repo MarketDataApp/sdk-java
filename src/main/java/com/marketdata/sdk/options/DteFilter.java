@@ -93,6 +93,12 @@ public sealed interface DteFilter
     }
   }
 
+  /**
+   * @param min lower bound of the closed range, inclusive, in {@code [0, 36500]}. Must not exceed
+   *     {@code max}.
+   * @param max upper bound of the closed range, inclusive, in {@code [0, 36500]}. Must not be less
+   *     than {@code min}.
+   */
   record Range(int min, int max) implements DteFilter {
     public Range {
       validate(min);
@@ -103,6 +109,10 @@ public sealed interface DteFilter
     }
   }
 
+  /**
+   * @param operator the comparison to apply against {@code days}; never {@code null}.
+   * @param days the threshold, in {@code [0, 36500]}.
+   */
   record Comparison(Operator operator, int days) implements DteFilter {
     public Comparison {
       Objects.requireNonNull(operator, "operator");

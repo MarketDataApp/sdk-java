@@ -1341,6 +1341,11 @@ class OptionsResourceTest {
   }
 
   @Test
+  void dteFilterRangeAcceptsInclusiveMaxBoundary() {
+    assertThat(DteFilter.range(0, 36500).max()).isEqualTo(36500);
+  }
+
+  @Test
   void dteFilterComparisonRejectsNegativeValue() {
     assertThatThrownBy(() -> DteFilter.comparison(DteFilter.Operator.GTE, -1))
         .isInstanceOf(IllegalArgumentException.class)
