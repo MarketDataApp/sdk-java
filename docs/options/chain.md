@@ -20,7 +20,8 @@ OptionsChainRequest.builder(String symbol)
 
     // Expiration selection (sealed ExpirationFilter — pick one):
     .expirationFilter(ExpirationFilter.onDate(LocalDate date))
-    .expirationFilter(ExpirationFilter.dte(int days))          // days-to-expiration
+    .expirationFilter(ExpirationFilter.dte(int days))          // days-to-expiration, single value
+    .expirationFilter(ExpirationFilter.dte(DteFilter filter))  // days-to-expiration, list/range/comparison
     .expirationFilter(ExpirationFilter.between(LocalDate from, LocalDate to))
     .expirationFilter(ExpirationFilter.all())                  // every expiration
     // (if omitted, the API narrows to the front month)
@@ -39,6 +40,18 @@ OptionsChainRequest.builder(String symbol)
     .date(LocalDate date)               // historical chain
     .build()
 ```
+
+#### DteFilter
+
+`ExpirationFilter.dte(DteFilter)` covers the `dte` query parameter's multi-value syntax — a sealed type alongside `ExpirationFilter.dte(int)`'s single-value form:
+
+```java
+DteFilter.list(int first, int... rest)             // comma-separated list, e.g. ?dte=15,30,45
+DteFilter.range(int min, int max)                  // closed, inclusive range, e.g. ?dte=0-45
+DteFilter.comparison(DteFilter.Operator op, int days) // e.g. ?dte=>=30 — GT, GTE, LT, LTE
+```
+
+Every value, in every form, must be a whole number of days in `[0, 36500]`.
 
 <a name="optionquote"></a>
 #### Returns
@@ -66,6 +79,7 @@ public record OptionQuote(
 
 ```java
 import com.marketdata.sdk.MarketDataClient;
+import com.marketdata.sdk.options.DteFilter;
 import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.OptionQuote;
 import com.marketdata.sdk.options.OptionSide;
@@ -93,6 +107,13 @@ try (MarketDataClient client = new MarketDataClient()) {
       OptionsChainRequest.builder("AAPL")
           .expirationFilter(ExpirationFilter.dte(45))
           .strikeFilter(StrikeFilter.range(150, 250))
+          .side(OptionSide.CALL)
+          .build());
+
+  // DteFilter: contracts between 30 and 60 days to expiry, inclusive.
+  var byDteRange = client.options().chain(
+      OptionsChainRequest.builder("AAPL")
+          .expirationFilter(ExpirationFilter.dte(DteFilter.range(30, 60)))
           .side(OptionSide.CALL)
           .build());
 }

@@ -2,6 +2,7 @@ package com.marketdata.examples.resources;
 
 import com.marketdata.sdk.MarketDataClient;
 import com.marketdata.sdk.exception.AuthenticationError;
+import com.marketdata.sdk.options.DteFilter;
 import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.OptionQuote;
 import com.marketdata.sdk.options.OptionSide;
@@ -50,6 +51,17 @@ public final class OptionsAdvancedExample {
               .build())
           .values().stream().map(OptionQuote::expiration).distinct().count();
       System.out.println("ExpirationFilter.all() spans " + spans + " distinct expirations");
+
+      // ExpirationFilter.dte(...) also accepts the chain's full dte syntax via DteFilter: a
+      // comma-separated list, a closed range, or a comparison — not just a single value.
+      List<OptionQuote> byDteRange = client.options().chain(
+          OptionsChainRequest.builder("AAPL")
+              .expirationFilter(ExpirationFilter.dte(DteFilter.range(30, 60)))
+              .side(OptionSide.CALL)
+              .strikeLimit(1)
+              .build())
+          .values();
+      System.out.println("dte in [30, 60]: " + byDteRange.size() + " contract(s)");
 
       if (chain.size() < 2) {
         System.out.println("Not enough contracts to demo the rest — try a more liquid underlying.");

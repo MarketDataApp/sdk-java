@@ -2,6 +2,7 @@ package com.marketdata.sdk;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.marketdata.sdk.options.DteFilter;
 import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.OptionQuote;
 import com.marketdata.sdk.options.OptionSide;
@@ -131,6 +132,114 @@ class OptionsIntegrationTest {
     assertThat(distinctExpirations)
         .as("expiration=all returns every expiration, not just the front-month")
         .isGreaterThan(1);
+  }
+
+  @Test
+  void chainDteSingleValueNarrowsToFarDatedExpiration() {
+    // A single dte value narrows the chain to the expiration closest to it; a far-out value (180
+    // days) necessarily lands well past the API's front-month default, so a loose lower bound on
+    // the result proves the filter reached the server rather than being ignored.
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dte(180))
+                    .side(OptionSide.CALL)
+                    .strikeRange(StrikeRange.ITM)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    assertThat(chain.get(0).dte()).isNotNull();
+    assertThat(chain.get(0).dte()).isGreaterThan(60);
+  }
+
+  @Test
+  void chainDteListSelectsMultipleDistinctExpirations() {
+    // A comma-separated dte list selects the closest expiration for each value, deduplicated
+    // server-side, so three requested values select at most three distinct expirations.
+    // Well-spaced values (7, 60, 180 days) land on different expiration cycles, so the result also
+    // spans more expirations than the same request without the filter — which returns only the
+    // single front-month expiration — proving the server honored the list rather than ignoring it.
+    List<OptionQuote> unfiltered =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+    long unfilteredDistinctExpirations =
+        unfiltered.stream().map(OptionQuote::expiration).distinct().count();
+
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dte(DteFilter.list(7, 60, 180)))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    long distinctExpirations = chain.stream().map(OptionQuote::expiration).distinct().count();
+    assertThat(distinctExpirations)
+        .as("a comma-separated dte list selects at most one expiration per requested value")
+        .isLessThanOrEqualTo(3);
+    assertThat(distinctExpirations)
+        .as("the filtered result differs from the unfiltered chain's single front-month expiration")
+        .isGreaterThan(unfilteredDistinctExpirations);
+  }
+
+  @Test
+  void chainDteRangeReturnsExpirationsWithinInclusiveBounds() {
+    // range(60, 180) excludes AAPL's near-term weekly expirations; every returned row's dte must
+    // fall within the closed, inclusive bounds the API documents.
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dte(DteFilter.range(60, 180)))
+                    .side(OptionSide.CALL)
+                    .strikeRange(StrikeRange.ITM)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    for (OptionQuote q : chain) {
+      assertThat(q.dte()).isNotNull();
+      assertThat(q.dte()).isBetween(60, 180);
+    }
+  }
+
+  @Test
+  void chainDteComparisonReturnsExpirationsSatisfyingOperator() {
+    // dte >= 60 excludes AAPL's near-term weekly expirations; every returned row must satisfy the
+    // inclusive comparison the API documents.
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(
+                        ExpirationFilter.dte(DteFilter.comparison(DteFilter.Operator.GTE, 60)))
+                    .side(OptionSide.CALL)
+                    .strikeRange(StrikeRange.ITM)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    for (OptionQuote q : chain) {
+      assertThat(q.dte()).isNotNull();
+      assertThat(q.dte()).isGreaterThanOrEqualTo(60);
+    }
   }
 
   @Test
