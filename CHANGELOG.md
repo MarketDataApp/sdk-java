@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`DteFilter` sealed type** (API 2.0.0) — multi-value days-to-expiration filtering for chain queries. Sealed record variants: `ValueList` (`list(int, int...)`), `Range` (`range(int, int)`), `Comparison` (`comparison(Operator, int)` where `Operator` = `GT`/`GTE`/`LT`/`LTE`). New `ExpirationFilter.dte(DteFilter)` overload; existing `dte(int)` single-value form unchanged. Constant `MAX_DAYS = 36500`. All values validated to `[0, 36500]`.
+
 ## [1.0.0] - 2026-06-29
 
 First stable release of the Market Data Java &amp; Kotlin SDK — a single JVM

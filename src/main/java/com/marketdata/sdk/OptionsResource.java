@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.module.SimpleModule;
+import com.marketdata.sdk.options.DteFilter;
 import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.OptionQuote;
 import com.marketdata.sdk.options.OptionsChain;
@@ -312,6 +313,8 @@ public final class OptionsResource extends ConfiguredResource<OptionsResource> {
       b.query("expiration", DateTimeFormatter.ISO_LOCAL_DATE.format(v.date()));
     } else if (f instanceof ExpirationFilter.Dte v) {
       b.query("dte", v.days());
+    } else if (f instanceof ExpirationFilter.DteValues v) {
+      b.query("dte", dteFilterWireValue(v.filter()));
     } else if (f instanceof ExpirationFilter.Between v) {
       b.query("from", DateTimeFormatter.ISO_LOCAL_DATE.format(v.from()));
       b.query("to", DateTimeFormatter.ISO_LOCAL_DATE.format(v.to()));
@@ -335,6 +338,25 @@ public final class OptionsResource extends ConfiguredResource<OptionsResource> {
     // exhaustiveness (Java 17 can't prove it in an if-chain) and fails fast if a variant is added.
     StrikeFilter.Comparison v = (StrikeFilter.Comparison) f;
     return v.operator().wireValue() + formatStrike(v.price());
+  }
+
+  private static String dteFilterWireValue(DteFilter f) {
+    if (f instanceof DteFilter.ValueList v) {
+      StringBuilder sb = new StringBuilder();
+      for (int i = 0; i < v.days().size(); i++) {
+        if (i > 0) {
+          sb.append(',');
+        }
+        sb.append(v.days().get(i));
+      }
+      return sb.toString();
+    } else if (f instanceof DteFilter.Range v) {
+      return v.min() + "-" + v.max();
+    }
+    // DteFilter is sealed; the only remaining variant is Comparison. The cast documents that
+    // exhaustiveness (Java 17 can't prove it in an if-chain) and fails fast if a variant is added.
+    DteFilter.Comparison v = (DteFilter.Comparison) f;
+    return v.operator().wireValue() + v.days();
   }
 
   private static String formatStrike(double v) {

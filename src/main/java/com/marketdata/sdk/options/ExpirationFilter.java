@@ -11,6 +11,11 @@ import java.util.Objects;
  * expirationFilter(...)} setter on the request builder makes that exclusivity compiler-enforced:
  * there is no way to assign two variants at once.
  *
+ * <p>{@code dte} alone has two entry points — {@link #dte(int)} for a single value, {@link
+ * #dte(DteFilter)} for the list/range/comparison forms ({@link DteFilter}) — but both produce an
+ * {@code ExpirationFilter}, so they still compete with {@code onDate}/{@code between}/{@code
+ * monthYear}/{@code all} for the one setter slot.
+ *
  * <p>Additive expiration-type predicates ({@code weekly}/{@code monthly}/{@code quarterly}/{@code
  * am}/{@code pm}) are not part of this hierarchy — they intersect freely with any variant and stay
  * as separate booleans on the request builder.
@@ -18,6 +23,7 @@ import java.util.Objects;
 public sealed interface ExpirationFilter
     permits ExpirationFilter.OnDate,
         ExpirationFilter.Dte,
+        ExpirationFilter.DteValues,
         ExpirationFilter.Between,
         ExpirationFilter.MonthYear,
         ExpirationFilter.All {
@@ -39,12 +45,21 @@ public sealed interface ExpirationFilter
     return new All();
   }
 
-  /** Days-to-expiration filter — wire form {@code ?dte=N}. */
+  /** Days-to-expiration, single value — wire form {@code ?dte=N}. */
   static Dte dte(int days) {
     if (days < 0) {
       throw new IllegalArgumentException("dte must be non-negative");
     }
     return new Dte(days);
+  }
+
+  /**
+   * Days-to-expiration, multi-value form — a comma-separated list, a closed range, or a comparison,
+   * per {@link DteFilter}. Wire form is whichever {@code DteFilter} variant produces (e.g. {@code
+   * ?dte=15,30,45}, {@code ?dte=0-45}, {@code ?dte=>=30}).
+   */
+  static DteValues dte(DteFilter filter) {
+    return new DteValues(Objects.requireNonNull(filter, "filter"));
   }
 
   /**
@@ -78,6 +93,13 @@ public sealed interface ExpirationFilter
   }
 
   record Dte(int days) implements ExpirationFilter {}
+
+  /** See {@link #dte(DteFilter)}. */
+  record DteValues(DteFilter filter) implements ExpirationFilter {
+    public DteValues {
+      Objects.requireNonNull(filter, "filter");
+    }
+  }
 
   record Between(LocalDate from, LocalDate to) implements ExpirationFilter {}
 
