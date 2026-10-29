@@ -134,6 +134,180 @@ class OptionsIntegrationTest {
   }
 
   @Test
+  void chainExpirationDteSingleValueMatchesClosestExpiration() {
+    // Request an available dte value exactly — its own closest expiration is unambiguous (zero
+    // distance), so the result's dte must equal it. Picking the farthest-out value keeps it
+    // distinct from the unfiltered default, which is the front-month (nearest) expiration.
+    List<Integer> baseline = baselineDtes();
+    int farthest = baseline.get(baseline.size() - 1);
+
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dte(farthest))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    for (OptionQuote q : chain) {
+      assertThat(q.dte()).isEqualTo(farthest);
+    }
+  }
+
+  @Test
+  void chainExpirationDteListMatchesClosestExpirationPerValue() {
+    // Request two distinct, available dte values exactly: each is its own unambiguous closest
+    // candidate (zero distance), so the result can only ever contain those two values, and both
+    // must be present. Distinct from the unfiltered default, which carries a single expiration.
+    List<Integer> baseline = baselineDtes();
+    int low = baseline.get(0);
+    int high = baseline.get(baseline.size() - 1);
+
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dteList(List.of(low, high)))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    for (OptionQuote q : chain) {
+      assertThat(q.dte()).isIn(low, high);
+    }
+    assertThat(chain.stream().map(OptionQuote::dte).collect(java.util.stream.Collectors.toSet()))
+        .as("each requested value's own candidate must be present")
+        .contains(low, high);
+  }
+
+  @Test
+  void chainExpirationDteRangeReturnsEveryExpirationWithinBounds() {
+    // A closed range spanning several available expirations: every row's dte must fall within
+    // [min, max], and the span must cover more than one distinct value to differ from the
+    // unfiltered (single front-month) default.
+    List<Integer> baseline = baselineDtes();
+    int min = baseline.get(baseline.size() / 4);
+    int max = baseline.get(3 * baseline.size() / 4);
+
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dteRange(min, max))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    for (OptionQuote q : chain) {
+      assertThat(q.dte()).isBetween(min, max);
+    }
+    long distinctDtes = chain.stream().map(OptionQuote::dte).distinct().count();
+    assertThat(distinctDtes)
+        .as("a range spanning several expirations holds more than one distinct value")
+        .isGreaterThan(1);
+  }
+
+  @Test
+  void chainExpirationDteComparisonGteReturnsExpirationsAtOrAboveBound() {
+    // >= N: every row's dte is >= N, asserted in a way that holds whether the server treats the
+    // bound as inclusive or exclusive. The bound sits a third of the way up the baseline so the
+    // qualifying set spans more than one expiration, distinguishing it from the unfiltered
+    // default (a single front-month row).
+    List<Integer> baseline = baselineDtes();
+    int bound = baseline.get(baseline.size() / 3);
+
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(
+                        ExpirationFilter.dteComparison(ExpirationFilter.Operator.GTE, bound))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    for (OptionQuote q : chain) {
+      assertThat(q.dte()).isGreaterThanOrEqualTo(bound);
+    }
+    long distinctDtes = chain.stream().map(OptionQuote::dte).distinct().count();
+    assertThat(distinctDtes)
+        .as("a >= bound below the top of the chain qualifies more than one expiration")
+        .isGreaterThan(1);
+  }
+
+  @Test
+  void chainExpirationDteComparisonLtReturnsExpirationsBelowBound() {
+    // < N: every row's dte is <= N, asserted in a way that holds whether the server treats the
+    // bound as inclusive or exclusive. The bound sits two-thirds of the way up the baseline so the
+    // qualifying set spans more than one expiration, distinguishing it from the unfiltered
+    // default (a single front-month row).
+    List<Integer> baseline = baselineDtes();
+    int bound = baseline.get(2 * baseline.size() / 3);
+
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(
+                        ExpirationFilter.dteComparison(ExpirationFilter.Operator.LT, bound))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    for (OptionQuote q : chain) {
+      assertThat(q.dte()).isLessThanOrEqualTo(bound);
+    }
+    long distinctDtes = chain.stream().map(OptionQuote::dte).distinct().count();
+    assertThat(distinctDtes)
+        .as("a < bound above the bottom of the chain qualifies more than one expiration")
+        .isGreaterThan(1);
+  }
+
+  /**
+   * Every distinct dte present across AAPL's full expiration chain, ascending — the baseline a
+   * dte-filter test derives its candidate values from, per the suite's own convention of deriving
+   * expectations from a baseline call rather than from values assumed in advance.
+   */
+  private List<Integer> baselineDtes() {
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.all())
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+    List<Integer> dtes =
+        chain.stream()
+            .map(OptionQuote::dte)
+            .distinct()
+            .sorted()
+            .collect(java.util.stream.Collectors.toList());
+    assertThat(dtes)
+        .as("AAPL has at least two distinct expirations")
+        .hasSizeGreaterThanOrEqualTo(2);
+    return dtes;
+  }
+
+  @Test
   void chainDecodesOptionalRhoColumn() {
     // rho is an optional column: the live feed may or may not populate it. Assert the SDK decodes
     // whatever comes back without error — every row's rho is either null (omitted) or a finite

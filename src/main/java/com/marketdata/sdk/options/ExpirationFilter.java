@@ -1,6 +1,7 @@
 package com.marketdata.sdk.options;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -18,6 +19,9 @@ import java.util.Objects;
 public sealed interface ExpirationFilter
     permits ExpirationFilter.OnDate,
         ExpirationFilter.Dte,
+        ExpirationFilter.DteList,
+        ExpirationFilter.DteRange,
+        ExpirationFilter.DteComparison,
         ExpirationFilter.Between,
         ExpirationFilter.MonthYear,
         ExpirationFilter.All {
@@ -45,6 +49,53 @@ public sealed interface ExpirationFilter
       throw new IllegalArgumentException("dte must be non-negative");
     }
     return new Dte(days);
+  }
+
+  /**
+   * Comma-separated days-to-expiration list — wire form {@code ?dte=15,30,45}. For each value, the
+   * API selects the closest available expiration; duplicates across values are deduplicated
+   * server-side. {@code days} must be non-empty, and every value non-negative.
+   */
+  static DteList dteList(List<Integer> days) {
+    return new DteList(days);
+  }
+
+  /**
+   * Closed days-to-expiration range — wire form {@code ?dte=0-45}, both ends inclusive (same
+   * grammar as {@link StrikeFilter#range}, which documents the same closed-range syntax). {@code
+   * min} must not exceed {@code max}.
+   */
+  static DteRange dteRange(int min, int max) {
+    return new DteRange(min, max);
+  }
+
+  /**
+   * Days-to-expiration comparison — wire form {@code ?dte=>=30} (e.g. {@code operator=GTE}, {@code
+   * days=30}). Same comparison grammar as {@link StrikeFilter#comparison}.
+   */
+  static DteComparison dteComparison(Operator operator, int days) {
+    return new DteComparison(operator, days);
+  }
+
+  /**
+   * Comparison operators accepted by the {@code dte} comparison form — see {@link #dteComparison}.
+   */
+  enum Operator {
+    GT(">"),
+    GTE(">="),
+    LT("<"),
+    LTE("<=");
+
+    private final String wireValue;
+
+    Operator(String wireValue) {
+      this.wireValue = wireValue;
+    }
+
+    /** The wire-form prefix the API expects, e.g. {@code ">="}. */
+    public String wireValue() {
+      return wireValue;
+    }
   }
 
   /**
@@ -78,6 +129,40 @@ public sealed interface ExpirationFilter
   }
 
   record Dte(int days) implements ExpirationFilter {}
+
+  record DteList(List<Integer> days) implements ExpirationFilter {
+    public DteList {
+      days = List.copyOf(Objects.requireNonNull(days, "days"));
+      if (days.isEmpty()) {
+        throw new IllegalArgumentException("days must be non-empty");
+      }
+      for (int day : days) {
+        if (day < 0) {
+          throw new IllegalArgumentException("dte must be non-negative");
+        }
+      }
+    }
+  }
+
+  record DteRange(int min, int max) implements ExpirationFilter {
+    public DteRange {
+      if (min < 0) {
+        throw new IllegalArgumentException("dte must be non-negative");
+      }
+      if (min > max) {
+        throw new IllegalArgumentException("min must be <= max");
+      }
+    }
+  }
+
+  record DteComparison(Operator operator, int days) implements ExpirationFilter {
+    public DteComparison {
+      Objects.requireNonNull(operator, "operator");
+      if (days < 0) {
+        throw new IllegalArgumentException("dte must be non-negative");
+      }
+    }
+  }
 
   record Between(LocalDate from, LocalDate to) implements ExpirationFilter {}
 

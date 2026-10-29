@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ExpirationFilter.dteList(List<Integer>)`, `ExpirationFilter.dteRange(int, int)`, and `ExpirationFilter.dteComparison(ExpirationFilter.Operator, int)` — New static factories for the chain endpoint's expanded `dte` parameter forms (comma-separated list, closed range, comparison operators). The existing `ExpirationFilter.dte(int)` works as before (API release 2.0.0).
+- `ExpirationFilter.Operator` — New enum (GT, GTE, LT, LTE) for comparison operators, with `wireValue()` accessor.
+
 ## [1.0.0] - 2026-06-29
 
 First stable release of the Market Data Java &amp; Kotlin SDK — a single JVM

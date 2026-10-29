@@ -20,7 +20,10 @@ OptionsChainRequest.builder(String symbol)
 
     // Expiration selection (sealed ExpirationFilter — pick one):
     .expirationFilter(ExpirationFilter.onDate(LocalDate date))
-    .expirationFilter(ExpirationFilter.dte(int days))          // days-to-expiration
+    .expirationFilter(ExpirationFilter.dte(int days))                       // days-to-expiration
+    .expirationFilter(ExpirationFilter.dteList(List<Integer> days))         // closest expiration per value
+    .expirationFilter(ExpirationFilter.dteRange(int min, int max))          // every expiration within [min, max]
+    .expirationFilter(ExpirationFilter.dteComparison(Operator op, int days)) // every expiration satisfying "op days"
     .expirationFilter(ExpirationFilter.between(LocalDate from, LocalDate to))
     .expirationFilter(ExpirationFilter.all())                  // every expiration
     // (if omitted, the API narrows to the front month)
@@ -39,6 +42,8 @@ OptionsChainRequest.builder(String symbol)
     .date(LocalDate date)               // historical chain
     .build()
 ```
+
+`dte` accepts four forms: a single value (`dte(int)`), a comma-separated list (`dteList(List<Integer>)` — for each value, the API selects its closest available expiration), a closed range (`dteRange(int, int)`, both ends inclusive — same grammar as `StrikeFilter.range`), and a comparison (`dteComparison(ExpirationFilter.Operator, int)`, operators `GT`/`GTE`/`LT`/`LTE` — same grammar as `StrikeFilter.comparison`).
 
 <a name="optionquote"></a>
 #### Returns
@@ -93,6 +98,13 @@ try (MarketDataClient client = new MarketDataClient()) {
       OptionsChainRequest.builder("AAPL")
           .expirationFilter(ExpirationFilter.dte(45))
           .strikeFilter(StrikeFilter.range(150, 250))
+          .side(OptionSide.CALL)
+          .build());
+
+  // dte also accepts a list, a closed range, or a comparison.
+  var dteRange = client.options().chain(
+      OptionsChainRequest.builder("AAPL")
+          .expirationFilter(ExpirationFilter.dteRange(0, 45))
           .side(OptionSide.CALL)
           .build());
 }
