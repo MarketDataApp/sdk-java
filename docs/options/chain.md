@@ -20,7 +20,10 @@ OptionsChainRequest.builder(String symbol)
 
     // Expiration selection (sealed ExpirationFilter — pick one):
     .expirationFilter(ExpirationFilter.onDate(LocalDate date))
-    .expirationFilter(ExpirationFilter.dte(int days))          // days-to-expiration
+    .expirationFilter(ExpirationFilter.dte(int days))                       // closest to N days
+    .expirationFilter(ExpirationFilter.dteList(List<Integer> days))         // closest to each of N1,N2,...
+    .expirationFilter(ExpirationFilter.dteRange(int min, int max))          // dte in [min, max], inclusive
+    .expirationFilter(ExpirationFilter.dteComparison(ExpirationFilter.Operator op, int days)) // dte op days
     .expirationFilter(ExpirationFilter.between(LocalDate from, LocalDate to))
     .expirationFilter(ExpirationFilter.all())                  // every expiration
     // (if omitted, the API narrows to the front month)
@@ -39,6 +42,12 @@ OptionsChainRequest.builder(String symbol)
     .date(LocalDate date)               // historical chain
     .build()
 ```
+
+`dte` alone carries four wire syntaxes: a single value (`dte(45)` → `?dte=45`), a comma-separated
+list (`dteList(List.of(15, 30, 45))` → `?dte=15,30,45`, selecting the closest expiration for each
+value), a closed range (`dteRange(0, 45)` → `?dte=0-45`, inclusive), and a comparison
+(`dteComparison(ExpirationFilter.Operator.GTE, 30)` → `?dte=>=30`). Every `dte` value must be a
+whole number of days in `[0, 36500]`.
 
 <a name="optionquote"></a>
 #### Returns
@@ -93,6 +102,18 @@ try (MarketDataClient client = new MarketDataClient()) {
       OptionsChainRequest.builder("AAPL")
           .expirationFilter(ExpirationFilter.dte(45))
           .strikeFilter(StrikeFilter.range(150, 250))
+          .side(OptionSide.CALL)
+          .build());
+
+  // dte also accepts a range or a comparison, in addition to a single value or a list.
+  var within30To45Days = client.options().chain(
+      OptionsChainRequest.builder("AAPL")
+          .expirationFilter(ExpirationFilter.dteRange(30, 45))
+          .side(OptionSide.CALL)
+          .build());
+  var at30DaysOrFurther = client.options().chain(
+      OptionsChainRequest.builder("AAPL")
+          .expirationFilter(ExpirationFilter.dteComparison(ExpirationFilter.Operator.GTE, 30))
           .side(OptionSide.CALL)
           .build());
 }

@@ -14,6 +14,7 @@ import com.marketdata.sdk.options.StrikeRange;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -131,6 +132,166 @@ class OptionsIntegrationTest {
     assertThat(distinctExpirations)
         .as("expiration=all returns every expiration, not just the front-month")
         .isGreaterThan(1);
+  }
+
+  @Test
+  void chainDteSingleValueSelectsTheClosestExpiration() {
+    // Pick the farthest real expiration (not the front-month) so a server that silently ignored
+    // the filter — falling back to its own front-month default — would be caught: that default
+    // would not match "target" here.
+    List<Integer> dtes = liveDistinctDtes();
+    int target = dtes.get(dtes.size() - 1);
+
+    List<OptionQuote> result =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dte(target))
+                    .side(OptionSide.CALL)
+                    .build())
+            .values();
+
+    assertThat(result).isNotEmpty();
+    assertThat(result.stream().map(OptionQuote::dte).distinct().toList())
+        .as("dte=%d resolves to the single expiration closest to that value", target)
+        .containsExactly(target);
+  }
+
+  @Test
+  void chainDteListResolvesToEachValuesClosestExpiration() {
+    List<Integer> dtes = liveDistinctDtes();
+    int first = dtes.get(0);
+    int last = dtes.get(dtes.size() - 1);
+
+    List<OptionQuote> result =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dteList(List.of(first, last)))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(result.stream().map(OptionQuote::dte).distinct().toList())
+        .as("dte list resolves to exactly the two requested expirations, nothing else")
+        .containsExactlyInAnyOrder(first, last);
+  }
+
+  @Test
+  void chainDteRangeKeepsExpirationsWithinInclusiveBounds() {
+    // An interior subrange (second through second-to-last baseline dte) so the requested range is
+    // a strict subset of the full chain — unlike the full span, this distinguishes a working range
+    // filter from one that was ignored (expiration=all's own front-to-back span would otherwise
+    // look
+    // identical to the filtered answer).
+    List<Integer> dtes = liveDistinctDtes();
+    int min = dtes.get(1);
+    int max = dtes.get(dtes.size() - 2);
+    int belowRange = dtes.get(0);
+    int aboveRange = dtes.get(dtes.size() - 1);
+
+    List<OptionQuote> result =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dteRange(min, max))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    List<Integer> resultDtes = result.stream().map(OptionQuote::dte).distinct().toList();
+    assertThat(resultDtes)
+        .as("every returned expiration falls within the inclusive [%d, %d] bound", min, max)
+        .allMatch(d -> d >= min && d <= max);
+    assertThat(resultDtes)
+        .as("the range's own endpoints are kept (bounds are inclusive)")
+        .contains(min, max);
+    assertThat(resultDtes)
+        .as("expirations outside the requested range are excluded, not just the ones inside kept")
+        .doesNotContain(belowRange, aboveRange);
+  }
+
+  @Test
+  void chainDteComparisonBoundaryIsInclusiveAtGteAndExclusiveAtLt() {
+    // Compare each comparison answer against the exact baseline slice it ought to produce (not
+    // just "contains" / "does not contain" the boundary): a server that ignored the dte filter
+    // entirely would fall back to its own front-month default, which happens not to carry
+    // "boundary" either, so a bare doesNotContain(boundary) on the "<" half would pass whether or
+    // not the filter was honored. The exact-match on both halves proves inclusion and exclusion at
+    // once: nothing below the boundary leaks into ">=", and nothing at or above it leaks into "<".
+    List<Integer> dtes = liveDistinctDtes();
+    int boundary = dtes.get(dtes.size() / 2);
+    List<Integer> atOrAboveBoundary = dtes.stream().filter(d -> d >= boundary).toList();
+    List<Integer> belowBoundary = dtes.stream().filter(d -> d < boundary).toList();
+
+    List<OptionQuote> included =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(
+                        ExpirationFilter.dteComparison(ExpirationFilter.Operator.GTE, boundary))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+    List<Integer> includedDtes =
+        included.stream().map(OptionQuote::dte).distinct().sorted().toList();
+    assertThat(includedDtes)
+        .as(
+            ">=%d keeps every baseline expiration at or above %d, boundary included",
+            boundary, boundary)
+        .allMatch(d -> d >= boundary)
+        .containsExactlyElementsOf(atOrAboveBoundary);
+
+    List<OptionQuote> excluded =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(
+                        ExpirationFilter.dteComparison(ExpirationFilter.Operator.LT, boundary))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+    List<Integer> excludedDtes =
+        excluded.stream().map(OptionQuote::dte).distinct().sorted().toList();
+    assertThat(excludedDtes)
+        .as(
+            "<%d keeps exactly the baseline expirations below %d, boundary excluded",
+            boundary, boundary)
+        .containsExactlyElementsOf(belowBoundary);
+  }
+
+  /**
+   * Ground truth for the dte-filter assertions: the distinct dte values present in today's full
+   * AAPL call chain, discovered via the already-covered {@code expiration=all} filter rather than
+   * computed from the local clock. AAPL carries far more than four standard expirations at any
+   * time, so the index picks used by the dte tests (first / second / middle / second-to-last /
+   * last) are always distinct, and the range test's interior subrange always has at least one
+   * baseline dte strictly outside it on each side.
+   */
+  private List<Integer> liveDistinctDtes() {
+    List<OptionQuote> all =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.all())
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+    List<Integer> dtes =
+        all.stream().map(OptionQuote::dte).filter(Objects::nonNull).distinct().sorted().toList();
+    assertThat(dtes).as("AAPL carries several distinct expirations").hasSizeGreaterThanOrEqualTo(4);
+    return dtes;
   }
 
   @Test
