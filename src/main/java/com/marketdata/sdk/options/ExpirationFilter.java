@@ -43,7 +43,11 @@ public sealed interface ExpirationFilter
     return new All();
   }
 
-  /** Days-to-expiration filter — wire form {@code ?dte=N}. */
+  /**
+   * Days-to-expiration filter — wire form {@code ?dte=N}. {@code days} is relative to the request's
+   * {@code date} parameter when one is set (to "today" otherwise), and is capped at 36,500 days
+   * (100 years).
+   */
   static Dte dte(int days) {
     if (days < 0) {
       throw new IllegalArgumentException("dte must be non-negative");
@@ -54,7 +58,9 @@ public sealed interface ExpirationFilter
   /**
    * Comma-separated days-to-expiration list — wire form {@code ?dte=15,30,45}. For each value, the
    * API selects the closest available expiration; duplicates across values are deduplicated
-   * server-side. {@code days} must be non-empty, and every value non-negative.
+   * server-side. {@code days} must be non-empty, and every value non-negative. Each value is
+   * relative to the request's {@code date} parameter when one is set (to "today" otherwise), and is
+   * capped at 36,500 days (100 years).
    */
   static DteList dteList(List<Integer> days) {
     return new DteList(days);
@@ -63,7 +69,8 @@ public sealed interface ExpirationFilter
   /**
    * Closed days-to-expiration range — wire form {@code ?dte=0-45}, both ends inclusive (same
    * grammar as {@link StrikeFilter#range}, which documents the same closed-range syntax). {@code
-   * min} must not exceed {@code max}.
+   * min} must not exceed {@code max}. Both bounds are relative to the request's {@code date}
+   * parameter when one is set (to "today" otherwise), and are capped at 36,500 days (100 years).
    */
   static DteRange dteRange(int min, int max) {
     return new DteRange(min, max);
@@ -71,7 +78,9 @@ public sealed interface ExpirationFilter
 
   /**
    * Days-to-expiration comparison — wire form {@code ?dte=>=30} (e.g. {@code operator=GTE}, {@code
-   * days=30}). Same comparison grammar as {@link StrikeFilter#comparison}.
+   * days=30}). Same comparison grammar as {@link StrikeFilter#comparison}. {@code days} is relative
+   * to the request's {@code date} parameter when one is set (to "today" otherwise), and is capped
+   * at 36,500 days (100 years).
    */
   static DteComparison dteComparison(Operator operator, int days) {
     return new DteComparison(operator, days);

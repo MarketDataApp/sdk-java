@@ -43,7 +43,7 @@ OptionsChainRequest.builder(String symbol)
     .build()
 ```
 
-`dte` accepts four forms: a single value (`dte(int)`), a comma-separated list (`dteList(List<Integer>)` — for each value, the API selects its closest available expiration), a closed range (`dteRange(int, int)`, both ends inclusive — same grammar as `StrikeFilter.range`), and a comparison (`dteComparison(ExpirationFilter.Operator, int)`, operators `GT`/`GTE`/`LT`/`LTE` — same grammar as `StrikeFilter.comparison`).
+`dte` accepts four forms: a single value (`dte(int)`), a comma-separated list (`dteList(List<Integer>)` — for each value, the API selects its closest available expiration), a closed range (`dteRange(int, int)`, both ends inclusive — same grammar as `StrikeFilter.range`), and a comparison (`dteComparison(ExpirationFilter.Operator, int)`, operators `GT`/`GTE`/`LT`/`LTE` — same grammar as `StrikeFilter.comparison`). Every `dte` value, in any of the four forms, is relative to the request's `date` parameter when one is set (to "today" otherwise), and is capped at 36,500 days (100 years).
 
 <a name="optionquote"></a>
 #### Returns

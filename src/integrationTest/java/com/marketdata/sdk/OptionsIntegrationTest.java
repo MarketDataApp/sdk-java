@@ -40,6 +40,11 @@ class OptionsIntegrationTest {
 
   private static final String UNDERLYING = "AAPL";
 
+  // A fixed, recent US trading day (not a weekend or market holiday) that the dte tests below
+  // pin their baseline and filtered calls to, so the chain's dte values can't shift with the
+  // wall clock the way LocalDate.now() would.
+  private static final LocalDate DTE_FIXED_TRADING_DAY = LocalDate.of(2026, 10, 27);
+
   private MarketDataClient client;
 
   @BeforeAll
@@ -138,7 +143,11 @@ class OptionsIntegrationTest {
     // Request an available dte value exactly — its own closest expiration is unambiguous (zero
     // distance), so the result's dte must equal it. Picking the farthest-out value keeps it
     // distinct from the unfiltered default, which is the front-month (nearest) expiration.
-    List<Integer> baseline = baselineDtes();
+    // The baseline and the filtered call share one fixed trading day so dte is computed against
+    // the same session for both, instead of a wall-clock "today" that would shift with the
+    // calendar and could land on a weekend or market holiday.
+    LocalDate date = DTE_FIXED_TRADING_DAY;
+    List<Integer> baseline = baselineDtes(date);
     int farthest = baseline.get(baseline.size() - 1);
 
     List<OptionQuote> chain =
@@ -149,6 +158,7 @@ class OptionsIntegrationTest {
                     .expirationFilter(ExpirationFilter.dte(farthest))
                     .side(OptionSide.CALL)
                     .strikeLimit(1)
+                    .date(date)
                     .build())
             .values();
 
@@ -163,7 +173,11 @@ class OptionsIntegrationTest {
     // Request two distinct, available dte values exactly: each is its own unambiguous closest
     // candidate (zero distance), so the result can only ever contain those two values, and both
     // must be present. Distinct from the unfiltered default, which carries a single expiration.
-    List<Integer> baseline = baselineDtes();
+    // The baseline and the filtered call share one fixed trading day so dte is computed against
+    // the same session for both, instead of a wall-clock "today" that would shift with the
+    // calendar and could land on a weekend or market holiday.
+    LocalDate date = DTE_FIXED_TRADING_DAY;
+    List<Integer> baseline = baselineDtes(date);
     int low = baseline.get(0);
     int high = baseline.get(baseline.size() - 1);
 
@@ -175,6 +189,7 @@ class OptionsIntegrationTest {
                     .expirationFilter(ExpirationFilter.dteList(List.of(low, high)))
                     .side(OptionSide.CALL)
                     .strikeLimit(1)
+                    .date(date)
                     .build())
             .values();
 
@@ -192,7 +207,11 @@ class OptionsIntegrationTest {
     // A closed range spanning several available expirations: every row's dte must fall within
     // [min, max], and the span must cover more than one distinct value to differ from the
     // unfiltered (single front-month) default.
-    List<Integer> baseline = baselineDtes();
+    // The baseline and the filtered call share one fixed trading day so dte is computed against
+    // the same session for both, instead of a wall-clock "today" that would shift with the
+    // calendar and could land on a weekend or market holiday.
+    LocalDate date = DTE_FIXED_TRADING_DAY;
+    List<Integer> baseline = baselineDtes(date);
     int min = baseline.get(baseline.size() / 4);
     int max = baseline.get(3 * baseline.size() / 4);
 
@@ -204,6 +223,7 @@ class OptionsIntegrationTest {
                     .expirationFilter(ExpirationFilter.dteRange(min, max))
                     .side(OptionSide.CALL)
                     .strikeLimit(1)
+                    .date(date)
                     .build())
             .values();
 
@@ -223,7 +243,11 @@ class OptionsIntegrationTest {
     // bound as inclusive or exclusive. The bound sits a third of the way up the baseline so the
     // qualifying set spans more than one expiration, distinguishing it from the unfiltered
     // default (a single front-month row).
-    List<Integer> baseline = baselineDtes();
+    // The baseline and the filtered call share one fixed trading day so dte is computed against
+    // the same session for both, instead of a wall-clock "today" that would shift with the
+    // calendar and could land on a weekend or market holiday.
+    LocalDate date = DTE_FIXED_TRADING_DAY;
+    List<Integer> baseline = baselineDtes(date);
     int bound = baseline.get(baseline.size() / 3);
 
     List<OptionQuote> chain =
@@ -235,6 +259,7 @@ class OptionsIntegrationTest {
                         ExpirationFilter.dteComparison(ExpirationFilter.Operator.GTE, bound))
                     .side(OptionSide.CALL)
                     .strikeLimit(1)
+                    .date(date)
                     .build())
             .values();
 
@@ -254,7 +279,11 @@ class OptionsIntegrationTest {
     // bound as inclusive or exclusive. The bound sits two-thirds of the way up the baseline so the
     // qualifying set spans more than one expiration, distinguishing it from the unfiltered
     // default (a single front-month row).
-    List<Integer> baseline = baselineDtes();
+    // The baseline and the filtered call share one fixed trading day so dte is computed against
+    // the same session for both, instead of a wall-clock "today" that would shift with the
+    // calendar and could land on a weekend or market holiday.
+    LocalDate date = DTE_FIXED_TRADING_DAY;
+    List<Integer> baseline = baselineDtes(date);
     int bound = baseline.get(2 * baseline.size() / 3);
 
     List<OptionQuote> chain =
@@ -266,6 +295,7 @@ class OptionsIntegrationTest {
                         ExpirationFilter.dteComparison(ExpirationFilter.Operator.LT, bound))
                     .side(OptionSide.CALL)
                     .strikeLimit(1)
+                    .date(date)
                     .build())
             .values();
 
@@ -282,9 +312,11 @@ class OptionsIntegrationTest {
   /**
    * Every distinct dte present across AAPL's full expiration chain, ascending — the baseline a
    * dte-filter test derives its candidate values from, per the suite's own convention of deriving
-   * expectations from a baseline call rather than from values assumed in advance.
+   * expectations from a baseline call rather than from values assumed in advance. {@code date} is
+   * the fixed trading day the caller also passes to its filtered call, so both calls see the same
+   * session and dte can't shift between them.
    */
-  private List<Integer> baselineDtes() {
+  private List<Integer> baselineDtes(LocalDate date) {
     List<OptionQuote> chain =
         client
             .options()
@@ -293,6 +325,7 @@ class OptionsIntegrationTest {
                     .expirationFilter(ExpirationFilter.all())
                     .side(OptionSide.CALL)
                     .strikeLimit(1)
+                    .date(date)
                     .build())
             .values();
     List<Integer> dtes =
