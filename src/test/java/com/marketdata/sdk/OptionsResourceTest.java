@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.marketdata.sdk.exception.ParseError;
+import com.marketdata.sdk.options.DteFilter;
 import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.Greek;
 import com.marketdata.sdk.options.OptionQuote;
@@ -27,6 +28,7 @@ import java.time.Month;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -1026,6 +1028,60 @@ class OptionsResourceTest {
   }
 
   @Test
+  void chainExpirationFilterDteValuesTranslatesToCommaSeparatedList() {
+    // dte's API-level type change (integer -> string) adds a comma-separated-list form: each
+    // value selects its own closest expiration, deduplicated server-side.
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(DteFilter.values(15, 30, 45))
+                .build())
+        .join();
+
+    // The comma is URL-encoded, so decode before asserting (same convention as columns=).
+    String decodedUri =
+        java.net.URLDecoder.decode(
+            client.captured.get(0).uri().toString(), java.nio.charset.StandardCharsets.UTF_8);
+    assertThat(decodedUri).isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=15,30,45");
+  }
+
+  @Test
+  void chainExpirationFilterDteRangeTranslatesToDashedRange() {
+    // dte's closed-range form, e.g. "0-45" — same dashed syntax as StrikeFilter.Range.
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL").expirationFilter(DteFilter.range(0, 45)).build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=0-45");
+  }
+
+  @Test
+  void chainExpirationFilterDteComparisonRendersWithOperatorPrefix() {
+    // dte's comparison-operator form reuses StrikeFilter.Operator — same wire syntax as strike.
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(DteFilter.comparison(StrikeFilter.Operator.GTE, 30))
+                .build())
+        .join();
+
+    String url = client.captured.get(0).uri().toString();
+    // "%3E%3D" is the URL-encoded ">=" — the query encoder pushes reserved characters through.
+    assertThat(url).contains("dte=%3E%3D30");
+  }
+
+  @Test
   void chainStrikeFilterExactRendersAsBareNumber() {
     CapturingClient client = okWith(CANNED_CHAIN_BODY);
     OptionsResource options = resourceWith(client);
@@ -1218,6 +1274,92 @@ class OptionsResourceTest {
     assertThatThrownBy(() -> ExpirationFilter.monthYear(2025, 13))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("month must be in 1..12");
+  }
+
+  @Test
+  void dteFilterValuesRejectsEmptyArray() {
+    assertThatThrownBy(() -> DteFilter.values())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("days must not be empty");
+  }
+
+  @Test
+  void dteFilterValuesRejectsNegativeDay() {
+    assertThatThrownBy(() -> DteFilter.values(15, -1))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be non-negative");
+  }
+
+  @Test
+  void dteFilterValuesRejectsDayAboveMaximum() {
+    assertThatThrownBy(() -> DteFilter.values(15, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be at most 36500");
+  }
+
+  @Test
+  void dteFilterRangeRejectsMinGreaterThanMax() {
+    assertThatThrownBy(() -> DteFilter.range(45, 0))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("min must be <= max");
+  }
+
+  @Test
+  void dteFilterRangeRejectsNegativeMin() {
+    assertThatThrownBy(() -> DteFilter.range(-1, 45))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be non-negative");
+  }
+
+  @Test
+  void dteFilterRangeRejectsMaxAboveMaximum() {
+    assertThatThrownBy(() -> DteFilter.range(0, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be at most 36500");
+  }
+
+  @Test
+  void dteFilterComparisonRejectsNegativeDay() {
+    assertThatThrownBy(() -> DteFilter.comparison(StrikeFilter.Operator.GTE, -1))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be non-negative");
+  }
+
+  @Test
+  void dteFilterComparisonRejectsDayAboveMaximum() {
+    assertThatThrownBy(() -> DteFilter.comparison(StrikeFilter.Operator.GTE, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("dte must be at most 36500");
+  }
+
+  @Test
+  void dteFilterComparisonRejectsNullOperatorThroughDirectConstruction() {
+    // The static factory's parameter is typed, so only a direct call to the record's public
+    // canonical constructor can pass null — validation has to hold there too.
+    assertThatThrownBy(() -> new DteFilter.Comparison(null, 30))
+        .isInstanceOf(NullPointerException.class);
+  }
+
+  @Test
+  void dteFilterValuesRejectsNullArrayThroughVarargsFactory() {
+    // A null array reaches the varargs parameter directly (no reflection trick needed) if a
+    // caller passes one explicitly instead of omitting the argument.
+    assertThatThrownBy(() -> DteFilter.values((int[]) null))
+        .isInstanceOf(NullPointerException.class);
+  }
+
+  @Test
+  void dteFilterValuesRejectsNullListThroughDirectConstruction() {
+    assertThatThrownBy(() -> new DteFilter.Values(null)).isInstanceOf(NullPointerException.class);
+  }
+
+  @Test
+  void dteFilterValuesRejectsNullElementThroughDirectConstruction() {
+    // The varargs factory can't carry a null int, so only a direct call to the record's public
+    // canonical constructor with a boxed list can — validation has to hold there too.
+    assertThatThrownBy(() -> new DteFilter.Values(Arrays.asList(15, null)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("days must not contain null elements");
   }
 
   @Test

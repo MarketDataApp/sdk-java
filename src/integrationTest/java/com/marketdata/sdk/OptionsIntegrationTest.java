@@ -2,6 +2,7 @@ package com.marketdata.sdk;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.marketdata.sdk.options.DteFilter;
 import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.OptionQuote;
 import com.marketdata.sdk.options.OptionSide;
@@ -10,6 +11,7 @@ import com.marketdata.sdk.options.OptionsExpirationsRequest;
 import com.marketdata.sdk.options.OptionsLookupRequest;
 import com.marketdata.sdk.options.OptionsQuoteRequest;
 import com.marketdata.sdk.options.OptionsQuotesRequest;
+import com.marketdata.sdk.options.StrikeFilter;
 import com.marketdata.sdk.options.StrikeRange;
 import java.time.LocalDate;
 import java.util.List;
@@ -130,6 +132,163 @@ class OptionsIntegrationTest {
     long distinctExpirations = chain.stream().map(OptionQuote::expiration).distinct().count();
     assertThat(distinctExpirations)
         .as("expiration=all returns every expiration, not just the front-month")
+        .isGreaterThan(1);
+  }
+
+  @Test
+  void chainExpirationDteSingleValueSelectsClosestExpiration() {
+    // A single dte value narrows to the one expiration closest to it, same as before the API's
+    // dte type change — but 365 is far enough from AAPL's front-month expiration (always well
+    // under 180 days for a name this liquid) that an unfiltered call could never satisfy the
+    // assertions below.
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dte(365))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    long distinctExpirations = chain.stream().map(OptionQuote::expiration).distinct().count();
+    assertThat(distinctExpirations)
+        .as("a single dte value selects exactly one expiration")
+        .isEqualTo(1);
+    Integer dte = chain.get(0).dte();
+    assertThat(dte).isNotNull();
+    assertThat(dte)
+        .as(
+            "the expiration closest to the requested 365 dte is far from the front-month"
+                + " expiration an unfiltered call would return")
+        .isGreaterThan(180);
+  }
+
+  @Test
+  void chainExpirationDteValuesSelectsClosestPerValueDeduplicated() {
+    // Three widely-spaced dte values each resolve to their own closest expiration and dedupe —
+    // unlike a single dte value (or no filter at all), which always resolves to one expiration.
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(DteFilter.values(30, 180, 365))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    long distinctExpirations = chain.stream().map(OptionQuote::expiration).distinct().count();
+    assertThat(distinctExpirations)
+        .as(
+            "three widely-spaced dte values resolve to multiple distinct expirations, unlike the"
+                + " single front-month expiration an unfiltered call returns")
+        .isGreaterThan(1);
+  }
+
+  @Test
+  void chainExpirationDteRangeReturnsAllExpirationsWithinBounds() {
+    // A wide closed range spans multiple expirations, unlike no filter (front-month only); every
+    // returned contract's dte must also fall within the bounds, inclusive.
+    int max = 180;
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(DteFilter.range(0, max))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    long distinctExpirations = chain.stream().map(OptionQuote::expiration).distinct().count();
+    assertThat(distinctExpirations)
+        .as(
+            "a wide closed range spans multiple expirations, unlike the single front-month"
+                + " expiration an unfiltered call returns")
+        .isGreaterThan(1);
+    for (OptionQuote q : chain) {
+      assertThat(q.dte()).isNotNull();
+      assertThat(q.dte())
+          .as("every contract's dte falls within the closed range")
+          .isBetween(0, max);
+    }
+  }
+
+  @Test
+  void chainExpirationDteComparisonIsInclusiveAtLowerBound() {
+    // Anchor N on an actual expiration's dte, discovered via the range form (not the unfiltered
+    // call) — then probe the comparison form's boundary against it: >=N must keep the expiration
+    // whose dte is exactly N, <N must exclude it.
+    List<OptionQuote> withinRange =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(DteFilter.range(0, 365))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+    assertThat(withinRange).isNotEmpty();
+    int n =
+        withinRange.stream()
+            .map(OptionQuote::dte)
+            .filter(java.util.Objects::nonNull)
+            .max(Integer::compareTo)
+            .orElseThrow();
+
+    List<OptionQuote> atLeastN =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(DteFilter.comparison(StrikeFilter.Operator.GTE, n))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+    assertThat(atLeastN)
+        .as(">=N keeps the expiration whose dte is exactly N")
+        .extracting(OptionQuote::dte)
+        .contains(n);
+    for (OptionQuote q : atLeastN) {
+      assertThat(q.dte()).isGreaterThanOrEqualTo(n);
+    }
+
+    List<OptionQuote> lessThanN =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(DteFilter.comparison(StrikeFilter.Operator.LT, n))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+    assertThat(lessThanN)
+        .as("<N excludes the expiration whose dte is exactly N")
+        .extracting(OptionQuote::dte)
+        .doesNotContain(n);
+    // An empty answer, or the unfiltered single front-month expiration, would also pass
+    // doesNotContain(n) above without proving the server applied the filter — require a
+    // non-empty, multi-expiration result where every row is strictly below N.
+    assertThat(lessThanN).as("<N is not vacuously satisfied by an empty answer").isNotEmpty();
+    for (OptionQuote q : lessThanN) {
+      assertThat(q.dte()).isLessThan(n);
+    }
+    long lessThanDistinctExpirations =
+        lessThanN.stream().map(OptionQuote::expiration).distinct().count();
+    assertThat(lessThanDistinctExpirations)
+        .as(
+            "<N spans multiple expirations below N, unlike the single front-month expiration an"
+                + " unfiltered call returns")
         .isGreaterThan(1);
   }
 

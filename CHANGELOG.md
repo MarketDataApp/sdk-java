@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `DteFilter` — sealed interface for extended days-to-expiration filtering in
+  `GET /v1/options/chain/` (API release 2.0.0). Three static factories:
+  `values(int...)` for comma-separated lists, `range(int, int)` for closed
+  ranges, `comparison(StrikeFilter.Operator, int)` for numeric comparisons,
+  alongside the existing `ExpirationFilter.dte(int)` single-value form (unchanged).
+
 ## [1.0.0] - 2026-06-29
 
 First stable release of the Market Data Java &amp; Kotlin SDK — a single JVM

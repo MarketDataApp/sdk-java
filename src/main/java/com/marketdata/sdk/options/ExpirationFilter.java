@@ -14,13 +14,19 @@ import java.util.Objects;
  * <p>Additive expiration-type predicates ({@code weekly}/{@code monthly}/{@code quarterly}/{@code
  * am}/{@code pm}) are not part of this hierarchy — they intersect freely with any variant and stay
  * as separate booleans on the request builder.
+ *
+ * <p>{@link DteFilter} is a further permitted subtype: the {@code dte} parameter accepts a single
+ * value ({@link #dte(int)}, below) or, for the comma-separated-list/range/comparison forms, a
+ * {@code DteFilter}. Both still plug into the one {@code expirationFilter(...)} setter, so {@code
+ * dte} stays mutually exclusive with the other variants here.
  */
 public sealed interface ExpirationFilter
     permits ExpirationFilter.OnDate,
         ExpirationFilter.Dte,
         ExpirationFilter.Between,
         ExpirationFilter.MonthYear,
-        ExpirationFilter.All {
+        ExpirationFilter.All,
+        DteFilter {
 
   /** A specific expiration date — wire form {@code ?expiration=YYYY-MM-DD}. */
   static OnDate onDate(LocalDate date) {
@@ -39,7 +45,10 @@ public sealed interface ExpirationFilter
     return new All();
   }
 
-  /** Days-to-expiration filter — wire form {@code ?dte=N}. */
+  /**
+   * Days-to-expiration filter, single value — wire form {@code ?dte=N}. For a comma-separated list,
+   * a closed range, or a comparison, use {@link DteFilter} instead.
+   */
   static Dte dte(int days) {
     if (days < 0) {
       throw new IllegalArgumentException("dte must be non-negative");

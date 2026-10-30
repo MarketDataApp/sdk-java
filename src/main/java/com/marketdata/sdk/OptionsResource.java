@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.module.SimpleModule;
+import com.marketdata.sdk.options.DteFilter;
 import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.OptionQuote;
 import com.marketdata.sdk.options.OptionsChain;
@@ -28,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -312,6 +314,12 @@ public final class OptionsResource extends ConfiguredResource<OptionsResource> {
       b.query("expiration", DateTimeFormatter.ISO_LOCAL_DATE.format(v.date()));
     } else if (f instanceof ExpirationFilter.Dte v) {
       b.query("dte", v.days());
+    } else if (f instanceof DteFilter.Values v) {
+      b.query("dte", joinDays(v.days()));
+    } else if (f instanceof DteFilter.Range v) {
+      b.query("dte", v.min() + "-" + v.max());
+    } else if (f instanceof DteFilter.Comparison v) {
+      b.query("dte", v.operator().wireValue() + v.days());
     } else if (f instanceof ExpirationFilter.Between v) {
       b.query("from", DateTimeFormatter.ISO_LOCAL_DATE.format(v.from()));
       b.query("to", DateTimeFormatter.ISO_LOCAL_DATE.format(v.to()));
@@ -335,6 +343,10 @@ public final class OptionsResource extends ConfiguredResource<OptionsResource> {
     // exhaustiveness (Java 17 can't prove it in an if-chain) and fails fast if a variant is added.
     StrikeFilter.Comparison v = (StrikeFilter.Comparison) f;
     return v.operator().wireValue() + formatStrike(v.price());
+  }
+
+  private static String joinDays(List<Integer> days) {
+    return days.stream().map(String::valueOf).collect(Collectors.joining(","));
   }
 
   private static String formatStrike(double v) {
