@@ -243,11 +243,12 @@ class OptionsIntegrationTest {
 
   @Test
   void chainDteComparisonGteIncludesExactBoundaryDte() {
-    // "a comparison operator (>=30, <45) returns every expiration whose dte falls within the
-    // bounds, inclusive." Using the board's front-month dte as the bound would pass even if the
-    // server ignored dte — the unfiltered front-month response also carries exactly that dte — so
-    // use a bound above the front of the board, and require every returned row to respect it (a
-    // front-month-only answer would carry a dte below the bound and fail the second assertion).
+    // The comparison form reuses StrikeFilter.Operator ("the syntax matches strike"): >= keeps the
+    // row whose dte equals the bound. Using the board's front-month dte as the bound would pass
+    // even if the server ignored dte — the unfiltered front-month response also carries exactly
+    // that dte — so use a bound above the front of the board, and require every returned row to
+    // respect it (a front-month-only answer would carry a dte below the bound and fail the second
+    // assertion).
     List<Integer> board = discoverDteBoard();
     assertThat(board).as("AAPL has at least 2 distinct expirations").hasSizeGreaterThanOrEqualTo(2);
     int bound = board.get(board.size() / 2);
@@ -272,7 +273,8 @@ class OptionsIntegrationTest {
 
   @Test
   void chainDteComparisonGtExcludesExactBoundaryDte() {
-    // > is strict: it must drop the row whose dte exactly equals the bound, unlike >=.
+    // > is strict, matching StrikeFilter's own ">" semantics ("the syntax matches strike"): it
+    // must drop the row whose dte exactly equals the bound, unlike >=.
     int n = discoverDteBoard().get(0);
 
     List<OptionQuote> gt =
@@ -317,8 +319,9 @@ class OptionsIntegrationTest {
 
   @Test
   void chainDteComparisonLtExcludesExactBoundaryDte() {
-    // < is strict: it must drop the row whose dte exactly equals the bound, unlike <=. Asserting
-    // only doesNotContain(max) would pass even if the server ignored dte — an unfiltered,
+    // < is strict, matching StrikeFilter's own "<" semantics ("the syntax matches strike"): it
+    // must drop the row whose dte exactly equals the bound, unlike <=. Asserting only
+    // doesNotContain(max) would pass even if the server ignored dte — an unfiltered,
     // front-month-only response also excludes max (since max differs from the front) — so also
     // require every returned dte to sit below the bound and more than one distinct expiration to
     // come back, which a front-month-only answer could not satisfy.
