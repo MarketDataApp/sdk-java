@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ExpirationFilter.dte(int...)`, the comma-separated dte list wire form (API release 2.0.0).
+  `ExpirationFilter.dte(int)` works as before.
+- `ExpirationFilter.dteRange(int, int)`, the closed-range dte wire form (API release 2.0.0).
+- `ExpirationFilter.dteComparison(StrikeFilter.Operator, int)`, the comparison-operator dte wire form
+  (API release 2.0.0), reusing `StrikeFilter.Operator` syntax.
+- `ExpirationFilter.DteList`, `ExpirationFilter.DteRange`, and `ExpirationFilter.DteComparison`: new
+  permitted subtypes of the sealed `ExpirationFilter` interface, supporting the API's three new dte
+  forms (API release 2.0.0).
+
 ## [1.0.0] - 2026-06-29
 
 First stable release of the Market Data Java &amp; Kotlin SDK — a single JVM

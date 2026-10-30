@@ -10,6 +10,7 @@ import com.marketdata.sdk.options.OptionsExpirationsRequest;
 import com.marketdata.sdk.options.OptionsLookupRequest;
 import com.marketdata.sdk.options.OptionsQuoteRequest;
 import com.marketdata.sdk.options.OptionsQuotesRequest;
+import com.marketdata.sdk.options.StrikeFilter;
 import com.marketdata.sdk.options.StrikeRange;
 import java.time.LocalDate;
 import java.util.List;
@@ -156,6 +157,202 @@ class OptionsIntegrationTest {
         assertThat(rho.doubleValue()).isFinite();
       }
     }
+  }
+
+  // ---------- chain: dte parameter forms (v2.0.0 — dte became a string parameter) ----------
+
+  @Test
+  void chainDteSingleValueMovesExpirationFurtherOutAsValueGrows() {
+    // dte's wire type changed from integer to string; the single-value form must still pick the
+    // expiration closest to the given value. Compared against another value of the same
+    // parameter (not the unfiltered default) so an ignored filter would fail this assertion.
+    int nearDte = java.util.Objects.requireNonNull(chainRowForDte(ExpirationFilter.dte(7)).dte());
+    int farDte = java.util.Objects.requireNonNull(chainRowForDte(ExpirationFilter.dte(180)).dte());
+
+    assertThat(farDte)
+        .as("dte(180) must resolve to a later expiration than dte(7)")
+        .isGreaterThan(nearDte);
+  }
+
+  @Test
+  void chainDteListReturnsClosestExpirationPerValueDeduplicated() {
+    LocalDate nearExpiration =
+        java.util.Objects.requireNonNull(chainRowForDte(ExpirationFilter.dte(7)).expiration())
+            .toLocalDate();
+    LocalDate farExpiration =
+        java.util.Objects.requireNonNull(chainRowForDte(ExpirationFilter.dte(180)).expiration())
+            .toLocalDate();
+
+    List<OptionQuote> combined =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dte(7, 180))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .strikeRange(StrikeRange.ITM)
+                    .build())
+            .values();
+
+    java.util.Set<LocalDate> distinctExpirations =
+        combined.stream()
+            .map(q -> java.util.Objects.requireNonNull(q.expiration()).toLocalDate())
+            .collect(java.util.stream.Collectors.toSet());
+
+    assertThat(distinctExpirations)
+        .as("dte(7, 180) must select exactly the two closest expirations, one per value")
+        .containsExactlyInAnyOrder(nearExpiration, farExpiration);
+  }
+
+  @Test
+  void chainDteRangeDegenerateToSingleDayIncludesBothInclusiveBounds() {
+    // The anchor comes from a dte(...) call itself — not the unfiltered default — and is seeded
+    // far enough out (180 days) that an answer which merely echoed the unfiltered front-month
+    // default would fail the dte-equality assertion below, catching an ignored parameter.
+    int anchorDte = anchorDte(180);
+
+    List<OptionQuote> rows =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dteRange(anchorDte, anchorDte))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .strikeRange(StrikeRange.ITM)
+                    .build())
+            .values();
+
+    assertThat(rows)
+        .as("a min==max range must still include the expiration at exactly that dte")
+        .isNotEmpty();
+    assertThat(rows).allSatisfy(q -> assertThat(q.dte()).isEqualTo(anchorDte));
+  }
+
+  @Test
+  void chainDteRangeSpansMultipleExpirationsUnlikeASingleValue() {
+    List<OptionQuote> ranged =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dteRange(0, 400))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .strikeRange(StrikeRange.ITM)
+                    .build())
+            .values();
+
+    long distinctExpirations = ranged.stream().map(OptionQuote::expiration).distinct().count();
+    assertThat(distinctExpirations)
+        .as("a closed range must span every expiration within bounds, not just the closest one")
+        .isGreaterThan(1);
+    assertThat(ranged)
+        .as("every row's dte must fall within the inclusive [0, 400] bound")
+        .allSatisfy(q -> assertThat(q.dte()).isBetween(0, 400));
+  }
+
+  @Test
+  void chainDteComparisonGteIncludesTheBoundaryValue() {
+    // Seeded far out (180 days), like the range test above, so an ignored filter (which would
+    // echo the near-term unfiltered default) fails both assertions below.
+    int anchorDte = anchorDte(180);
+
+    List<OptionQuote> rows =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(
+                        ExpirationFilter.dteComparison(StrikeFilter.Operator.GTE, anchorDte))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .strikeRange(StrikeRange.ITM)
+                    .build())
+            .values();
+
+    assertThat(rows)
+        .as(">=N must keep the expiration at exactly N")
+        .anySatisfy(q -> assertThat(q.dte()).isEqualTo(anchorDte));
+    assertThat(rows)
+        .as("every row returned by >=N must satisfy dte >= N")
+        .allSatisfy(q -> assertThat(q.dte()).isGreaterThanOrEqualTo(anchorDte));
+    long distinctExpirations = rows.stream().map(OptionQuote::expiration).distinct().count();
+    assertThat(distinctExpirations)
+        .as(">=N must span every expiration at or beyond N, not just the closest one")
+        .isGreaterThan(1);
+  }
+
+  @Test
+  void chainDteComparisonGteExcludesExpirationsBelowTheBoundary() {
+    int anchorDte = anchorDte(7);
+    int threshold = anchorDte + 60;
+
+    List<OptionQuote> rows =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(
+                        ExpirationFilter.dteComparison(StrikeFilter.Operator.GTE, threshold))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .strikeRange(StrikeRange.ITM)
+                    .build())
+            .values();
+
+    assertThat(rows)
+        .as(">=N must exclude an expiration below N — proves the filter is not ignored")
+        .allSatisfy(q -> assertThat(q.dte()).isGreaterThanOrEqualTo(threshold));
+  }
+
+  @Test
+  void chainDteComparisonLtExcludesTheBoundaryValue() {
+    int anchorDte = anchorDte(7);
+
+    List<OptionQuote> rows =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(
+                        ExpirationFilter.dteComparison(StrikeFilter.Operator.LT, anchorDte))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .strikeRange(StrikeRange.ITM)
+                    .build())
+            .values();
+
+    assertThat(rows)
+        .as("<N must leave out the expiration at exactly N — proves the filter is not ignored")
+        .allSatisfy(q -> assertThat(q.dte()).isLessThan(anchorDte));
+  }
+
+  /** The nearest-the-money call under {@code filter}; asserts the chain isn't empty. */
+  private OptionQuote chainRowForDte(ExpirationFilter filter) {
+    List<OptionQuote> rows =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(filter)
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .strikeRange(StrikeRange.ITM)
+                    .build())
+            .values();
+    assertThat(rows).isNotEmpty();
+    return rows.get(0);
+  }
+
+  /**
+   * The live dte of the expiration closest to {@code seedDays} — built from a {@code dte(...)} call
+   * itself (the parameter under test), never from the unfiltered default, per the live-test rule
+   * that a baseline must exercise the parameter it's anchoring.
+   */
+  private int anchorDte(int seedDays) {
+    return java.util.Objects.requireNonNull(chainRowForDte(ExpirationFilter.dte(seedDays)).dte());
   }
 
   @Test
