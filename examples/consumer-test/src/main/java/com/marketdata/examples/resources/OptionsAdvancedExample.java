@@ -51,6 +51,36 @@ public final class OptionsAdvancedExample {
           .values().stream().map(OptionQuote::expiration).distinct().count();
       System.out.println("ExpirationFilter.all() spans " + spans + " distinct expirations");
 
+      // dte's other forms: a comma-separated list, a closed range, and a comparison operator — the
+      // comparison operator reuses StrikeFilter.Operator, since the syntax matches strike.
+      long nearTerm = client.options().chain(
+          OptionsChainRequest.builder("AAPL")
+              .expirationFilter(ExpirationFilter.dteList(15, 30, 45))
+              .side(OptionSide.CALL)
+              .strikeLimit(1)
+              .build())
+          .values().stream().map(OptionQuote::expiration).distinct().count();
+      System.out.println("ExpirationFilter.dteList(15, 30, 45) spans " + nearTerm + " expirations");
+
+      List<OptionQuote> withinRange = client.options().chain(
+          OptionsChainRequest.builder("AAPL")
+              .expirationFilter(ExpirationFilter.dteRange(0, 45))
+              .side(OptionSide.CALL)
+              .strikeLimit(1)
+              .build())
+          .values();
+      System.out.println("ExpirationFilter.dteRange(0, 45): " + withinRange.size() + " row(s)");
+
+      List<OptionQuote> atLeast30Days = client.options().chain(
+          OptionsChainRequest.builder("AAPL")
+              .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator.GTE, 30))
+              .side(OptionSide.CALL)
+              .strikeLimit(1)
+              .build())
+          .values();
+      System.out.println(
+          "ExpirationFilter.dteComparison(GTE, 30): " + atLeast30Days.size() + " row(s)");
+
       if (chain.size() < 2) {
         System.out.println("Not enough contracts to demo the rest — try a more liquid underlying.");
         return;
