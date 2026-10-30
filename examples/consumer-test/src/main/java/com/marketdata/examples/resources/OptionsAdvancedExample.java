@@ -2,6 +2,7 @@ package com.marketdata.examples.resources;
 
 import com.marketdata.sdk.MarketDataClient;
 import com.marketdata.sdk.exception.AuthenticationError;
+import com.marketdata.sdk.options.DteFilter;
 import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.OptionQuote;
 import com.marketdata.sdk.options.OptionSide;
@@ -50,6 +51,37 @@ public final class OptionsAdvancedExample {
               .build())
           .values().stream().map(OptionQuote::expiration).distinct().count();
       System.out.println("ExpirationFilter.all() spans " + spans + " distinct expirations");
+
+      // DteFilter: dte's forms beyond a single value — a comma-separated list (closest expiration
+      // per value, deduplicated), a closed range (inclusive), and a comparison (same operator
+      // syntax as StrikeFilter).
+      long dteValuesSpans = client.options().chain(
+          OptionsChainRequest.builder("AAPL")
+              .expirationFilter(DteFilter.values(30, 60, 90))
+              .side(OptionSide.CALL)
+              .strikeLimit(1)
+              .build())
+          .values().stream().map(OptionQuote::expiration).distinct().count();
+      System.out.println("DteFilter.values(30, 60, 90) spans " + dteValuesSpans + " expirations");
+
+      List<OptionQuote> dteRangeChain = client.options().chain(
+          OptionsChainRequest.builder("AAPL")
+              .expirationFilter(DteFilter.range(0, 45))
+              .strikeFilter(StrikeFilter.exact(150))
+              .side(OptionSide.CALL)
+              .build())
+          .values();
+      System.out.println("DteFilter.range(0, 45): " + dteRangeChain.size() + " contracts");
+
+      List<OptionQuote> dteComparisonChain = client.options().chain(
+          OptionsChainRequest.builder("AAPL")
+              .expirationFilter(DteFilter.comparison(StrikeFilter.Operator.GTE, 30))
+              .strikeFilter(StrikeFilter.exact(150))
+              .side(OptionSide.CALL)
+              .build())
+          .values();
+      System.out.println(
+          "DteFilter.comparison(GTE, 30): " + dteComparisonChain.size() + " contracts");
 
       if (chain.size() < 2) {
         System.out.println("Not enough contracts to demo the rest — try a more liquid underlying.");
