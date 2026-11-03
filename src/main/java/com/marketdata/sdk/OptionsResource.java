@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -312,6 +313,12 @@ public final class OptionsResource extends ConfiguredResource<OptionsResource> {
       b.query("expiration", DateTimeFormatter.ISO_LOCAL_DATE.format(v.date()));
     } else if (f instanceof ExpirationFilter.Dte v) {
       b.query("dte", v.days());
+    } else if (f instanceof ExpirationFilter.DteList v) {
+      b.query("dte", v.days().stream().map(String::valueOf).collect(Collectors.joining(",")));
+    } else if (f instanceof ExpirationFilter.DteRange v) {
+      b.query("dte", v.min() + "-" + v.max());
+    } else if (f instanceof ExpirationFilter.DteComparison v) {
+      b.query("dte", v.operator().wireValue() + v.days());
     } else if (f instanceof ExpirationFilter.Between v) {
       b.query("from", DateTimeFormatter.ISO_LOCAL_DATE.format(v.from()));
       b.query("to", DateTimeFormatter.ISO_LOCAL_DATE.format(v.to()));

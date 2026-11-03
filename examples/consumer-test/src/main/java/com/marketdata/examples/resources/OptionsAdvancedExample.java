@@ -40,6 +40,24 @@ public final class OptionsAdvancedExample {
           .values();
       System.out.println("Filtered chain: " + chain.size() + " contracts");
 
+      // dte's own sub-syntax: a comma-separated list, a closed range, or a comparison — the same
+      // range/comparison syntax StrikeFilter uses for strike.
+      long dteFormVariants = client.options().chain(
+          OptionsChainRequest.builder("AAPL")
+              .expirationFilter(ExpirationFilter.dteList(List.of(15, 30, 45)))
+              .side(OptionSide.CALL)
+              .strikeLimit(1)
+              .build())
+          .values().stream().map(OptionQuote::expiration).distinct().count();
+      System.out.println("ExpirationFilter.dteList(15, 30, 45) spans " + dteFormVariants
+          + " distinct expirations");
+      client.options().chain(
+          OptionsChainRequest.builder("AAPL").expirationFilter(ExpirationFilter.dteRange(0, 45)).build());
+      client.options().chain(
+          OptionsChainRequest.builder("AAPL")
+              .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator.GTE, 30))
+              .build());
+
       // ExpirationFilter.all() spans every expiration at once — distinct from omitting the filter,
       // which the API narrows to the front month.
       long spans = client.options().chain(

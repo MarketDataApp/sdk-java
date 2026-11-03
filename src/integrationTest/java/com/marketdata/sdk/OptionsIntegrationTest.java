@@ -10,10 +10,12 @@ import com.marketdata.sdk.options.OptionsExpirationsRequest;
 import com.marketdata.sdk.options.OptionsLookupRequest;
 import com.marketdata.sdk.options.OptionsQuoteRequest;
 import com.marketdata.sdk.options.OptionsQuotesRequest;
+import com.marketdata.sdk.options.StrikeFilter;
 import com.marketdata.sdk.options.StrikeRange;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -134,6 +136,151 @@ class OptionsIntegrationTest {
   }
 
   @Test
+  void chainDteSingleValueSelectsExactExpirationWhenAvailable() {
+    // Pick the furthest real expiration (far from the front-month the unfiltered call would
+    // return) and request it by its own dte: the "closest expiration" to a value that is itself
+    // a real expiration is that expiration exactly, with zero distance.
+    List<Integer> liveDtes = liveDteValues();
+    assertThat(liveDtes)
+        .as("AAPL has at least two live expirations")
+        .hasSizeGreaterThanOrEqualTo(2);
+    int farthest = liveDtes.get(liveDtes.size() - 1);
+
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dte(farthest))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain).isNotEmpty();
+    assertThat(chain.stream().map(OptionQuote::dte).distinct().toList())
+        .as(
+            "dte=%d selects exactly the expiration %d days out, not the front month",
+            farthest, farthest)
+        .containsExactly(farthest);
+  }
+
+  @Test
+  void chainDteListSelectsClosestExpirationForEachValue() {
+    // Three real, widely-spaced expirations: requesting them by dte should return all three
+    // distinct expirations, which the unfiltered (front-month-only) answer never does.
+    List<Integer> liveDtes = liveDteValues();
+    assertThat(liveDtes)
+        .as("AAPL has at least three live expirations")
+        .hasSizeGreaterThanOrEqualTo(3);
+    int low = liveDtes.get(0);
+    int mid = liveDtes.get(liveDtes.size() / 2);
+    int high = liveDtes.get(liveDtes.size() - 1);
+
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dteList(List.of(low, mid, high)))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    assertThat(chain.stream().map(OptionQuote::dte).distinct().toList())
+        .as(
+            "dte=%d,%d,%d selects all three expirations, unlike the single front-month default",
+            low, mid, high)
+        .containsExactlyInAnyOrder(low, mid, high);
+  }
+
+  @Test
+  void chainDteRangeIncludesEveryExpirationWithinBoundsInclusive() {
+    // A closed range starting after the front month: every expiration from the second-smallest
+    // live dte through the largest must come back, and the front month (the unfiltered answer)
+    // must be excluded — proving both the inclusive bounds and that the filter actually narrowed
+    // the result away from the default.
+    List<Integer> liveDtes = liveDteValues();
+    assertThat(liveDtes)
+        .as("AAPL has at least three live expirations")
+        .hasSizeGreaterThanOrEqualTo(3);
+    int frontMonth = liveDtes.get(0);
+    int low = liveDtes.get(1);
+    int high = liveDtes.get(liveDtes.size() - 1);
+    List<Integer> expectedInRange = liveDtes.stream().filter(d -> d >= low && d <= high).toList();
+
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.dteRange(low, high))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+
+    List<Integer> distinctDtes = chain.stream().map(OptionQuote::dte).distinct().sorted().toList();
+    assertThat(distinctDtes)
+        .as(
+            "dte=%d-%d keeps every expiration in [%d, %d] inclusive, including both bounds",
+            low, high, low, high)
+        .containsExactlyInAnyOrderElementsOf(expectedInRange)
+        .contains(low, high);
+    assertThat(distinctDtes)
+        .as("the range excludes the front month %d", frontMonth)
+        .doesNotContain(frontMonth);
+  }
+
+  @Test
+  void chainDteComparisonGteIncludesBoundaryLtExcludesIt() {
+    // Anchor on the furthest real expiration M: ">=M" must keep exactly M (nothing exceeds the
+    // maximum, so the bound is kept), while "<M" must return more than one expiration and never
+    // include M itself — demonstrating the inclusive/exclusive boundary on real data rather than
+    // on the unfiltered (single front-month) answer, which satisfies neither assertion.
+    List<Integer> liveDtes = liveDteValues();
+    assertThat(liveDtes)
+        .as("AAPL has at least three live expirations")
+        .hasSizeGreaterThanOrEqualTo(3);
+    int anchor = liveDtes.get(liveDtes.size() - 1);
+
+    List<OptionQuote> gteChain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(
+                        ExpirationFilter.dteComparison(StrikeFilter.Operator.GTE, anchor))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+    assertThat(gteChain.stream().map(OptionQuote::dte).distinct().toList())
+        .as("dte>=%d keeps exactly the boundary expiration %d", anchor, anchor)
+        .containsExactly(anchor);
+
+    List<OptionQuote> ltChain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(
+                        ExpirationFilter.dteComparison(StrikeFilter.Operator.LT, anchor))
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+    List<Integer> ltDtes = ltChain.stream().map(OptionQuote::dte).distinct().toList();
+    assertThat(ltDtes)
+        .as(
+            "dte<%d excludes the boundary expiration %d and returns more than the front month",
+            anchor, anchor)
+        .doesNotContain(anchor)
+        .hasSizeGreaterThan(1);
+  }
+
+  @Test
   void chainDecodesOptionalRhoColumn() {
     // rho is an optional column: the live feed may or may not populate it. Assert the SDK decodes
     // whatever comes back without error — every row's rho is either null (omitted) or a finite
@@ -217,6 +364,30 @@ class OptionsIntegrationTest {
     assertThat(resp.keySet()).containsExactly(first, second);
     assertThat(resp.get(first).values().get(0).optionSymbol()).isEqualTo(first);
     assertThat(resp.get(second).values().get(0).optionSymbol()).isEqualTo(second);
+  }
+
+  /**
+   * Every distinct dte (days-to-expiration) across AAPL's full expiration calendar today, sorted
+   * ascending — used as real anchors for the dte filter tests above instead of values guessed from
+   * today's date, which expirations drift around daily.
+   */
+  private List<Integer> liveDteValues() {
+    List<OptionQuote> chain =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .expirationFilter(ExpirationFilter.all())
+                    .side(OptionSide.CALL)
+                    .strikeLimit(1)
+                    .build())
+            .values();
+    return chain.stream()
+        .map(OptionQuote::dte)
+        .filter(Objects::nonNull)
+        .distinct()
+        .sorted()
+        .toList();
   }
 
   /** Fetch one real option symbol — used by {@link #quoteFetchesSingleContract()}. */

@@ -20,7 +20,10 @@ OptionsChainRequest.builder(String symbol)
 
     // Expiration selection (sealed ExpirationFilter — pick one):
     .expirationFilter(ExpirationFilter.onDate(LocalDate date))
-    .expirationFilter(ExpirationFilter.dte(int days))          // days-to-expiration
+    .expirationFilter(ExpirationFilter.dte(int days))                       // a single dte value
+    .expirationFilter(ExpirationFilter.dteList(List<Integer> days))         // comma-separated dte values
+    .expirationFilter(ExpirationFilter.dteRange(int min, int max))          // closed dte range, inclusive
+    .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator op, int days)) // dte comparison
     .expirationFilter(ExpirationFilter.between(LocalDate from, LocalDate to))
     .expirationFilter(ExpirationFilter.all())                  // every expiration
     // (if omitted, the API narrows to the front month)
@@ -39,6 +42,21 @@ OptionsChainRequest.builder(String symbol)
     .date(LocalDate date)               // historical chain
     .build()
 ```
+
+`dte` itself accepts four forms — a single value, a comma-separated list, a closed range, or a
+comparison — the same range/comparison syntax `StrikeFilter` uses for `strike`:
+
+```java
+ExpirationFilter.dte(30)                                            // ?dte=30
+ExpirationFilter.dteList(List.of(15, 30, 45))                       // ?dte=15,30,45
+ExpirationFilter.dteRange(0, 45)                                    // ?dte=0-45
+ExpirationFilter.dteComparison(StrikeFilter.Operator.GTE, 30)       // ?dte=>=30
+```
+
+Every `dte` value accepted by the API is a non-negative whole number of days, at most 36500. The
+SDK enforces that upper bound client-side on the three new forms (`dteList`/`dteRange`/
+`dteComparison`); the original single-value `dte(int)` predates the bound and still lets an
+out-of-range value reach the API rather than rejecting it locally.
 
 <a name="optionquote"></a>
 #### Returns
@@ -94,6 +112,20 @@ try (MarketDataClient client = new MarketDataClient()) {
           .expirationFilter(ExpirationFilter.dte(45))
           .strikeFilter(StrikeFilter.range(150, 250))
           .side(OptionSide.CALL)
+          .build());
+
+  // dte's own sub-syntax: list, closed range, and comparison, matching StrikeFilter's syntax.
+  client.options().chain(
+      OptionsChainRequest.builder("AAPL")
+          .expirationFilter(ExpirationFilter.dteList(List.of(15, 30, 45)))
+          .build());
+  client.options().chain(
+      OptionsChainRequest.builder("AAPL")
+          .expirationFilter(ExpirationFilter.dteRange(0, 45))
+          .build());
+  client.options().chain(
+      OptionsChainRequest.builder("AAPL")
+          .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator.GTE, 30))
           .build());
 }
 ```

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ExpirationFilter.dteList(List<Integer>)` — comma-separated days-to-expiration
+  list; selects the expiration nearest each value (API 2.0.0). `ExpirationFilter.dte(int)`
+  continues to work as before.
+- `ExpirationFilter.dteRange(int, int)` — closed-range days-to-expiration filter
+  (API 2.0.0). Returns every expiration whose DTE falls within `[min, max]`
+  inclusive.
+- `ExpirationFilter.dteComparison(StrikeFilter.Operator, int)` —
+  comparison-operator days-to-expiration filter (API 2.0.0). Returns every
+  expiration satisfying the condition (e.g., `>= 30`).
+
 ## [1.0.0] - 2026-06-29
 
 First stable release of the Market Data Java &amp; Kotlin SDK — a single JVM
