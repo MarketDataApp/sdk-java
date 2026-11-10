@@ -66,23 +66,20 @@ class ParallelArraysTest {
   void serverSideErrorEnvelopeShortCircuitsBeforeFieldValidation() {
     // s=error means the body intentionally omits the data arrays. The helper must surface the
     // errmsg instead of complaining about missing fields downstream.
-    assertThatThrownBy(
-            () ->
-                ParallelArrays.zip(
-                    null,
-                    parse("{\"s\":\"error\",\"errmsg\":\"database connection refused\"}"),
-                    List.of("symbol"),
-                    row -> null))
+    assertThatThrownBy(() ->
+            ParallelArrays.zip(
+                null,
+                parse("{\"s\":\"error\",\"errmsg\":\"database connection refused\"}"),
+                List.of("symbol"),
+                row -> null))
         .isInstanceOf(JsonMappingException.class)
         .hasMessageContaining("database connection refused");
   }
 
   @Test
   void errorEnvelopeWithoutErrmsgYieldsPlaceholderText() {
-    assertThatThrownBy(
-            () ->
-                ParallelArrays.zip(
-                    null, parse("{\"s\":\"error\"}"), List.of("symbol"), row -> null))
+    assertThatThrownBy(() ->
+            ParallelArrays.zip(null, parse("{\"s\":\"error\"}"), List.of("symbol"), row -> null))
         .isInstanceOf(JsonMappingException.class)
         .hasMessageContaining("no errmsg field");
   }
@@ -130,13 +127,12 @@ class ParallelArraysTest {
 
   @Test
   void missingFieldFailsWithFieldName() {
-    assertThatThrownBy(
-            () ->
-                ParallelArrays.zip(
-                    null,
-                    parse("{\"s\":\"ok\",\"symbol\":[\"AAPL\"]}"),
-                    List.of("symbol", "price"),
-                    row -> null))
+    assertThatThrownBy(() ->
+            ParallelArrays.zip(
+                null,
+                parse("{\"s\":\"ok\",\"symbol\":[\"AAPL\"]}"),
+                List.of("symbol", "price"),
+                row -> null))
         .isInstanceOf(JsonMappingException.class)
         .hasMessageContaining("missing or non-array")
         .hasMessageContaining("price");
@@ -144,13 +140,12 @@ class ParallelArraysTest {
 
   @Test
   void nonArrayFieldFailsWithFieldName() {
-    assertThatThrownBy(
-            () ->
-                ParallelArrays.zip(
-                    null,
-                    parse("{\"s\":\"ok\",\"symbol\":\"AAPL\",\"price\":[150.0]}"),
-                    List.of("symbol", "price"),
-                    row -> null))
+    assertThatThrownBy(() ->
+            ParallelArrays.zip(
+                null,
+                parse("{\"s\":\"ok\",\"symbol\":\"AAPL\",\"price\":[150.0]}"),
+                List.of("symbol", "price"),
+                row -> null))
         .isInstanceOf(JsonMappingException.class)
         .hasMessageContaining("missing or non-array")
         .hasMessageContaining("symbol");
@@ -158,16 +153,12 @@ class ParallelArraysTest {
 
   @Test
   void mismatchedLengthsFailWithDetail() {
-    assertThatThrownBy(
-            () ->
-                ParallelArrays.zip(
-                    null,
-                    parse(
-                        "{\"s\":\"ok\","
-                            + "\"symbol\":[\"AAPL\",\"MSFT\"],"
-                            + "\"price\":[150.0]}"),
-                    List.of("symbol", "price"),
-                    row -> null))
+    assertThatThrownBy(() ->
+            ParallelArrays.zip(
+                null,
+                parse("{\"s\":\"ok\"," + "\"symbol\":[\"AAPL\",\"MSFT\"]," + "\"price\":[150.0]}"),
+                List.of("symbol", "price"),
+                row -> null))
         .isInstanceOf(JsonMappingException.class)
         .hasMessageContaining("mismatched lengths")
         .hasMessageContaining("price=1")
@@ -197,13 +188,12 @@ class ParallelArraysTest {
     // builder lambda — surface it loudly rather than NPEing on a null array.
     JsonNode root = parse("{\"s\":\"ok\",\"a\":[\"x\"]}");
 
-    assertThatThrownBy(
-            () ->
-                ParallelArrays.zip(
-                    null,
-                    root,
-                    List.of("a"),
-                    row -> row.text("nonexistent"))) // builder asks for an undeclared column
+    assertThatThrownBy(() ->
+            ParallelArrays.zip(
+                null,
+                root,
+                List.of("a"),
+                row -> row.text("nonexistent"))) // builder asks for an undeclared column
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("nonexistent")
         .hasMessageContaining("[a]");
@@ -387,14 +377,13 @@ class ParallelArraysTest {
 
   @Test
   void mismatchedOptionalColumnLengthFails() {
-    assertThatThrownBy(
-            () ->
-                ParallelArrays.zip(
-                    null,
-                    parse("{\"s\":\"ok\",\"a\":[\"x\",\"y\"],\"opt\":[1.0]}"),
-                    List.of("a"),
-                    List.of("opt"),
-                    row -> row.dblOrNull("opt")))
+    assertThatThrownBy(() ->
+            ParallelArrays.zip(
+                null,
+                parse("{\"s\":\"ok\",\"a\":[\"x\",\"y\"],\"opt\":[1.0]}"),
+                List.of("a"),
+                List.of("opt"),
+                row -> row.dblOrNull("opt")))
         .isInstanceOf(JsonMappingException.class)
         .hasMessageContaining("mismatched lengths")
         .hasMessageContaining("opt");
@@ -409,18 +398,16 @@ class ParallelArraysTest {
             () -> ParallelArrays.zip(null, root, List.of("a"), List.of("d"), r -> r.dblOrNull("d")))
         .isInstanceOf(JsonMappingException.class)
         .hasMessageContaining("number");
-    assertThatThrownBy(
-            () ->
-                ParallelArrays.zip(null, root, List.of("a"), List.of("t"), r -> r.textOrNull("t")))
+    assertThatThrownBy(() ->
+            ParallelArrays.zip(null, root, List.of("a"), List.of("t"), r -> r.textOrNull("t")))
         .isInstanceOf(JsonMappingException.class)
         .hasMessageContaining("string");
     assertThatThrownBy(
             () -> ParallelArrays.zip(null, root, List.of("a"), List.of("l"), r -> r.lngOrNull("l")))
         .isInstanceOf(JsonMappingException.class)
         .hasMessageContaining("number");
-    assertThatThrownBy(
-            () ->
-                ParallelArrays.zip(null, root, List.of("a"), List.of("b"), r -> r.boolOrNull("b")))
+    assertThatThrownBy(() ->
+            ParallelArrays.zip(null, root, List.of("a"), List.of("b"), r -> r.boolOrNull("b")))
         .isInstanceOf(JsonMappingException.class)
         .hasMessageContaining("boolean");
   }

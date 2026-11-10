@@ -120,14 +120,13 @@ class JsonResponseParserTest {
     // String "500" instead of integer 500 — strict rejection rather than Jackson's lax coercion.
     JsonResponseParser parser = parserWithUtilitiesModule();
 
-    assertThatThrownBy(
-            () ->
-                parser.parse(
-                    env(
-                        "{\"x-ratelimit-requests-remaining\":\"5\","
-                            + "\"x-ratelimit-requests-limit\":10,"
-                            + "\"x-options-data-permissions\":\"\"}"),
-                    User.class))
+    assertThatThrownBy(() ->
+            parser.parse(
+                env(
+                    "{\"x-ratelimit-requests-remaining\":\"5\","
+                        + "\"x-ratelimit-requests-limit\":10,"
+                        + "\"x-options-data-permissions\":\"\"}"),
+                User.class))
         .isInstanceOf(ParseError.class)
         .hasMessageContaining("non-integer")
         .hasMessageContaining("x-ratelimit-requests-remaining");
@@ -139,13 +138,10 @@ class JsonResponseParserTest {
     // present as a JSON string. Absence is treated as a backend regression, not a default.
     JsonResponseParser parser = parserWithUtilitiesModule();
 
-    assertThatThrownBy(
-            () ->
-                parser.parse(
-                    env(
-                        "{\"x-ratelimit-requests-remaining\":1,"
-                            + "\"x-ratelimit-requests-limit\":2}"),
-                    User.class))
+    assertThatThrownBy(() ->
+            parser.parse(
+                env("{\"x-ratelimit-requests-remaining\":1," + "\"x-ratelimit-requests-limit\":2}"),
+                User.class))
         .isInstanceOf(ParseError.class)
         .hasMessageContaining("missing or non-string")
         .hasMessageContaining("x-options-data-permissions");
@@ -343,14 +339,13 @@ class JsonResponseParserTest {
 
     assertThatThrownBy(() -> parser.parse(env("{not-json"), RequestHeaders.class))
         .isInstanceOf(ParseError.class)
-        .satisfies(
-            t -> {
-              ParseError err = (ParseError) t;
-              assertThat(err.getRequestUrl()).isEqualTo("http://localhost/headers/");
-              assertThat(err.getStatusCode()).isEqualTo(200);
-              assertThat(err.getRequestId()).isEqualTo("test-request-id");
-              assertThat(err.getCause()).isNotNull();
-            });
+        .satisfies(t -> {
+          ParseError err = (ParseError) t;
+          assertThat(err.getRequestUrl()).isEqualTo("http://localhost/headers/");
+          assertThat(err.getStatusCode()).isEqualTo(200);
+          assertThat(err.getRequestId()).isEqualTo("test-request-id");
+          assertThat(err.getCause()).isNotNull();
+        });
   }
 
   /**
@@ -374,16 +369,15 @@ class JsonResponseParserTest {
         .isInstanceOf(ParseError.class)
         .hasMessageContaining("Empty response body")
         .hasMessageContaining("0 bytes")
-        .satisfies(
-            t -> {
-              ParseError err = (ParseError) t;
-              // Context is still populated — consumers can correlate via requestId, see the
-              // status code, etc.
-              assertThat(err.getStatusCode()).isEqualTo(200);
-              assertThat(err.getRequestId()).isEqualTo("test-request-id");
-              // No Jackson cause when we short-circuit at the empty-body check.
-              assertThat(err.getCause()).isNull();
-            });
+        .satisfies(t -> {
+          ParseError err = (ParseError) t;
+          // Context is still populated — consumers can correlate via requestId, see the
+          // status code, etc.
+          assertThat(err.getStatusCode()).isEqualTo(200);
+          assertThat(err.getRequestId()).isEqualTo("test-request-id");
+          // No Jackson cause when we short-circuit at the empty-body check.
+          assertThat(err.getCause()).isNull();
+        });
   }
 
   /**
@@ -405,17 +399,16 @@ class JsonResponseParserTest {
 
     assertThatThrownBy(() -> parser.parse(envWithQuery, RequestHeaders.class))
         .isInstanceOf(ParseError.class)
-        .satisfies(
-            t -> {
-              ParseError err = (ParseError) t;
-              // Message redacts the query.
-              assertThat(err.getMessage()).doesNotContain("secret-xyz").doesNotContain("AAPL");
-              assertThat(err.getMessage()).contains("?…");
-              // getRequestUrl() also redacts (pre-existing policy on MarketDataException).
-              assertThat(err.getRequestUrl()).doesNotContain("secret-xyz");
-              // The raw context retains the full URI for diagnostic use that won't be persisted.
-              assertThat(err.getContext().requestUrl()).contains("token=secret-xyz");
-            });
+        .satisfies(t -> {
+          ParseError err = (ParseError) t;
+          // Message redacts the query.
+          assertThat(err.getMessage()).doesNotContain("secret-xyz").doesNotContain("AAPL");
+          assertThat(err.getMessage()).contains("?…");
+          // getRequestUrl() also redacts (pre-existing policy on MarketDataException).
+          assertThat(err.getRequestUrl()).doesNotContain("secret-xyz");
+          // The raw context retains the full URI for diagnostic use that won't be persisted.
+          assertThat(err.getContext().requestUrl()).contains("token=secret-xyz");
+        });
   }
 
   // ---------- §9 / ADR-007: parser is resource-agnostic ----------

@@ -27,10 +27,8 @@ final class JsonResponses {
       ResponseFactory<D, R> factory) {
     return transport
         .executeAsync(spec)
-        .thenApply(
-            env ->
-                factory.create(
-                    parser.parse(env, decodeType, requestedColumns), env, spec.format()));
+        .thenApply(env ->
+            factory.create(parser.parse(env, decodeType, requestedColumns), env, spec.format()));
   }
 
   static <D, R> CompletableFuture<R> execute(
@@ -43,9 +41,7 @@ final class JsonResponses {
       ResponseFactory<D, R> factory) {
     return transport
         .executeAsync(spec, policy)
-        .thenApply(
-            env ->
-                factory.create(
-                    parser.parse(env, decodeType, requestedColumns), env, spec.format()));
+        .thenApply(env ->
+            factory.create(parser.parse(env, decodeType, requestedColumns), env, spec.format()));
   }
 }

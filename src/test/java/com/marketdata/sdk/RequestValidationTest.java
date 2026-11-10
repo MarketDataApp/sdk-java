@@ -70,12 +70,11 @@ class RequestValidationTest {
 
   @Test
   void stockWindowRejectsDatePlusRange() {
-    assertThatThrownBy(
-            () ->
-                StockCandlesRequest.builder(StockResolution.DAILY, "AAPL")
-                    .date(TODAY)
-                    .from(TODAY)
-                    .build())
+    assertThatThrownBy(() ->
+            StockCandlesRequest.builder(StockResolution.DAILY, "AAPL")
+                .date(TODAY)
+                .from(TODAY)
+                .build())
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("mutually exclusive");
   }

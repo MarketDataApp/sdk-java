@@ -40,14 +40,13 @@ final class RateLimitHeaders {
   private static @Nullable Long readLong(HttpHeaders headers, String name) {
     return headers
         .firstValue(name)
-        .map(
-            v -> {
-              try {
-                return Long.parseLong(v.trim());
-              } catch (NumberFormatException e) {
-                return null;
-              }
-            })
+        .map(v -> {
+          try {
+            return Long.parseLong(v.trim());
+          } catch (NumberFormatException e) {
+            return null;
+          }
+        })
         .orElse(null);
   }
 }

@@ -173,9 +173,9 @@ public final class FundsResource extends ConfiguredResource<FundsResource> {
 
   /**
    * Option A: for every required column the consumer asked for (explicitly via {@code columns}, or
-   * implicitly by not projecting at all), verify the API actually returned it. A requested-but-
-   * absent required column throws, so a {@code null} a consumer sees only ever means "I projected
-   * it away" — never "the backend silently dropped it".
+   * implicitly by not projecting at all), verify the API actually returned it. A
+   * requested-but-absent required column throws, so a {@code null} a consumer sees only ever means
+   * "I projected it away" — never "the backend silently dropped it".
    */
   private static void validateRequestedColumns(
       JsonParser p,

@@ -69,10 +69,10 @@ class ConfigurationTest {
         Files.writeString(
             tmp.resolve(".env"),
             """
-                MARKETDATA_TOKEN=dotenv-key
-                MARKETDATA_BASE_URL=https://dotenv.example
-                MARKETDATA_API_VERSION=v3
-                """);
+            MARKETDATA_TOKEN=dotenv-key
+            MARKETDATA_BASE_URL=https://dotenv.example
+            MARKETDATA_API_VERSION=v3
+            """);
 
     Configuration config = Configuration.resolve(null, null, null, NO_ENV, dotEnv);
 
@@ -91,10 +91,10 @@ class ConfigurationTest {
         Files.writeString(
             tmp.resolve(".env"),
             """
-                MARKETDATA_TOKEN=marketdata-key
-                AWS_SECRET_ACCESS_KEY=sk-aws-supersecret
-                GITHUB_TOKEN=ghp-leaked
-                """);
+            MARKETDATA_TOKEN=marketdata-key
+            AWS_SECRET_ACCESS_KEY=sk-aws-supersecret
+            GITHUB_TOKEN=ghp-leaked
+            """);
 
     Configuration config = Configuration.resolve(null, null, null, NO_ENV, dotEnv);
 
@@ -144,9 +144,9 @@ class ConfigurationTest {
         Files.writeString(
             tmp.resolve(".env"),
             """
-                MARKETDATA_TOKEN=dotenv-key
-                MARKETDATA_BASE_URL=https://dotenv.example
-                """);
+            MARKETDATA_TOKEN=dotenv-key
+            MARKETDATA_BASE_URL=https://dotenv.example
+            """);
 
     Configuration withExplicit =
         Configuration.resolve(
@@ -331,20 +331,18 @@ class ConfigurationTest {
     // Query belongs on requests, not the origin. Letting it through would corrupt every URL the
     // transport composes (`?token=abc/v1/markets/status/`).
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                Configuration.resolve(
-                    null, "https://api.example.com?token=x", null, NO_ENV, noDotEnv(tmp)))
+        .isThrownBy(() ->
+            Configuration.resolve(
+                null, "https://api.example.com?token=x", null, NO_ENV, noDotEnv(tmp)))
         .withMessageContaining("query string");
   }
 
   @Test
   void resolve_rejects_baseUrl_with_fragment(@TempDir Path tmp) {
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                Configuration.resolve(
-                    null, "https://api.example.com#frag", null, NO_ENV, noDotEnv(tmp)))
+        .isThrownBy(() ->
+            Configuration.resolve(
+                null, "https://api.example.com#frag", null, NO_ENV, noDotEnv(tmp)))
         .withMessageContaining("fragment");
   }
 
@@ -353,10 +351,9 @@ class ConfigurationTest {
     // user:pass@host has Basic-auth semantics the SDK does not support — and would leak
     // credentials into log lines that include the URL.
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                Configuration.resolve(
-                    null, "https://user:pass@api.example.com", null, NO_ENV, noDotEnv(tmp)))
+        .isThrownBy(() ->
+            Configuration.resolve(
+                null, "https://user:pass@api.example.com", null, NO_ENV, noDotEnv(tmp)))
         .withMessageContaining("user-info");
   }
 
@@ -499,10 +496,9 @@ class ConfigurationTest {
   @Test
   void apiKey_validation_error_does_not_leak_token(@TempDir Path tmp) {
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                Configuration.resolve(
-                    "supersecret-prefix\rsuffix-leak", null, null, NO_ENV, noDotEnv(tmp)))
+        .isThrownBy(() ->
+            Configuration.resolve(
+                "supersecret-prefix\rsuffix-leak", null, null, NO_ENV, noDotEnv(tmp)))
         .withMessageNotContaining("supersecret-prefix")
         .withMessageNotContaining("suffix-leak");
   }

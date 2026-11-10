@@ -92,11 +92,10 @@ class RetryExecutorTest {
     RetryExecutor exec = new RetryExecutor(FAST_RETRY);
 
     CompletableFuture<String> f =
-        exec.execute(
-            () -> {
-              calls.incrementAndGet();
-              return CompletableFuture.failedFuture(retriable5xx());
-            });
+        exec.execute(() -> {
+          calls.incrementAndGet();
+          return CompletableFuture.failedFuture(retriable5xx());
+        });
 
     assertThatThrownBy(f::join)
         .isInstanceOf(CompletionException.class)
@@ -116,11 +115,10 @@ class RetryExecutorTest {
     RetryExecutor exec = new RetryExecutor(RetryPolicy.noRetry());
 
     CompletableFuture<String> f =
-        exec.execute(
-            () -> {
-              calls.incrementAndGet();
-              return CompletableFuture.failedFuture(retriableNet());
-            });
+        exec.execute(() -> {
+          calls.incrementAndGet();
+          return CompletableFuture.failedFuture(retriableNet());
+        });
 
     assertThatThrownBy(f::join)
         .isInstanceOf(CompletionException.class)
@@ -137,11 +135,10 @@ class RetryExecutorTest {
     RetryExecutor exec = new RetryExecutor(FAST_RETRY);
 
     CompletableFuture<String> f =
-        exec.execute(
-            () -> {
-              calls.incrementAndGet();
-              return CompletableFuture.failedFuture(nonRetriable500());
-            });
+        exec.execute(() -> {
+          calls.incrementAndGet();
+          return CompletableFuture.failedFuture(nonRetriable500());
+        });
 
     assertThatThrownBy(f::join)
         .isInstanceOf(CompletionException.class)
@@ -158,12 +155,11 @@ class RetryExecutorTest {
     RetryExecutor exec = new RetryExecutor(NO_RETRY);
 
     CompletableFuture<String> result =
-        exec.execute(
-            () -> {
-              CompletableFuture<String> f = new CompletableFuture<>();
-              handle.set(f);
-              return f;
-            });
+        exec.execute(() -> {
+          CompletableFuture<String> f = new CompletableFuture<>();
+          handle.set(f);
+          return f;
+        });
 
     assertThat(handle.get()).isNotNull();
     result.cancel(false);
@@ -180,11 +176,10 @@ class RetryExecutorTest {
     RetryExecutor exec = new RetryExecutor(slow);
 
     CompletableFuture<String> result =
-        exec.execute(
-            () -> {
-              calls.incrementAndGet();
-              return CompletableFuture.failedFuture(retriableNet());
-            });
+        exec.execute(() -> {
+          calls.incrementAndGet();
+          return CompletableFuture.failedFuture(retriableNet());
+        });
 
     // Wait until the first attempt has fired and we're presumably in the backoff window.
     Thread.sleep(10);

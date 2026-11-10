@@ -226,11 +226,10 @@ class FundsResourceTest {
     CapturingClient client = okWith("{\"s\":\"ok\",\"t\":[1705276800],\"c\":[452.84]}");
     FundsResource funds = resourceWith(client);
 
-    assertThatThrownBy(
-            () ->
-                funds
-                    .columns("t", "c", "o")
-                    .candles(FundCandlesRequest.of(FundResolution.DAILY, "VFINX")))
+    assertThatThrownBy(() ->
+            funds
+                .columns("t", "c", "o")
+                .candles(FundCandlesRequest.of(FundResolution.DAILY, "VFINX")))
         .isInstanceOf(ParseError.class)
         .hasMessageContaining("o");
   }
@@ -355,36 +354,33 @@ class FundsResourceTest {
 
   @Test
   void candlesRequestRejectsDateWithRange() {
-    assertThatThrownBy(
-            () ->
-                FundCandlesRequest.builder(FundResolution.DAILY, "VFINX")
-                    .date(LocalDate.of(2025, Month.JANUARY, 1))
-                    .from(LocalDate.of(2024, Month.DECEMBER, 1))
-                    .build())
+    assertThatThrownBy(() ->
+            FundCandlesRequest.builder(FundResolution.DAILY, "VFINX")
+                .date(LocalDate.of(2025, Month.JANUARY, 1))
+                .from(LocalDate.of(2024, Month.DECEMBER, 1))
+                .build())
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("mutually exclusive");
   }
 
   @Test
   void candlesRequestRejectsCountbackWithFrom() {
-    assertThatThrownBy(
-            () ->
-                FundCandlesRequest.builder(FundResolution.DAILY, "VFINX")
-                    .from(LocalDate.of(2024, Month.JANUARY, 1))
-                    .countback(3)
-                    .build())
+    assertThatThrownBy(() ->
+            FundCandlesRequest.builder(FundResolution.DAILY, "VFINX")
+                .from(LocalDate.of(2024, Month.JANUARY, 1))
+                .countback(3)
+                .build())
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("countback and from");
   }
 
   @Test
   void candlesRequestRejectsFromAfterTo() {
-    assertThatThrownBy(
-            () ->
-                FundCandlesRequest.builder(FundResolution.DAILY, "VFINX")
-                    .from(LocalDate.of(2025, Month.JANUARY, 31))
-                    .to(LocalDate.of(2025, Month.JANUARY, 1))
-                    .build())
+    assertThatThrownBy(() ->
+            FundCandlesRequest.builder(FundResolution.DAILY, "VFINX")
+                .from(LocalDate.of(2025, Month.JANUARY, 31))
+                .to(LocalDate.of(2025, Month.JANUARY, 1))
+                .build())
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("from must not be after to");
   }

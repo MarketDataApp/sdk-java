@@ -68,15 +68,14 @@ public final class OptionsCsvResource extends FormattedResource<OptionsCsvResour
               .thenApply(resp -> Map.entry(symbol, resp)));
     }
     return CompletableFuture.allOf(futures.toArray(new CompletableFuture<?>[0]))
-        .thenApply(
-            unused -> {
-              Map<String, CsvResponse> result = new LinkedHashMap<>();
-              for (CompletableFuture<Map.Entry<String, CsvResponse>> f : futures) {
-                Map.Entry<String, CsvResponse> entry = f.join();
-                result.put(entry.getKey(), entry.getValue());
-              }
-              return result;
-            });
+        .thenApply(unused -> {
+          Map<String, CsvResponse> result = new LinkedHashMap<>();
+          for (CompletableFuture<Map.Entry<String, CsvResponse>> f : futures) {
+            Map.Entry<String, CsvResponse> entry = f.join();
+            result.put(entry.getKey(), entry.getValue());
+          }
+          return result;
+        });
   }
 
   public Map<String, CsvResponse> quotes(OptionsQuotesRequest request) {

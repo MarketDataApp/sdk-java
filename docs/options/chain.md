@@ -20,7 +20,10 @@ OptionsChainRequest.builder(String symbol)
 
     // Expiration selection (sealed ExpirationFilter — pick one):
     .expirationFilter(ExpirationFilter.onDate(LocalDate date))
-    .expirationFilter(ExpirationFilter.dte(int days))          // days-to-expiration
+    .expirationFilter(ExpirationFilter.dte(int days))                    // days-to-expiration
+    .expirationFilter(ExpirationFilter.dteList(int... days))             // e.g. 15,30,45
+    .expirationFilter(ExpirationFilter.dteRange(int minDays, int maxDays)) // closed range, e.g. 0-45
+    .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator op, int days)) // e.g. >=30
     .expirationFilter(ExpirationFilter.between(LocalDate from, LocalDate to))
     .expirationFilter(ExpirationFilter.all())                  // every expiration
     // (if omitted, the API narrows to the front month)
@@ -28,6 +31,7 @@ OptionsChainRequest.builder(String symbol)
     // Strike selection (sealed StrikeFilter — pick one):
     .strikeFilter(StrikeFilter.exact(double price))
     .strikeFilter(StrikeFilter.range(double min, double max))
+    .strikeFilter(StrikeFilter.comparison(StrikeFilter.Operator op, double price))
 
     // Additive filters:
     .side(OptionSide.CALL)              // CALL or PUT
@@ -94,6 +98,21 @@ try (MarketDataClient client = new MarketDataClient()) {
           .expirationFilter(ExpirationFilter.dte(45))
           .strikeFilter(StrikeFilter.range(150, 250))
           .side(OptionSide.CALL)
+          .build());
+
+  // dte's other forms: a comma-separated list, a closed range, and a comparison — the same
+  // syntax as strike's range()/comparison().
+  var dteList = client.options().chain(
+      OptionsChainRequest.builder("AAPL")
+          .expirationFilter(ExpirationFilter.dteList(15, 30, 45))
+          .build());
+  var dteRange = client.options().chain(
+      OptionsChainRequest.builder("AAPL")
+          .expirationFilter(ExpirationFilter.dteRange(0, 45))
+          .build());
+  var dteComparison = client.options().chain(
+      OptionsChainRequest.builder("AAPL")
+          .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator.GTE, 30))
           .build());
 }
 ```
