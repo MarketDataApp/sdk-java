@@ -51,6 +51,17 @@ public final class OptionsAdvancedExample {
           .values().stream().map(OptionQuote::expiration).distinct().count();
       System.out.println("ExpirationFilter.all() spans " + spans + " distinct expirations");
 
+      // dte's other forms — a comma-separated list, a closed range, and a comparison — use the
+      // same syntax as StrikeFilter.range()/comparison().
+      long beyond180 = client.options().chain(
+          OptionsChainRequest.builder("AAPL")
+              .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator.GTE, 180))
+              .side(OptionSide.CALL)
+              .strikeLimit(1)
+              .build())
+          .values().size();
+      System.out.println("dteComparison(GTE, 180) matched " + beyond180 + " contract(s)");
+
       if (chain.size() < 2) {
         System.out.println("Not enough contracts to demo the rest — try a more liquid underlying.");
         return;

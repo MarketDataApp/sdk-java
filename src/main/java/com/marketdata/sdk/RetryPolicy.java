@@ -97,13 +97,12 @@ final class RetryPolicy {
           // to the calculated exponential backoff. The unbounded value is still preserved on the
           // ServerError instance for consumer inspection — only the SDK's own automatic wait is
           // capped.
-          LOGGER.warning(
-              () ->
-                  "Server-supplied Retry-After of "
-                      + override.toSeconds()
-                      + "s exceeds cap of "
-                      + MAX_RETRY_AFTER.toSeconds()
-                      + "s; ignoring and using calculated exponential backoff");
+          LOGGER.warning(() ->
+              "Server-supplied Retry-After of "
+                  + override.toSeconds()
+                  + "s exceeds cap of "
+                  + MAX_RETRY_AFTER.toSeconds()
+                  + "s; ignoring and using calculated exponential backoff");
         } else {
           return override;
         }

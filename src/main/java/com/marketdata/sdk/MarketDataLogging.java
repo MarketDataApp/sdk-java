@@ -68,13 +68,12 @@ final class MarketDataLogging {
       // surprise has a breadcrumb.
       Level installed = Logger.getLogger(SDK_LOGGER_NAME).getLevel();
       if (installed != null && !installed.equals(requested)) {
-        LOG.fine(
-            () ->
-                "MarketDataLogging.configure called with level "
-                    + requested.getName()
-                    + " but logger is already configured at "
-                    + installed.getName()
-                    + "; ignoring (first-install-wins).");
+        LOG.fine(() ->
+            "MarketDataLogging.configure called with level "
+                + requested.getName()
+                + " but logger is already configured at "
+                + installed.getName()
+                + "; ignoring (first-install-wins).");
       }
       return;
     }
@@ -129,15 +128,14 @@ final class MarketDataLogging {
     // Unknown spec — fall back to the default level, but loudly. A silent fallback was the
     // worst of both worlds: the consumer typed something wrong and saw INFO output instead of
     // the DEBUG they expected, with no breadcrumb pointing at the typo.
-    LOG.warning(
-        () ->
-            "Unrecognized MARKETDATA_LOGGING_LEVEL value '"
-                + levelSpec
-                + "'; expected one of "
-                + VALID_LEVEL_NAMES
-                + ". Falling back to "
-                + DEFAULT_LEVEL.getName()
-                + ".");
+    LOG.warning(() ->
+        "Unrecognized MARKETDATA_LOGGING_LEVEL value '"
+            + levelSpec
+            + "'; expected one of "
+            + VALID_LEVEL_NAMES
+            + ". Falling back to "
+            + DEFAULT_LEVEL.getName()
+            + ".");
     return DEFAULT_LEVEL;
   }
 

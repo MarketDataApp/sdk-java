@@ -420,12 +420,11 @@ class OptionsResourceTest {
 
   @Test
   void quoteRequestRejectsDateAndFromToTogether() {
-    assertThatThrownBy(
-            () ->
-                OptionsQuoteRequest.builder("X")
-                    .date(LocalDate.of(2025, Month.JANUARY, 1))
-                    .from(LocalDate.of(2024, Month.DECEMBER, 1))
-                    .build())
+    assertThatThrownBy(() ->
+            OptionsQuoteRequest.builder("X")
+                .date(LocalDate.of(2025, Month.JANUARY, 1))
+                .from(LocalDate.of(2024, Month.DECEMBER, 1))
+                .build())
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("mutually exclusive");
   }
@@ -451,24 +450,22 @@ class OptionsResourceTest {
 
   @Test
   void quoteRequestRejectsCountbackWithDate() {
-    assertThatThrownBy(
-            () ->
-                OptionsQuoteRequest.builder("X")
-                    .date(LocalDate.of(2025, Month.JANUARY, 1))
-                    .countback(5)
-                    .build())
+    assertThatThrownBy(() ->
+            OptionsQuoteRequest.builder("X")
+                .date(LocalDate.of(2025, Month.JANUARY, 1))
+                .countback(5)
+                .build())
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("mutually exclusive");
   }
 
   @Test
   void quoteRequestRejectsCountbackWithFrom() {
-    assertThatThrownBy(
-            () ->
-                OptionsQuoteRequest.builder("X")
-                    .from(LocalDate.of(2024, Month.DECEMBER, 1))
-                    .countback(5)
-                    .build())
+    assertThatThrownBy(() ->
+            OptionsQuoteRequest.builder("X")
+                .from(LocalDate.of(2024, Month.DECEMBER, 1))
+                .countback(5)
+                .build())
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("countback and from");
   }
@@ -482,12 +479,11 @@ class OptionsResourceTest {
 
   @Test
   void quoteRequestRejectsFromAfterTo() {
-    assertThatThrownBy(
-            () ->
-                OptionsQuoteRequest.builder("X")
-                    .from(LocalDate.of(2025, Month.JANUARY, 31))
-                    .to(LocalDate.of(2025, Month.JANUARY, 1))
-                    .build())
+    assertThatThrownBy(() ->
+            OptionsQuoteRequest.builder("X")
+                .from(LocalDate.of(2025, Month.JANUARY, 31))
+                .to(LocalDate.of(2025, Month.JANUARY, 1))
+                .build())
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("from must not be after to");
   }
@@ -627,11 +623,10 @@ class OptionsResourceTest {
         okWith("{\"s\":\"ok\",\"optionSymbol\":[\"AAPL250117C00150000\"],\"strike\":[150]}");
     OptionsResource options = resourceWith(client);
 
-    assertThatThrownBy(
-            () ->
-                options
-                    .columns("optionSymbol", "strike", "bid")
-                    .quote(OptionsQuoteRequest.of("AAPL250117C00150000")))
+    assertThatThrownBy(() ->
+            options
+                .columns("optionSymbol", "strike", "bid")
+                .quote(OptionsQuoteRequest.of("AAPL250117C00150000")))
         .isInstanceOf(ParseError.class)
         .hasMessageContaining("bid");
   }
@@ -975,6 +970,76 @@ class OptionsResourceTest {
         .isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=30");
   }
 
+  // ---------- chain: dte multi-form filter (dte query param: integer -> string) ----------
+
+  @Test
+  void chainExpirationFilterDteListTranslatesToCommaSeparatedDte() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dteList(15, 30, 45))
+                .build())
+        .join();
+
+    // The comma is URL-encoded on the wire, so decode before asserting (same convention as the
+    // columns= assertions elsewhere in this file).
+    String url =
+        java.net.URLDecoder.decode(
+            client.captured.get(0).uri().toString(), java.nio.charset.StandardCharsets.UTF_8);
+    assertThat(url).isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=15,30,45");
+  }
+
+  @Test
+  void chainExpirationFilterDteRangeTranslatesToDashedDte() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dteRange(0, 45))
+                .build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?dte=0-45");
+  }
+
+  @Test
+  void chainExpirationFilterDteComparisonGteRendersWithOperatorPrefix() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator.GTE, 30))
+                .build())
+        .join();
+
+    // "%3E%3D" is the URL-encoded ">=" — matches the strike comparison wire test's convention.
+    assertThat(client.captured.get(0).uri().toString()).contains("dte=%3E%3D30");
+  }
+
+  @Test
+  void chainExpirationFilterDteComparisonLtRendersWithOperatorPrefix() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL")
+                .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator.LT, 45))
+                .build())
+        .join();
+
+    // "%3C" is the URL-encoded "<".
+    assertThat(client.captured.get(0).uri().toString()).contains("dte=%3C45");
+  }
+
   @Test
   void chainExpirationFilterBetweenTranslatesToFromTo() {
     CapturingClient client = okWith(CANNED_CHAIN_BODY);
@@ -1205,10 +1270,9 @@ class OptionsResourceTest {
 
   @Test
   void expirationFilterBetweenRejectsReversedDates() {
-    assertThatThrownBy(
-            () ->
-                ExpirationFilter.between(
-                    LocalDate.of(2025, Month.MARCH, 1), LocalDate.of(2025, Month.JANUARY, 1)))
+    assertThatThrownBy(() ->
+            ExpirationFilter.between(
+                LocalDate.of(2025, Month.MARCH, 1), LocalDate.of(2025, Month.JANUARY, 1)))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("from must be on or before to");
   }
@@ -1225,6 +1289,75 @@ class OptionsResourceTest {
     assertThatThrownBy(() -> StrikeFilter.range(160, 140))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("min must be <= max");
+  }
+
+  // ---------- dte multi-form filter: validation (new factories added for the integer->string
+  // widening of the chain endpoint's dte query parameter) ----------
+
+  @Test
+  void expirationFilterDteListRejectsEmpty() {
+    assertThatThrownBy(() -> ExpirationFilter.dteList())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("must not be empty");
+  }
+
+  @Test
+  void expirationFilterDteListRejectsNegativeValue() {
+    assertThatThrownBy(() -> ExpirationFilter.dteList(30, -1, 90))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("non-negative");
+  }
+
+  @Test
+  void expirationFilterDteListRejectsValueAboveMax() {
+    assertThatThrownBy(() -> ExpirationFilter.dteList(30, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("36500");
+  }
+
+  @Test
+  void expirationFilterDteListRecordConstructorRejectsNullElement() {
+    // The dteList(int...) factory can never produce a null element (int is primitive), so this
+    // guard is only reachable by constructing the record directly — validation on a new type must
+    // hold on every public path, not only through the factory.
+    assertThatThrownBy(() -> new ExpirationFilter.DteList(java.util.Arrays.asList(30, null)))
+        .isInstanceOf(NullPointerException.class)
+        .hasMessageContaining("days element");
+  }
+
+  @Test
+  void expirationFilterDteRangeRejectsMinGreaterThanMax() {
+    assertThatThrownBy(() -> ExpirationFilter.dteRange(45, 10))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("min must be <= max");
+  }
+
+  @Test
+  void expirationFilterDteRangeRejectsNegativeMin() {
+    assertThatThrownBy(() -> ExpirationFilter.dteRange(-1, 10))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("non-negative");
+  }
+
+  @Test
+  void expirationFilterDteRangeRejectsMaxAboveLimit() {
+    assertThatThrownBy(() -> ExpirationFilter.dteRange(0, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("36500");
+  }
+
+  @Test
+  void expirationFilterDteComparisonRejectsNegative() {
+    assertThatThrownBy(() -> ExpirationFilter.dteComparison(StrikeFilter.Operator.GTE, -1))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("non-negative");
+  }
+
+  @Test
+  void expirationFilterDteComparisonRejectsValueAboveLimit() {
+    assertThatThrownBy(() -> ExpirationFilter.dteComparison(StrikeFilter.Operator.LT, 36501))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("36500");
   }
 
   // ---------- helpers ----------

@@ -323,14 +323,13 @@ final class HttpTransport implements AutoCloseable {
         requireMapped(HttpStatusMapper.map(status, context, retryAfter), status, uri, context);
     // §16: route the URI through safeUri so getMessage() — accessible to any consumer that logs
     // the exception — never carries query strings (token, account_id, symbols, …).
-    LOGGER.warning(
-        () ->
-            "Request to "
-                + HttpDispatcher.safeUri(uri)
-                + " returned HTTP "
-                + status
-                + ": "
-                + ex.getMessage());
+    LOGGER.warning(() ->
+        "Request to "
+            + HttpDispatcher.safeUri(uri)
+            + " returned HTTP "
+            + status
+            + ": "
+            + ex.getMessage());
     throw ex;
   }
 

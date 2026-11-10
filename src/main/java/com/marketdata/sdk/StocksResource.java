@@ -112,24 +112,22 @@ public final class StocksResource extends ConfiguredResource<StocksResource> {
       futures.add(
           transport
               .executeAsync(spec)
-              .thenApply(
-                  env ->
-                      new DecodedChunk(
-                          parser.parse(env, StockCandles.class, config.columns()),
-                          env,
-                          spec.format())));
+              .thenApply(env ->
+                  new DecodedChunk(
+                      parser.parse(env, StockCandles.class, config.columns()),
+                      env,
+                      spec.format())));
     }
     return java.util.concurrent.CompletableFuture.allOf(
             futures.toArray(new java.util.concurrent.CompletableFuture<?>[0]))
-        .thenApply(
-            unused -> {
-              List<StockCandle> merged = new java.util.ArrayList<>();
-              DecodedChunk last = futures.get(futures.size() - 1).join();
-              for (java.util.concurrent.CompletableFuture<DecodedChunk> f : futures) {
-                merged.addAll(f.join().decoded().candles());
-              }
-              return new StockCandlesResponse(List.copyOf(merged), last.envelope(), last.format());
-            });
+        .thenApply(unused -> {
+          List<StockCandle> merged = new java.util.ArrayList<>();
+          DecodedChunk last = futures.get(futures.size() - 1).join();
+          for (java.util.concurrent.CompletableFuture<DecodedChunk> f : futures) {
+            merged.addAll(f.join().decoded().candles());
+          }
+          return new StockCandlesResponse(List.copyOf(merged), last.envelope(), last.format());
+        });
   }
 
   /** One decoded candle sub-request — its rows plus the envelope/format for metadata. */
@@ -602,9 +600,9 @@ public final class StocksResource extends ConfiguredResource<StocksResource> {
 
   /**
    * Option A: for every required column the consumer asked for (explicitly via {@code columns}, or
-   * implicitly by not projecting at all), verify the API actually returned it. A requested-but-
-   * absent required column throws, so a {@code null} a consumer sees only ever means "I projected
-   * it away" — never "the backend silently dropped it".
+   * implicitly by not projecting at all), verify the API actually returned it. A
+   * requested-but-absent required column throws, so a {@code null} a consumer sees only ever means
+   * "I projected it away" — never "the backend silently dropped it".
    */
   private static void validateRequestedColumns(
       JsonParser p,

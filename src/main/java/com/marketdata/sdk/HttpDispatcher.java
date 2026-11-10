@@ -62,12 +62,11 @@ final class HttpDispatcher implements AutoCloseable {
     // permit by completing the waiter, but thenCompose's function wouldn't run (its dependent
     // is already cancelled), and send — which registers whenComplete(release) — would never
     // fire. Cancelling `permit` here makes AsyncSemaphore.release skip the waiter.
-    dispatched.whenComplete(
-        (r, t) -> {
-          if (t instanceof CancellationException) {
-            permit.cancel(false);
-          }
-        });
+    dispatched.whenComplete((r, t) -> {
+      if (t instanceof CancellationException) {
+        permit.cancel(false);
+      }
+    });
 
     return dispatched;
   }
@@ -84,12 +83,8 @@ final class HttpDispatcher implements AutoCloseable {
       // never formed, so the whenComplete below would never fire — release the permit here
       // to prevent a permanent leak that would degrade the pool to deadlock.
       permits.release();
-      LOGGER.warning(
-          () ->
-              "Request to "
-                  + safeUri(request.uri())
-                  + " failed before dispatch: "
-                  + t.getMessage());
+      LOGGER.warning(() ->
+          "Request to " + safeUri(request.uri()) + " failed before dispatch: " + t.getMessage());
       if (t instanceof Error err) {
         throw err;
       }
@@ -102,36 +97,33 @@ final class HttpDispatcher implements AutoCloseable {
 
     return sendFuture
         .whenComplete((r, t) -> permits.release())
-        .handle(
-            (response, error) -> {
-              long elapsedMs = Duration.between(start, clock.instant()).toMillis();
-              if (error != null) {
-                Throwable root = unwrap(error);
-                LOGGER.warning(
-                    () ->
-                        "Request to "
-                            + safeUri(request.uri())
-                            + " failed after "
-                            + elapsedMs
-                            + "ms: "
-                            + root.getMessage());
-                throw new CompletionException(
-                    new NetworkError(
-                        "Request to " + safeUri(request.uri()) + " failed: " + root.getMessage(),
-                        ErrorContext.forNoResponse(request.uri().toString(), clock.instant()),
-                        root));
-              }
-              LOGGER.fine(
-                  () ->
-                      "Response "
-                          + response.statusCode()
-                          + " from "
-                          + safeUri(request.uri())
-                          + " in "
-                          + elapsedMs
-                          + "ms");
-              return response;
-            });
+        .handle((response, error) -> {
+          long elapsedMs = Duration.between(start, clock.instant()).toMillis();
+          if (error != null) {
+            Throwable root = unwrap(error);
+            LOGGER.warning(() ->
+                "Request to "
+                    + safeUri(request.uri())
+                    + " failed after "
+                    + elapsedMs
+                    + "ms: "
+                    + root.getMessage());
+            throw new CompletionException(
+                new NetworkError(
+                    "Request to " + safeUri(request.uri()) + " failed: " + root.getMessage(),
+                    ErrorContext.forNoResponse(request.uri().toString(), clock.instant()),
+                    root));
+          }
+          LOGGER.fine(() ->
+              "Response "
+                  + response.statusCode()
+                  + " from "
+                  + safeUri(request.uri())
+                  + " in "
+                  + elapsedMs
+                  + "ms");
+          return response;
+        });
   }
 
   /**

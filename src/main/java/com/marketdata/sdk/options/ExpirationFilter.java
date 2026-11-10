@@ -1,6 +1,8 @@
 package com.marketdata.sdk.options;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -18,6 +20,9 @@ import java.util.Objects;
 public sealed interface ExpirationFilter
     permits ExpirationFilter.OnDate,
         ExpirationFilter.Dte,
+        ExpirationFilter.DteList,
+        ExpirationFilter.DteRange,
+        ExpirationFilter.DteComparison,
         ExpirationFilter.Between,
         ExpirationFilter.MonthYear,
         ExpirationFilter.All {
@@ -45,6 +50,40 @@ public sealed interface ExpirationFilter
       throw new IllegalArgumentException("dte must be non-negative");
     }
     return new Dte(days);
+  }
+
+  /**
+   * Days-to-expiration, comma-separated list — wire form {@code ?dte=15,30,45}. Selects the
+   * expiration closest to each value, deduplicated server-side. Each value must be non-negative and
+   * at most 36500 days, per the API.
+   */
+  static DteList dteList(int... days) {
+    Objects.requireNonNull(days, "days");
+    List<Integer> boxed = new ArrayList<>(days.length);
+    for (int day : days) {
+      boxed.add(day);
+    }
+    return new DteList(boxed);
+  }
+
+  /**
+   * Days-to-expiration, closed inclusive range — wire form {@code ?dte=0-45}. Returns every
+   * expiration whose dte falls within {@code [minDays, maxDays]}. {@code minDays} must not exceed
+   * {@code maxDays}; both must be non-negative and at most 36500 days, per the API. The syntax
+   * matches {@link StrikeFilter#range}.
+   */
+  static DteRange dteRange(int minDays, int maxDays) {
+    return new DteRange(minDays, maxDays);
+  }
+
+  /**
+   * Days-to-expiration, comparison — wire form {@code ?dte=>=30} or {@code ?dte=<45}. Returns every
+   * expiration whose dte satisfies {@code operator days}, inclusive where the operator is. {@code
+   * days} must be non-negative and at most 36500, per the API. The syntax matches {@link
+   * StrikeFilter#comparison}, and reuses its {@link StrikeFilter.Operator}.
+   */
+  static DteComparison dteComparison(StrikeFilter.Operator operator, int days) {
+    return new DteComparison(operator, days);
   }
 
   /**
@@ -78,6 +117,47 @@ public sealed interface ExpirationFilter
   }
 
   record Dte(int days) implements ExpirationFilter {}
+
+  record DteList(List<Integer> days) implements ExpirationFilter {
+    public DteList {
+      Objects.requireNonNull(days, "days");
+      if (days.isEmpty()) {
+        throw new IllegalArgumentException("days must not be empty");
+      }
+      for (Integer day : days) {
+        Objects.requireNonNull(day, "days element");
+        checkDteBounds(day, "days element");
+      }
+      days = List.copyOf(days);
+    }
+  }
+
+  record DteRange(int minDays, int maxDays) implements ExpirationFilter {
+    public DteRange {
+      checkDteBounds(minDays, "minDays");
+      checkDteBounds(maxDays, "maxDays");
+      if (minDays > maxDays) {
+        throw new IllegalArgumentException("min must be <= max");
+      }
+    }
+  }
+
+  record DteComparison(StrikeFilter.Operator operator, int days) implements ExpirationFilter {
+    public DteComparison {
+      Objects.requireNonNull(operator, "operator");
+      checkDteBounds(days, "days");
+    }
+  }
+
+  /** Shared bound for every dte form, per the API: "whole numbers of days, at most 36500." */
+  private static void checkDteBounds(int days, String label) {
+    if (days < 0) {
+      throw new IllegalArgumentException(label + " must be non-negative");
+    }
+    if (days > 36500) {
+      throw new IllegalArgumentException(label + " must be at most 36500");
+    }
+  }
 
   record Between(LocalDate from, LocalDate to) implements ExpirationFilter {}
 
