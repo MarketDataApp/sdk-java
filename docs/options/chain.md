@@ -40,8 +40,7 @@ OptionsChainRequest.builder(String symbol)
     .build()
 ```
 
-<a name="optionquote"></a>
-#### Returns
+#### Returns 
 
 `OptionsChainResponse` wrapping `List<OptionQuote>`:
 
