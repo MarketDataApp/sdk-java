@@ -31,9 +31,8 @@ class ParserAndUtilCoverageTest {
   void stockNewsDeserializerSurfacesErrorEnvelope() {
     ObjectMapper m = mapperFor(StockNews.class, new StockNewsDeserializer());
 
-    assertThatThrownBy(
-            () ->
-                m.readValue("{\"s\":\"error\",\"errmsg\":\"news service down\"}", StockNews.class))
+    assertThatThrownBy(() ->
+            m.readValue("{\"s\":\"error\",\"errmsg\":\"news service down\"}", StockNews.class))
         .isInstanceOf(JsonMappingException.class)
         .hasMessageContaining("news service down");
   }

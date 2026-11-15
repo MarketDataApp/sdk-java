@@ -83,15 +83,14 @@ final class RetryExecutor {
     // already done by the time the next one overwrites the reference, so this avoids
     // accumulating one handler per attempt.
     AtomicReference<@Nullable CompletableFuture<T>> currentAttempt = new AtomicReference<>();
-    result.whenComplete(
-        (r, t) -> {
-          if (t instanceof CancellationException) {
-            CompletableFuture<T> inFlight = currentAttempt.get();
-            if (inFlight != null && !inFlight.isDone()) {
-              inFlight.cancel(false);
-            }
-          }
-        });
+    result.whenComplete((r, t) -> {
+      if (t instanceof CancellationException) {
+        CompletableFuture<T> inFlight = currentAttempt.get();
+        if (inFlight != null && !inFlight.isDone()) {
+          inFlight.cancel(false);
+        }
+      }
+    });
     attempt(supplier, shouldRetry, 0, null, result, currentAttempt);
     return result;
   }
@@ -117,32 +116,24 @@ final class RetryExecutor {
     // currentAttempt under that race: if it sees the previous (already-done) attempt, it
     // doesn't cancel the new one. Re-check after publishing the new attempt.
     if (!cancelIfRaceLost(result, dispatched)) {
-      dispatched.whenComplete(
-          (value, error) -> {
-            if (result.isDone()) {
-              return;
-            }
-            if (error == null) {
-              result.complete(value);
-              return;
-            }
-            Throwable cause = unwrap(error);
-            if (shouldRetry.test(cause, attemptIdx)) {
-              long delayMs = policy.backoffDelay(cause, attemptIdx).toMillis();
-              CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS)
-                  .execute(
-                      () ->
-                          attempt(
-                              supplier,
-                              shouldRetry,
-                              attemptIdx + 1,
-                              cause,
-                              result,
-                              currentAttempt));
-            } else {
-              result.completeExceptionally(cause);
-            }
-          });
+      dispatched.whenComplete((value, error) -> {
+        if (result.isDone()) {
+          return;
+        }
+        if (error == null) {
+          result.complete(value);
+          return;
+        }
+        Throwable cause = unwrap(error);
+        if (shouldRetry.test(cause, attemptIdx)) {
+          long delayMs = policy.backoffDelay(cause, attemptIdx).toMillis();
+          CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS)
+              .execute(() ->
+                  attempt(supplier, shouldRetry, attemptIdx + 1, cause, result, currentAttempt));
+        } else {
+          result.completeExceptionally(cause);
+        }
+      });
     }
   }
 

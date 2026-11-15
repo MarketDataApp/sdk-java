@@ -167,10 +167,10 @@ public final class MarketsResource extends ConfiguredResource<MarketsResource> {
 
   /**
    * Option A: for every required column the consumer asked for (explicitly via {@code columns}, or
-   * implicitly by not projecting at all), verify the API actually returned it. A requested-but-
-   * absent required column throws, so a {@code null} a consumer sees only ever means "I projected
-   * it away" (or, for {@code status} cells, "outside calendar coverage") — never "the backend
-   * silently dropped the column".
+   * implicitly by not projecting at all), verify the API actually returned it. A
+   * requested-but-absent required column throws, so a {@code null} a consumer sees only ever means
+   * "I projected it away" (or, for {@code status} cells, "outside calendar coverage") — never "the
+   * backend silently dropped the column".
    */
   private static void validateRequestedColumns(
       JsonParser p,

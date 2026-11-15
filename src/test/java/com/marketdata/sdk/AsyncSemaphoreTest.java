@@ -166,17 +166,15 @@ class AsyncSemaphoreTest {
     CyclicBarrier barrier = new CyclicBarrier(2);
 
     Thread releaser =
-        new Thread(
-            () -> {
-              awaitBarrier(barrier);
-              sem.release();
-            });
+        new Thread(() -> {
+          awaitBarrier(barrier);
+          sem.release();
+        });
     Thread canceller =
-        new Thread(
-            () -> {
-              awaitBarrier(barrier);
-              waiter.cancel(false);
-            });
+        new Thread(() -> {
+          awaitBarrier(barrier);
+          waiter.cancel(false);
+        });
 
     releaser.start();
     canceller.start();

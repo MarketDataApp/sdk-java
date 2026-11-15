@@ -325,24 +325,22 @@ class MarketsResourceTest {
 
   @Test
   void statusRequestRejectsDateWithRange() {
-    assertThatThrownBy(
-            () ->
-                MarketStatusRequest.builder()
-                    .date(LocalDate.of(2025, Month.JANUARY, 1))
-                    .from(LocalDate.of(2024, Month.DECEMBER, 1))
-                    .build())
+    assertThatThrownBy(() ->
+            MarketStatusRequest.builder()
+                .date(LocalDate.of(2025, Month.JANUARY, 1))
+                .from(LocalDate.of(2024, Month.DECEMBER, 1))
+                .build())
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("mutually exclusive");
   }
 
   @Test
   void statusRequestRejectsCountbackWithFrom() {
-    assertThatThrownBy(
-            () ->
-                MarketStatusRequest.builder()
-                    .from(LocalDate.of(2024, Month.JANUARY, 1))
-                    .countback(3)
-                    .build())
+    assertThatThrownBy(() ->
+            MarketStatusRequest.builder()
+                .from(LocalDate.of(2024, Month.JANUARY, 1))
+                .countback(3)
+                .build())
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("countback and from");
   }
@@ -356,12 +354,11 @@ class MarketsResourceTest {
 
   @Test
   void statusRequestRejectsFromAfterTo() {
-    assertThatThrownBy(
-            () ->
-                MarketStatusRequest.builder()
-                    .from(LocalDate.of(2025, Month.JANUARY, 31))
-                    .to(LocalDate.of(2025, Month.JANUARY, 1))
-                    .build())
+    assertThatThrownBy(() ->
+            MarketStatusRequest.builder()
+                .from(LocalDate.of(2025, Month.JANUARY, 31))
+                .to(LocalDate.of(2025, Month.JANUARY, 1))
+                .build())
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("from must not be after to");
   }

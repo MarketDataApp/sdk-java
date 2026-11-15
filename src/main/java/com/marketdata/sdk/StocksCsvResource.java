@@ -54,22 +54,19 @@ public final class StocksCsvResource extends FormattedResource<StocksCsvResource
       futures.add(
           transport
               .executeAsync(spec)
-              .thenApply(
-                  env ->
-                      new EnvBody(
-                          new String(env.body(), StandardCharsets.UTF_8), env, spec.format())));
+              .thenApply(env ->
+                  new EnvBody(new String(env.body(), StandardCharsets.UTF_8), env, spec.format())));
     }
     return CompletableFuture.allOf(futures.toArray(new CompletableFuture<?>[0]))
-        .thenApply(
-            unused -> {
-              EnvBody last = futures.get(futures.size() - 1).join();
-              List<String> bodies = new ArrayList<>(futures.size());
-              for (CompletableFuture<EnvBody> f : futures) {
-                bodies.add(f.join().body());
-              }
-              return new CsvResponse(
-                  mergeCsvBodies(bodies, headersIncluded), last.envelope(), last.format());
-            });
+        .thenApply(unused -> {
+          EnvBody last = futures.get(futures.size() - 1).join();
+          List<String> bodies = new ArrayList<>(futures.size());
+          for (CompletableFuture<EnvBody> f : futures) {
+            bodies.add(f.join().body());
+          }
+          return new CsvResponse(
+              mergeCsvBodies(bodies, headersIncluded), last.envelope(), last.format());
+        });
   }
 
   private record EnvBody(String body, HttpResponseEnvelope envelope, Format format) {}

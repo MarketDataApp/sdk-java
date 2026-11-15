@@ -79,16 +79,15 @@ public final class MarketDataClient implements AutoCloseable {
     for (DotEnvLoader.Warning w : pendingWarnings) {
       LOGGER.log(w.level(), w.message(), w.cause());
     }
-    LOGGER.info(
-        () ->
-            "MarketDataClient initialized: baseUrl="
-                + config.baseUrl()
-                + ", apiVersion="
-                + config.apiVersion()
-                + ", token="
-                + Tokens.redact(config.apiKey())
-                + ", demoMode="
-                + DemoMode.isDemo(config));
+    LOGGER.info(() ->
+        "MarketDataClient initialized: baseUrl="
+            + config.baseUrl()
+            + ", apiVersion="
+            + config.apiVersion()
+            + ", token="
+            + Tokens.redact(config.apiKey())
+            + ", demoMode="
+            + DemoMode.isDemo(config));
 
     // §9.5: the status cache pre-checks /status/ before retrying 5xx. The cache's fetcher uses
     // `utilities.statusAsync()`, which goes through this transport — a chicken-and-egg. We

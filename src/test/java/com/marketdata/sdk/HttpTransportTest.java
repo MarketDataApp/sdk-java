@@ -715,11 +715,10 @@ class HttpTransportTest {
             () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
         .isInstanceOf(CompletionException.class)
         .hasCauseInstanceOf(ServerError.class)
-        .satisfies(
-            t -> {
-              ServerError se = (ServerError) t.getCause();
-              assertThat(se.getRetryAfter()).contains(Duration.ofSeconds(7));
-            });
+        .satisfies(t -> {
+          ServerError se = (ServerError) t.getCause();
+          assertThat(se.getRetryAfter()).contains(Duration.ofSeconds(7));
+        });
   }
 
   @Test
@@ -732,11 +731,10 @@ class HttpTransportTest {
             () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
         .isInstanceOf(CompletionException.class)
         .hasCauseInstanceOf(ServerError.class)
-        .satisfies(
-            t -> {
-              ServerError se = (ServerError) t.getCause();
-              assertThat(se.getRetryAfter()).isEmpty();
-            });
+        .satisfies(t -> {
+          ServerError se = (ServerError) t.getCause();
+          assertThat(se.getRetryAfter()).isEmpty();
+        });
   }
 
   /**
@@ -754,11 +752,10 @@ class HttpTransportTest {
             () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
         .isInstanceOf(CompletionException.class)
         .hasCauseInstanceOf(RateLimitError.class)
-        .satisfies(
-            t -> {
-              RateLimitError rle = (RateLimitError) t.getCause();
-              assertThat(rle.getRetryAfter()).contains(Duration.ofSeconds(30));
-            });
+        .satisfies(t -> {
+          RateLimitError rle = (RateLimitError) t.getCause();
+          assertThat(rle.getRetryAfter()).contains(Duration.ofSeconds(30));
+        });
   }
 
   @Test
@@ -771,11 +768,10 @@ class HttpTransportTest {
             () -> transport.executeAsync(RequestSpec.get("markets/status").build()).join())
         .isInstanceOf(CompletionException.class)
         .hasCauseInstanceOf(RateLimitError.class)
-        .satisfies(
-            t -> {
-              RateLimitError rle = (RateLimitError) t.getCause();
-              assertThat(rle.getRetryAfter()).isEmpty();
-            });
+        .satisfies(t -> {
+          RateLimitError rle = (RateLimitError) t.getCause();
+          assertThat(rle.getRetryAfter()).isEmpty();
+        });
   }
 
   // ---------- §9.5 status-cache gate ----------

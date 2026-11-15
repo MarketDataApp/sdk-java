@@ -807,36 +807,33 @@ class StocksResourceTest {
 
   @Test
   void candlesRequestRejectsDateWithRange() {
-    assertThatThrownBy(
-            () ->
-                StockCandlesRequest.builder(StockResolution.DAILY, "AAPL")
-                    .date(LocalDate.of(2025, Month.JANUARY, 1))
-                    .from(LocalDate.of(2024, Month.DECEMBER, 1))
-                    .build())
+    assertThatThrownBy(() ->
+            StockCandlesRequest.builder(StockResolution.DAILY, "AAPL")
+                .date(LocalDate.of(2025, Month.JANUARY, 1))
+                .from(LocalDate.of(2024, Month.DECEMBER, 1))
+                .build())
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("mutually exclusive");
   }
 
   @Test
   void earningsRequestRejectsCountbackWithFrom() {
-    assertThatThrownBy(
-            () ->
-                StockEarningsRequest.builder("AAPL")
-                    .from(LocalDate.of(2024, Month.JANUARY, 1))
-                    .countback(3)
-                    .build())
+    assertThatThrownBy(() ->
+            StockEarningsRequest.builder("AAPL")
+                .from(LocalDate.of(2024, Month.JANUARY, 1))
+                .countback(3)
+                .build())
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("countback and from");
   }
 
   @Test
   void candlesRequestRejectsFromAfterTo() {
-    assertThatThrownBy(
-            () ->
-                StockCandlesRequest.builder(StockResolution.DAILY, "AAPL")
-                    .from(LocalDate.of(2025, Month.JANUARY, 31))
-                    .to(LocalDate.of(2025, Month.JANUARY, 1))
-                    .build())
+    assertThatThrownBy(() ->
+            StockCandlesRequest.builder(StockResolution.DAILY, "AAPL")
+                .from(LocalDate.of(2025, Month.JANUARY, 31))
+                .to(LocalDate.of(2025, Month.JANUARY, 1))
+                .build())
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("from must not be after to");
   }

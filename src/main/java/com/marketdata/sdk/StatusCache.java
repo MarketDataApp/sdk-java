@@ -101,21 +101,20 @@ final class StatusCache {
       refreshInFlight.set(false);
       return;
     }
-    future.whenComplete(
-        (apiStatus, err) -> {
-          try {
-            if (err == null && apiStatus != null) {
-              snapshot.set(Snapshot.from(apiStatus, clock.instant()));
-            } else if (err != null) {
-              // On error: cache persists — §9.5 "Cache persists across failed refresh attempts" —
-              // but the failure is logged so operators can detect a /status/ outage instead of
-              // wondering why the SDK keeps blocking retries against a stale snapshot.
-              LOGGER.log(Level.WARNING, "StatusCache refresh failed; snapshot persists.", err);
-            }
-          } finally {
-            refreshInFlight.set(false);
-          }
-        });
+    future.whenComplete((apiStatus, err) -> {
+      try {
+        if (err == null && apiStatus != null) {
+          snapshot.set(Snapshot.from(apiStatus, clock.instant()));
+        } else if (err != null) {
+          // On error: cache persists — §9.5 "Cache persists across failed refresh attempts" —
+          // but the failure is logged so operators can detect a /status/ outage instead of
+          // wondering why the SDK keeps blocking retries against a stale snapshot.
+          LOGGER.log(Level.WARNING, "StatusCache refresh failed; snapshot persists.", err);
+        }
+      } finally {
+        refreshInFlight.set(false);
+      }
+    });
   }
 
   /**
