@@ -106,14 +106,14 @@ jobs:
       # Validates the wrapper jar hash and caches Gradle home + wrapper
       # dists between runs.
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
       - name: Build, test, lint, coverage
         run: ./gradlew build --stacktrace
 
       - name: Upload test reports on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-reports
           path: |
@@ -181,7 +181,7 @@ jobs:
           java-version: '17'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
       # SDK requirements §17.3: a missing token fails the job, never skips it.
       - name: Run integration tests against live API
@@ -197,7 +197,7 @@ jobs:
 
       - name: Upload integration-test reports on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: integration-test-reports-jdk17
           path: |
