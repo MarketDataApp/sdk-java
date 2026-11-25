@@ -2,6 +2,8 @@
 
 Retrieve historical and upcoming earnings data (EPS actuals, estimates, surprises) for a stock symbol.
 
+With no dates the API returns only upcoming reports, from today through the next three years.
+
 ## Making Requests
 
 Use the `earnings()` method on the `stocks` resource, built with `StockEarningsRequest`.
@@ -20,7 +22,7 @@ StockEarningsRequest.builder(String symbol)
     .from(LocalDate from)        // window start
     .to(LocalDate to)            // window end
     .countback(int n)            // N reports before `to`
-    .report(String report)       // "actual" or "estimated"
+    .report(String report)       // a specific fiscal report, e.g. "2023-Q4"
     .build()
 ```
 
@@ -35,7 +37,7 @@ public record StockEarning(
     @Nullable Integer fiscalQuarter,
     @Nullable ZonedDateTime date,
     @Nullable ZonedDateTime reportDate,
-    @Nullable String reportTime,        // "pre" / "post"
+    @Nullable String reportTime,        // "before open" / "after close" / "during market hours", or null
     @Nullable String currency,
     @Nullable Double reportedEPS,
     @Nullable Double estimatedEPS,
