@@ -100,7 +100,8 @@ try (MarketDataClient client = new MarketDataClient()) {
           .build());
 
   // dte's other forms: a comma-separated list, a closed range, and a comparison — the same
-  // syntax as strike's range()/comparison().
+  // syntax as strike's range()/comparison(). The range is inclusive at both ends. LT (<) and
+  // GT (>) are strict and exclude the boundary day; LTE (<=) and GTE (>=) include it.
   var dteList = client.options().chain(
       OptionsChainRequest.builder("AAPL")
           .expirationFilter(ExpirationFilter.dteList(15, 30, 45))

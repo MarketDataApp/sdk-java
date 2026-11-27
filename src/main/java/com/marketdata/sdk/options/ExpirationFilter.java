@@ -78,9 +78,10 @@ public sealed interface ExpirationFilter
 
   /**
    * Days-to-expiration, comparison — wire form {@code ?dte=>=30} or {@code ?dte=<45}. Returns every
-   * expiration whose dte satisfies {@code operator days}, inclusive where the operator is. {@code
-   * days} must be non-negative and at most 36500, per the API. The syntax matches {@link
-   * StrikeFilter#comparison}, and reuses its {@link StrikeFilter.Operator}.
+   * expiration whose dte satisfies {@code operator days}. {@code <} and {@code >} are strict (the
+   * boundary day is excluded); {@code <=} and {@code >=} are inclusive (the boundary day is
+   * included). {@code days} must be non-negative and at most 36500, per the API. The syntax matches
+   * {@link StrikeFilter#comparison}, and reuses its {@link StrikeFilter.Operator}.
    */
   static DteComparison dteComparison(StrikeFilter.Operator operator, int days) {
     return new DteComparison(operator, days);
