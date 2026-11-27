@@ -9,10 +9,11 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * Parameters for the multi-contract form of {@code /v1/options/quotes/}. Carries a list of one or
- * more OCC option symbols plus the optional historical-window filters shared across them. The
- * resource fans out one HTTP request per symbol concurrently (via the SDK's 50-permit {@code
- * AsyncSemaphore}) and returns a {@code Map<String, OptionsQuotesResponse>} so per-symbol status,
- * raw body, and error envelopes stay observable.
+ * more OCC option symbols plus the optional historical-window filters shared across them — {@code
+ * date}/{@code from}/{@code to}/{@code countback} and the pricing {@code model}. The resource fans
+ * out one HTTP request per symbol concurrently (via the SDK's 50-permit {@code AsyncSemaphore}) and
+ * returns a {@code Map<String, OptionsQuotesResponse>} so per-symbol status, raw body, and error
+ * envelopes stay observable.
  *
  * <p>For a single contract, prefer {@link OptionsQuoteRequest} — clearer intent and one fewer map
  * lookup at the call site.
@@ -24,6 +25,7 @@ public final class OptionsQuotesRequest {
   private final @Nullable LocalDate from;
   private final @Nullable LocalDate to;
   private final @Nullable Integer countback;
+  private final @Nullable PricingModel model;
 
   private OptionsQuotesRequest(Builder b) {
     this.optionSymbols = List.copyOf(b.optionSymbols);
@@ -31,6 +33,7 @@ public final class OptionsQuotesRequest {
     this.from = b.from;
     this.to = b.to;
     this.countback = b.countback;
+    this.model = b.model;
   }
 
   /** Shortcut for {@code builder(first, rest...).build()}. */
@@ -76,12 +79,21 @@ public final class OptionsQuotesRequest {
     return countback;
   }
 
+  /**
+   * Pricing model for {@code iv} and the greeks on a historical request ({@link #date}, {@link
+   * #from} or {@link #to}); applied identically to every symbol in the fan-out.
+   */
+  public @Nullable PricingModel model() {
+    return model;
+  }
+
   public static final class Builder {
     private final List<String> optionSymbols = new ArrayList<>();
     private @Nullable LocalDate date;
     private @Nullable LocalDate from;
     private @Nullable LocalDate to;
     private @Nullable Integer countback;
+    private @Nullable PricingModel model;
 
     private Builder() {}
 
@@ -116,6 +128,16 @@ public final class OptionsQuotesRequest {
      */
     public Builder countback(int countback) {
       this.countback = countback;
+      return this;
+    }
+
+    /**
+     * Pricing model for {@code iv} and the greeks on this historical request. Only meaningful
+     * alongside {@link #date}, {@link #from} or {@link #to}; the API rejects a model named without
+     * one of those with a 400.
+     */
+    public Builder model(PricingModel model) {
+      this.model = Objects.requireNonNull(model, "model");
       return this;
     }
 

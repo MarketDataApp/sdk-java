@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.marketdata.sdk.exception.AuthenticationError;
+import com.marketdata.sdk.exception.ServerError;
 import com.marketdata.sdk.utilities.RequestHeaders;
 import com.marketdata.sdk.utilities.ServiceStatus;
 import com.marketdata.sdk.utilities.User;
@@ -27,6 +28,16 @@ class UtilitiesResourceTest {
 
   /** Mints a fresh transport + resource pair against the given canned HTTP client. */
   private static UtilitiesResource resourceWith(HttpClient client) {
+    return resourceWith(client, NO_RETRY);
+  }
+
+  /**
+   * Like {@link #resourceWith(HttpClient)}, but with the transport's default retry policy set to
+   * {@code defaultPolicy} — used to prove {@code deleteTokenAsync} overrides it with {@link
+   * RetryPolicy#noRetry()} rather than inheriting whatever the transport would otherwise retry
+   * with.
+   */
+  private static UtilitiesResource resourceWith(HttpClient client, RetryPolicy defaultPolicy) {
     HttpTransport transport =
         new HttpTransport(
             "http://localhost",
@@ -34,7 +45,7 @@ class UtilitiesResourceTest {
             "test/0.0",
             "secret-token",
             new HttpDispatcher(client, HttpTransport.CONCURRENCY_LIMIT),
-            new RetryExecutor(NO_RETRY),
+            new RetryExecutor(defaultPolicy),
             () -> null,
             Clock.systemUTC());
     return new UtilitiesResource(transport, new JsonResponseParser());
@@ -308,6 +319,140 @@ class UtilitiesResourceTest {
         .isInstanceOf(com.marketdata.sdk.exception.ParseError.class)
         .hasMessageContaining("/headers/")
         .hasMessageContaining("JSON null");
+  }
+
+  // ---------- /user/token/ endpoint (DELETE) ----------
+
+  @Test
+  void deleteTokenHitsVersionedTokenEndpointWithDeleteVerb() {
+    CapturingClient client =
+        new CapturingClient(
+            200, "{\"s\":\"ok\"}".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    utilities.deleteTokenAsync().join();
+
+    HttpRequest sent = client.captured.get(0);
+    // Versioned (/v1/) — unlike /user/, /status/, /headers/, which live at the API root.
+    assertThat(sent.uri().toString()).isEqualTo("http://localhost/v1/user/token/");
+    assertThat(sent.method()).isEqualTo("DELETE");
+  }
+
+  @Test
+  void deleteTokenAsyncReturnsSuccessOnOkEnvelope() {
+    CapturingClient client =
+        new CapturingClient(
+            200, "{\"s\":\"ok\"}".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    Boolean revoked = utilities.deleteTokenAsync().join().values();
+
+    assertThat(revoked).isTrue();
+  }
+
+  @Test
+  void deleteTokenSyncMirrorsAsync() {
+    CapturingClient client =
+        new CapturingClient(
+            200, "{\"s\":\"ok\"}".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    Boolean revoked = utilities.deleteToken().values();
+
+    assertThat(revoked).isTrue();
+  }
+
+  /**
+   * Regression guard: only an explicit {@code s=ok} decodes to a confirmed revocation. A body with
+   * no {@code s} field at all (e.g. an empty object) must not be read as success.
+   */
+  @Test
+  void deleteTokenMissingStatusFieldSurfacesAsParseError() {
+    CapturingClient client =
+        new CapturingClient(200, "{}".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    assertThatThrownBy(utilities::deleteToken)
+        .isInstanceOf(com.marketdata.sdk.exception.ParseError.class)
+        .hasMessageContaining("unexpected status");
+  }
+
+  /**
+   * Regression guard: a literal JSON {@code null} body (no {@code s} field reachable at all) must
+   * not be read as success either.
+   */
+  @Test
+  void deleteTokenNullBodySurfacesAsParseError() {
+    CapturingClient client =
+        new CapturingClient(200, "null".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    assertThatThrownBy(utilities::deleteToken)
+        .isInstanceOf(com.marketdata.sdk.exception.ParseError.class)
+        .hasMessageContaining("unexpected status");
+  }
+
+  /**
+   * Regression guard: an unrecognized {@code s} value (neither {@code ok} nor {@code error}) must
+   * not be read as success — only the documented envelope values decode.
+   */
+  @Test
+  void deleteTokenUnknownStatusSurfacesAsParseError() {
+    CapturingClient client =
+        new CapturingClient(
+            200, "{\"s\":\"pending\"}".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    assertThatThrownBy(utilities::deleteToken)
+        .isInstanceOf(com.marketdata.sdk.exception.ParseError.class)
+        .hasMessageContaining("pending");
+  }
+
+  /**
+   * The endpoint's own documentation says a successful revocation leaves the token unable to
+   * authenticate "including a retry of this one" — so {@code deleteTokenAsync} must use {@link
+   * RetryPolicy#noRetry()} regardless of the transport's configured default. Proven here by giving
+   * the transport a multi-attempt default policy and a 503 (normally retryable) response, then
+   * asserting only one request reached the wire.
+   */
+  @Test
+  void deleteTokenDoesNotRetryEvenWhenTransportDefaultWould() {
+    RetryPolicy retryable = new RetryPolicy(3, Duration.ofMillis(1), Duration.ofMillis(1));
+    CapturingClient client =
+        new CapturingClient(503, new byte[0], HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client, retryable);
+
+    assertThatThrownBy(utilities::deleteToken).isInstanceOf(ServerError.class);
+
+    assertThat(client.captured).hasSize(1);
+  }
+
+  @Test
+  void deleteTokenErrorEnvelopeSurfacesAsParseError() {
+    CapturingClient client =
+        new CapturingClient(
+            200,
+            "{\"s\":\"error\",\"errmsg\":\"Token already revoked\"}".getBytes(),
+            HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    assertThatThrownBy(utilities::deleteToken)
+        .isInstanceOf(com.marketdata.sdk.exception.ParseError.class)
+        .hasMessageContaining("Token already revoked");
+  }
+
+  /**
+   * Per ADR-006: sync wrappers must unwrap {@code CompletionException} so consumers catch the
+   * underlying {@link com.marketdata.sdk.exception.MarketDataException} subtype directly — same
+   * parity guarantee already exercised for {@code headers()} and {@code user()}.
+   */
+  @Test
+  void deleteToken401SurfacesAuthenticationErrorDirectly() {
+    CapturingClient client =
+        new CapturingClient(401, new byte[0], HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    assertThatThrownBy(utilities::deleteToken).isInstanceOf(AuthenticationError.class);
   }
 
   // ---------- stub HttpClient ----------

@@ -10,6 +10,7 @@ import com.marketdata.sdk.options.OptionsExpirationsRequest;
 import com.marketdata.sdk.options.OptionsLookupRequest;
 import com.marketdata.sdk.options.OptionsQuoteRequest;
 import com.marketdata.sdk.options.OptionsQuotesRequest;
+import com.marketdata.sdk.options.PricingModel;
 import com.marketdata.sdk.options.StrikeFilter;
 import com.marketdata.sdk.options.StrikeRange;
 import java.time.LocalDate;
@@ -394,6 +395,108 @@ class OptionsIntegrationTest {
     }
   }
 
+  // ---------- chain: model query parameter (pricing model on a historical request) ----------
+
+  /**
+   * A fixed historical trading day (not "today") so the chain's bid/iv values stay stable across CI
+   * runs on any future date — the fixture the model-parameter tests below pivot on.
+   */
+  private static final LocalDate MODEL_HISTORICAL_DATE = LocalDate.of(2024, 1, 17);
+
+  /**
+   * Lazily-cached default-pricing historical call chain — the pivot every {@code model} test (both
+   * chain and quote) reads from. Fetched once per test class run rather than once per test: the
+   * request is identical across all eight {@code model} tests, so caching keeps each test's cost to
+   * the one additional request its own form needs.
+   */
+  private List<OptionQuote> cachedDefaultHistoricalCallChain;
+
+  private List<OptionQuote> defaultHistoricalCallChain() {
+    if (cachedDefaultHistoricalCallChain == null) {
+      cachedDefaultHistoricalCallChain =
+          client
+              .options()
+              .chain(
+                  OptionsChainRequest.builder(UNDERLYING)
+                      .side(OptionSide.CALL)
+                      .expirationFilter(ExpirationFilter.all())
+                      .date(MODEL_HISTORICAL_DATE)
+                      .build())
+              .values();
+    }
+    return cachedDefaultHistoricalCallChain;
+  }
+
+  @Test
+  void chainModelBsmSkipsBrokerConventionForNoBidContracts() {
+    assertChainModelSkipsBrokerConvention(PricingModel.BSM);
+  }
+
+  @Test
+  void chainModelBjsSkipsBrokerConventionForNoBidContracts() {
+    assertChainModelSkipsBrokerConvention(PricingModel.BJS);
+  }
+
+  @Test
+  void chainModelCrrSkipsBrokerConventionForNoBidContracts() {
+    assertChainModelSkipsBrokerConvention(PricingModel.CRR);
+  }
+
+  @Test
+  void chainModelBawSkipsBrokerConventionForNoBidContracts() {
+    assertChainModelSkipsBrokerConvention(PricingModel.BAW);
+  }
+
+  /**
+   * Without a named model, the API applies broker conventions on a historical request: a contract
+   * with no bid is priced from half its ask and gets the greeks of an option without time value
+   * (never null). Naming a model skips that convention and returns the model's own output instead —
+   * null for the same contract. Spanning every expiration on a fixed historical day makes at least
+   * one no-bid contract in AAPL's full call chain a near-certainty, and the null/non-null contrast
+   * (rather than a numeric comparison) is immune to two pricing engines coincidentally agreeing.
+   */
+  private void assertChainModelSkipsBrokerConvention(PricingModel model) {
+    List<OptionQuote> defaultPricing = defaultHistoricalCallChain();
+    List<OptionQuote> namedModelPricing =
+        client
+            .options()
+            .chain(
+                OptionsChainRequest.builder(UNDERLYING)
+                    .side(OptionSide.CALL)
+                    .expirationFilter(ExpirationFilter.all())
+                    .date(MODEL_HISTORICAL_DATE)
+                    .model(model)
+                    .build())
+            .values();
+
+    List<OptionQuote> noBidContracts =
+        defaultPricing.stream().filter(q -> q.bid() != null && q.bid() == 0.0).toList();
+    assertThat(noBidContracts)
+        .as(
+            "AAPL's full historical call chain on %s has at least one no-bid contract",
+            MODEL_HISTORICAL_DATE)
+        .isNotEmpty();
+    assertThat(noBidContracts)
+        .as(
+            "default pricing applies the broker convention: a no-bid contract still gets a non-null iv")
+        .allSatisfy(q -> assertThat(q.iv()).isNotNull());
+
+    Map<String, OptionQuote> namedBySymbol =
+        namedModelPricing.stream().collect(Collectors.toMap(OptionQuote::optionSymbol, q -> q));
+    assertThat(noBidContracts)
+        .as(
+            "naming a pricing model skips the broker convention: the same no-bid contracts get a"
+                + " null iv instead")
+        .allSatisfy(
+            q -> {
+              OptionQuote named = namedBySymbol.get(q.optionSymbol());
+              assertThat(named)
+                  .as("the named-model response still includes %s", q.optionSymbol())
+                  .isNotNull();
+              assertThat(named.iv()).isNull();
+            });
+  }
+
   @Test
   void quoteCountbackBoundsHistoricalSeries() {
     // countback=N with to caps the EOD series to at most N rows. A front-month ITM AAPL call has
@@ -428,6 +531,63 @@ class OptionsIntegrationTest {
     assertThat(q.underlying()).isEqualTo(UNDERLYING);
   }
 
+  // ---------- quote: model query parameter (pricing model on a historical request) ----------
+
+  @Test
+  void quoteModelBsmSkipsBrokerConventionForANoBidContract() {
+    assertQuoteModelSkipsBrokerConvention(PricingModel.BSM);
+  }
+
+  @Test
+  void quoteModelBjsSkipsBrokerConventionForANoBidContract() {
+    assertQuoteModelSkipsBrokerConvention(PricingModel.BJS);
+  }
+
+  @Test
+  void quoteModelCrrSkipsBrokerConventionForANoBidContract() {
+    assertQuoteModelSkipsBrokerConvention(PricingModel.CRR);
+  }
+
+  @Test
+  void quoteModelBawSkipsBrokerConventionForANoBidContract() {
+    assertQuoteModelSkipsBrokerConvention(PricingModel.BAW);
+  }
+
+  /**
+   * Same contrast as {@link #assertChainModelSkipsBrokerConvention}, through the single-contract
+   * quote endpoint.
+   */
+  private void assertQuoteModelSkipsBrokerConvention(PricingModel model) {
+    String noBidSymbol = sampleNoBidOptionSymbol();
+
+    OptionQuote defaultQuote =
+        client
+            .options()
+            .quote(OptionsQuoteRequest.builder(noBidSymbol).date(MODEL_HISTORICAL_DATE).build())
+            .values()
+            .get(0);
+    OptionQuote namedQuote =
+        client
+            .options()
+            .quote(
+                OptionsQuoteRequest.builder(noBidSymbol)
+                    .date(MODEL_HISTORICAL_DATE)
+                    .model(model)
+                    .build())
+            .values()
+            .get(0);
+
+    assertThat(defaultQuote.iv())
+        .as(
+            "default pricing applies the broker convention: a no-bid contract still gets a non-null iv")
+        .isNotNull();
+    assertThat(namedQuote.iv())
+        .as(
+            "naming a pricing model skips the broker convention: the same no-bid contract gets a"
+                + " null iv instead")
+        .isNull();
+  }
+
   @Test
   void quotesFansOutToMultipleContracts() {
     // Use the first two contracts from the chain so both are guaranteed to exist.
@@ -453,6 +613,20 @@ class OptionsIntegrationTest {
     assertThat(resp.keySet()).containsExactly(first, second);
     assertThat(resp.get(first).values().get(0).optionSymbol()).isEqualTo(first);
     assertThat(resp.get(second).values().get(0).optionSymbol()).isEqualTo(second);
+  }
+
+  /** Finds a real no-bid AAPL call from the fixed historical chain, for the quote model tests. */
+  private String sampleNoBidOptionSymbol() {
+    return defaultHistoricalCallChain().stream()
+        .filter(q -> q.bid() != null && q.bid() == 0.0)
+        .map(OptionQuote::optionSymbol)
+        .filter(Objects::nonNull)
+        .findFirst()
+        .orElseThrow(
+            () ->
+                new AssertionError(
+                    "expected at least one no-bid AAPL call in the historical chain on "
+                        + MODEL_HISTORICAL_DATE));
   }
 
   /** Fetch one real option symbol — used by {@link #quoteFetchesSingleContract()}. */

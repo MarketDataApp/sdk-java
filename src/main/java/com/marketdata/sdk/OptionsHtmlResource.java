@@ -37,7 +37,8 @@ public final class OptionsHtmlResource {
             request.date(),
             request.from(),
             request.to(),
-            request.countback()));
+            request.countback(),
+            request.model()));
   }
 
   public HtmlResponse quote(OptionsQuoteRequest request) {

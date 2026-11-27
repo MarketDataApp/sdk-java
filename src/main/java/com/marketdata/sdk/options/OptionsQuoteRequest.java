@@ -19,6 +19,7 @@ public final class OptionsQuoteRequest {
   private final @Nullable LocalDate from;
   private final @Nullable LocalDate to;
   private final @Nullable Integer countback;
+  private final @Nullable PricingModel model;
 
   private OptionsQuoteRequest(Builder b) {
     this.optionSymbol = b.optionSymbol;
@@ -26,6 +27,7 @@ public final class OptionsQuoteRequest {
     this.from = b.from;
     this.to = b.to;
     this.countback = b.countback;
+    this.model = b.model;
   }
 
   /** Shortcut for {@code builder(optionSymbol).build()}. */
@@ -64,12 +66,21 @@ public final class OptionsQuoteRequest {
     return countback;
   }
 
+  /**
+   * Pricing model for {@code iv} and the greeks on a historical request ({@link #date}, {@link
+   * #from} or {@link #to}).
+   */
+  public @Nullable PricingModel model() {
+    return model;
+  }
+
   public static final class Builder {
     private final String optionSymbol;
     private @Nullable LocalDate date;
     private @Nullable LocalDate from;
     private @Nullable LocalDate to;
     private @Nullable Integer countback;
+    private @Nullable PricingModel model;
 
     private Builder(String optionSymbol) {
       this.optionSymbol = Objects.requireNonNull(optionSymbol, "optionSymbol");
@@ -97,6 +108,16 @@ public final class OptionsQuoteRequest {
      */
     public Builder countback(int countback) {
       this.countback = countback;
+      return this;
+    }
+
+    /**
+     * Pricing model for {@code iv} and the greeks on this historical request. Only meaningful
+     * alongside {@link #date}, {@link #from} or {@link #to}; the API rejects a model named without
+     * one of those with a 400.
+     */
+    public Builder model(PricingModel model) {
+      this.model = Objects.requireNonNull(model, "model");
       return this;
     }
 

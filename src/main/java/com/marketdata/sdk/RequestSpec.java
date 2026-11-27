@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Declarative description of an HTTP GET request the SDK wants to make.
+ * Declarative description of an HTTP request the SDK wants to make.
  *
  * <p>Resources build instances of this and hand them to {@link HttpTransport}; the transport is the
  * only code that knows about base URLs, auth headers, timeouts, and the like. The transport stays
@@ -29,8 +29,15 @@ import java.util.Map;
  *     and path (the default, used by every {@code /v1/...} endpoint); when false, the path is
  *     appended directly to the base URL. The handful of system endpoints documented at the API root
  *     — {@code /status/}, {@code /headers/} — opt into the unversioned form.
+ * @param method the HTTP verb to send. Defaults to {@code GET} via {@link #get}; {@link #delete} is
+ *     the one exception — {@code DELETE /v1/user/token/} today.
  */
-record RequestSpec(String path, Map<String, String> queryParams, Format format, boolean versioned) {
+record RequestSpec(
+    String path,
+    Map<String, String> queryParams,
+    Format format,
+    boolean versioned,
+    HttpMethod method) {
 
   static final Format DEFAULT_FORMAT = Format.JSON;
 
@@ -42,17 +49,24 @@ record RequestSpec(String path, Map<String, String> queryParams, Format format, 
   }
 
   static Builder get(String path) {
-    return new Builder(path);
+    return new Builder(path, HttpMethod.GET);
+  }
+
+  /** Builder for a {@code DELETE} request — used by {@code utilities.deleteToken()}. */
+  static Builder delete(String path) {
+    return new Builder(path, HttpMethod.DELETE);
   }
 
   static final class Builder {
     private final String path;
+    private final HttpMethod method;
     private final Map<String, String> queryParams = new LinkedHashMap<>();
     private Format format = DEFAULT_FORMAT;
     private boolean versioned = true;
 
-    private Builder(String path) {
+    private Builder(String path, HttpMethod method) {
       this.path = path;
+      this.method = method;
     }
 
     /** Adds an arbitrary query parameter; skipped if {@code value} is null. */
@@ -128,7 +142,7 @@ record RequestSpec(String path, Map<String, String> queryParams, Format format, 
     RequestSpec build() {
       // Pass the raw LinkedHashMap — the record's compact constructor defensively copies and
       // wraps it as unmodifiable, so wrapping here too would just rebuild a redundant view.
-      return new RequestSpec(path, queryParams, format, versioned);
+      return new RequestSpec(path, queryParams, format, versioned, method);
     }
   }
 }
