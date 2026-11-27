@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ExpirationFilter.dteList(int...)`, `ExpirationFilter.dteRange(int, int)`, and
+  `ExpirationFilter.dteComparison(StrikeFilter.Operator, int)` — factory methods
+  for `/v1/options/chain/` `dte` filtering: comma-separated list of days, closed
+  inclusive range, and comparison operators (API release 2.0.0). `<` and `>`
+  are strict (the boundary day is excluded); `<=` and `>=` are inclusive.
+  Sealed subtypes `ExpirationFilter.DteList`, `ExpirationFilter.DteRange`, and
+  `ExpirationFilter.DteComparison` implement these forms. `ExpirationFilter.dte(int)`
+  unchanged.
+
 ## [1.0.0] - 2026-06-29
 
 First stable release of the Market Data Java &amp; Kotlin SDK — a single JVM

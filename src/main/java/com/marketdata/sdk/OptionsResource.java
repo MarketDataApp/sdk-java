@@ -312,6 +312,12 @@ public final class OptionsResource extends ConfiguredResource<OptionsResource> {
       b.query("expiration", DateTimeFormatter.ISO_LOCAL_DATE.format(v.date()));
     } else if (f instanceof ExpirationFilter.Dte v) {
       b.query("dte", v.days());
+    } else if (f instanceof ExpirationFilter.DteList v) {
+      b.query("dte", dteListWireValue(v));
+    } else if (f instanceof ExpirationFilter.DteRange v) {
+      b.query("dte", v.minDays() + "-" + v.maxDays());
+    } else if (f instanceof ExpirationFilter.DteComparison v) {
+      b.query("dte", v.operator().wireValue() + v.days());
     } else if (f instanceof ExpirationFilter.Between v) {
       b.query("from", DateTimeFormatter.ISO_LOCAL_DATE.format(v.from()));
       b.query("to", DateTimeFormatter.ISO_LOCAL_DATE.format(v.to()));
@@ -323,6 +329,17 @@ public final class OptionsResource extends ConfiguredResource<OptionsResource> {
     }
     // ExpirationFilter is sealed and every variant is handled above; Java 17 can't prove that in
     // an if-chain, but there is no reachable else, so no defensive throw is needed.
+  }
+
+  private static String dteListWireValue(ExpirationFilter.DteList f) {
+    StringBuilder sb = new StringBuilder();
+    for (Integer day : f.days()) {
+      if (sb.length() > 0) {
+        sb.append(',');
+      }
+      sb.append(day);
+    }
+    return sb.toString();
   }
 
   private static String strikeFilterWireValue(StrikeFilter f) {
