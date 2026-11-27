@@ -62,11 +62,12 @@ class DotEnvLoaderTest {
       assertThat(result).isEmpty();
       assertThat(warnings)
           .singleElement()
-          .satisfies(w -> {
-            assertThat(w.level()).isEqualTo(Level.WARNING);
-            assertThat(w.message()).contains("not readable").contains(file.toString());
-            assertThat(w.cause()).isNull();
-          });
+          .satisfies(
+              w -> {
+                assertThat(w.level()).isEqualTo(Level.WARNING);
+                assertThat(w.message()).contains("not readable").contains(file.toString());
+                assertThat(w.cause()).isNull();
+              });
     } finally {
       // Restore so @TempDir cleanup can delete the file.
       Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-------"));
@@ -86,11 +87,12 @@ class DotEnvLoaderTest {
     assertThat(result).isEmpty();
     assertThat(warnings)
         .singleElement()
-        .satisfies(w -> {
-          assertThat(w.level()).isEqualTo(Level.WARNING);
-          assertThat(w.message()).contains("Failed to read .env").contains(asDir.toString());
-          assertThat(w.cause()).isNotNull();
-        });
+        .satisfies(
+            w -> {
+              assertThat(w.level()).isEqualTo(Level.WARNING);
+              assertThat(w.message()).contains("Failed to read .env").contains(asDir.toString());
+              assertThat(w.cause()).isNotNull();
+            });
   }
 
   @Test
@@ -106,9 +108,9 @@ class DotEnvLoaderTest {
         Files.writeString(
             tmp.resolve(".env"),
             """
-            MARKETDATA_TOKEN=abc123
-            MARKETDATA_BASE_URL=https://example.com
-            """);
+                MARKETDATA_TOKEN=abc123
+                MARKETDATA_BASE_URL=https://example.com
+                """);
 
     Map<String, String> result = load(file);
 
@@ -144,10 +146,10 @@ class DotEnvLoaderTest {
         Files.writeString(
             tmp.resolve(".env"),
             """
-            # a comment
-            TOKEN=abc
-            #TOKEN=should-be-ignored
-            """);
+                # a comment
+                TOKEN=abc
+                #TOKEN=should-be-ignored
+                """);
 
     Map<String, String> result = load(file);
 
@@ -162,10 +164,10 @@ class DotEnvLoaderTest {
         Files.writeString(
             tmp.resolve(".env"),
             """
-                # leading-spaces comment
-            \t# leading-tab comment
-            TOKEN=abc
-            """);
+                    # leading-spaces comment
+                \t# leading-tab comment
+                TOKEN=abc
+                """);
 
     assertThat(load(file)).containsExactlyEntriesOf(Map.of("TOKEN", "abc"));
   }
@@ -177,11 +179,11 @@ class DotEnvLoaderTest {
             tmp.resolve(".env"),
             """
 
-            TOKEN=abc
+                TOKEN=abc
 
-            BASE_URL=https://x
+                BASE_URL=https://x
 
-            """);
+                """);
 
     assertThat(load(file)).containsEntry("TOKEN", "abc").containsEntry("BASE_URL", "https://x");
   }
@@ -214,9 +216,9 @@ class DotEnvLoaderTest {
         Files.writeString(
             tmp.resolve(".env"),
             """
-            TOKEN=abc#123
-            BASE_URL=https://example.com/path#frag
-            """);
+                TOKEN=abc#123
+                BASE_URL=https://example.com/path#frag
+                """);
 
     assertThat(load(file))
         .containsEntry("TOKEN", "abc#123")
@@ -257,10 +259,10 @@ class DotEnvLoaderTest {
         Files.writeString(
             tmp.resolve(".env"),
             """
-            EMPTY_BARE=
-            EMPTY_SPACES=\s\s\s
-            KEPT=value
-            """);
+                EMPTY_BARE=
+                EMPTY_SPACES=\s\s\s
+                KEPT=value
+                """);
 
     Map<String, String> result = load(file);
     assertThat(result)
@@ -290,10 +292,10 @@ class DotEnvLoaderTest {
         Files.writeString(
             tmp.resolve(".env"),
             """
-            EMPTY1=#comment-immediately
-            EMPTY2=   # comment after spaces
-            KEPT=value
-            """);
+                EMPTY1=#comment-immediately
+                EMPTY2=   # comment after spaces
+                KEPT=value
+                """);
 
     Map<String, String> result = load(file);
     assertThat(result)
@@ -341,10 +343,10 @@ class DotEnvLoaderTest {
         Files.writeString(
             tmp.resolve(".env"),
             """
-            TOKEN=first
-            TOKEN=second
-            TOKEN=third
-            """);
+                TOKEN=first
+                TOKEN=second
+                TOKEN=third
+                """);
 
     assertThat(load(file)).containsEntry("TOKEN", "third");
   }
@@ -362,10 +364,10 @@ class DotEnvLoaderTest {
         Files.writeString(
             tmp.resolve(".env"),
             """
-            this-is-not-a-pair
-            TOKEN=abc
-            also-not-a-pair
-            """);
+                this-is-not-a-pair
+                TOKEN=abc
+                also-not-a-pair
+                """);
 
     assertThat(load(file)).containsExactlyEntriesOf(Map.of("TOKEN", "abc"));
   }
@@ -404,11 +406,11 @@ class DotEnvLoaderTest {
         Files.writeString(
             tmp.resolve(".env"),
             """
-            MARKETDATA_TOKEN=abc123
-            AWS_SECRET_ACCESS_KEY=sk-aws-supersecret
-            GITHUB_TOKEN=ghp-leaked
-            MARKETDATA_BASE_URL=https://example.com
-            """);
+                MARKETDATA_TOKEN=abc123
+                AWS_SECRET_ACCESS_KEY=sk-aws-supersecret
+                GITHUB_TOKEN=ghp-leaked
+                MARKETDATA_BASE_URL=https://example.com
+                """);
 
     Map<String, String> result =
         DotEnvLoader.load(file, w -> {}, Set.of("MARKETDATA_TOKEN", "MARKETDATA_BASE_URL"));

@@ -35,7 +35,8 @@ final class TextResponses {
     RequestSpec spec = builder.build();
     return transport
         .executeAsync(spec)
-        .thenApply(env ->
-            factory.create(new String(env.body(), StandardCharsets.UTF_8), env, spec.format()));
+        .thenApply(
+            env ->
+                factory.create(new String(env.body(), StandardCharsets.UTF_8), env, spec.format()));
   }
 }

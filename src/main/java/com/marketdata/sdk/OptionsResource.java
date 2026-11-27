@@ -156,14 +156,15 @@ public final class OptionsResource extends ConfiguredResource<OptionsResource> {
               .thenApply(resp -> Map.entry(symbol, resp)));
     }
     return CompletableFuture.allOf(futures.toArray(new CompletableFuture<?>[0]))
-        .thenApply(unused -> {
-          Map<String, OptionsQuotesResponse> result = new LinkedHashMap<>();
-          for (CompletableFuture<Map.Entry<String, OptionsQuotesResponse>> f : futures) {
-            Map.Entry<String, OptionsQuotesResponse> entry = f.join();
-            result.put(entry.getKey(), entry.getValue());
-          }
-          return result;
-        });
+        .thenApply(
+            unused -> {
+              Map<String, OptionsQuotesResponse> result = new LinkedHashMap<>();
+              for (CompletableFuture<Map.Entry<String, OptionsQuotesResponse>> f : futures) {
+                Map.Entry<String, OptionsQuotesResponse> entry = f.join();
+                result.put(entry.getKey(), entry.getValue());
+              }
+              return result;
+            });
   }
 
   /** Sync wrapper for {@link #quotesAsync(OptionsQuotesRequest)}. */

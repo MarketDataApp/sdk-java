@@ -420,11 +420,12 @@ class OptionsResourceTest {
 
   @Test
   void quoteRequestRejectsDateAndFromToTogether() {
-    assertThatThrownBy(() ->
-            OptionsQuoteRequest.builder("X")
-                .date(LocalDate.of(2025, Month.JANUARY, 1))
-                .from(LocalDate.of(2024, Month.DECEMBER, 1))
-                .build())
+    assertThatThrownBy(
+            () ->
+                OptionsQuoteRequest.builder("X")
+                    .date(LocalDate.of(2025, Month.JANUARY, 1))
+                    .from(LocalDate.of(2024, Month.DECEMBER, 1))
+                    .build())
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("mutually exclusive");
   }
@@ -450,22 +451,24 @@ class OptionsResourceTest {
 
   @Test
   void quoteRequestRejectsCountbackWithDate() {
-    assertThatThrownBy(() ->
-            OptionsQuoteRequest.builder("X")
-                .date(LocalDate.of(2025, Month.JANUARY, 1))
-                .countback(5)
-                .build())
+    assertThatThrownBy(
+            () ->
+                OptionsQuoteRequest.builder("X")
+                    .date(LocalDate.of(2025, Month.JANUARY, 1))
+                    .countback(5)
+                    .build())
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("mutually exclusive");
   }
 
   @Test
   void quoteRequestRejectsCountbackWithFrom() {
-    assertThatThrownBy(() ->
-            OptionsQuoteRequest.builder("X")
-                .from(LocalDate.of(2024, Month.DECEMBER, 1))
-                .countback(5)
-                .build())
+    assertThatThrownBy(
+            () ->
+                OptionsQuoteRequest.builder("X")
+                    .from(LocalDate.of(2024, Month.DECEMBER, 1))
+                    .countback(5)
+                    .build())
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("countback and from");
   }
@@ -479,11 +482,12 @@ class OptionsResourceTest {
 
   @Test
   void quoteRequestRejectsFromAfterTo() {
-    assertThatThrownBy(() ->
-            OptionsQuoteRequest.builder("X")
-                .from(LocalDate.of(2025, Month.JANUARY, 31))
-                .to(LocalDate.of(2025, Month.JANUARY, 1))
-                .build())
+    assertThatThrownBy(
+            () ->
+                OptionsQuoteRequest.builder("X")
+                    .from(LocalDate.of(2025, Month.JANUARY, 31))
+                    .to(LocalDate.of(2025, Month.JANUARY, 1))
+                    .build())
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("from must not be after to");
   }
@@ -623,10 +627,11 @@ class OptionsResourceTest {
         okWith("{\"s\":\"ok\",\"optionSymbol\":[\"AAPL250117C00150000\"],\"strike\":[150]}");
     OptionsResource options = resourceWith(client);
 
-    assertThatThrownBy(() ->
-            options
-                .columns("optionSymbol", "strike", "bid")
-                .quote(OptionsQuoteRequest.of("AAPL250117C00150000")))
+    assertThatThrownBy(
+            () ->
+                options
+                    .columns("optionSymbol", "strike", "bid")
+                    .quote(OptionsQuoteRequest.of("AAPL250117C00150000")))
         .isInstanceOf(ParseError.class)
         .hasMessageContaining("bid");
   }
@@ -1270,9 +1275,10 @@ class OptionsResourceTest {
 
   @Test
   void expirationFilterBetweenRejectsReversedDates() {
-    assertThatThrownBy(() ->
-            ExpirationFilter.between(
-                LocalDate.of(2025, Month.MARCH, 1), LocalDate.of(2025, Month.JANUARY, 1)))
+    assertThatThrownBy(
+            () ->
+                ExpirationFilter.between(
+                    LocalDate.of(2025, Month.MARCH, 1), LocalDate.of(2025, Month.JANUARY, 1)))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("from must be on or before to");
   }
