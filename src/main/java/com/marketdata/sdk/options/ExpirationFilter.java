@@ -119,6 +119,11 @@ public sealed interface ExpirationFilter
 
   record Dte(int days) implements ExpirationFilter {}
 
+  /**
+   * Days-to-expiration list — see {@link #dteList(int...)}. Wire form {@code ?dte=15,30,45}. The
+   * constructor rejects a {@code null} or empty list, a {@code null} element, and any value that is
+   * negative or above 36500; it stores an immutable copy of {@code days}.
+   */
   record DteList(List<Integer> days) implements ExpirationFilter {
     public DteList {
       Objects.requireNonNull(days, "days");
@@ -133,6 +138,11 @@ public sealed interface ExpirationFilter
     }
   }
 
+  /**
+   * Days-to-expiration closed range, inclusive at both ends — see {@link #dteRange(int, int)}. Wire
+   * form {@code ?dte=0-45}. The constructor rejects either bound being negative or above 36500, and
+   * {@code minDays} greater than {@code maxDays}.
+   */
   record DteRange(int minDays, int maxDays) implements ExpirationFilter {
     public DteRange {
       checkDteBounds(minDays, "minDays");
@@ -143,6 +153,12 @@ public sealed interface ExpirationFilter
     }
   }
 
+  /**
+   * Days-to-expiration comparison — see {@link #dteComparison(StrikeFilter.Operator, int)}. Wire
+   * form {@code ?dte=>=30}. {@code <} and {@code >} are strict (the boundary day is excluded);
+   * {@code <=} and {@code >=} are inclusive. The constructor rejects a {@code null} operator and
+   * {@code days} that is negative or above 36500.
+   */
   record DteComparison(StrikeFilter.Operator operator, int days) implements ExpirationFilter {
     public DteComparison {
       Objects.requireNonNull(operator, "operator");
