@@ -13,8 +13,15 @@ import com.marketdata.sdk.options.OptionsQuotesRequest;
 import com.marketdata.sdk.options.StrikeFilter;
 import com.marketdata.sdk.options.StrikeRange;
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -40,6 +47,7 @@ import org.junit.jupiter.api.TestInstance;
 class OptionsIntegrationTest {
 
   private static final String UNDERLYING = "AAPL";
+  private static final ZoneId NEW_YORK = ZoneId.of("America/New_York");
 
   private MarketDataClient client;
 
@@ -164,29 +172,68 @@ class OptionsIntegrationTest {
 
   @Test
   void chainDteListSelectsOneExpirationPerValue() {
-    // A comma-separated dte list spans several widely-separated windows; a bare chain call
-    // returns only the single front-month expiration, so more than one distinct expiration here
-    // proves the list reached the server rather than being collapsed to one value.
+    // A comma-separated dte list selects the closest expiration to each value. The expected
+    // expirations are derived from a live /expirations/ baseline rather than pinned as a count,
+    // since the API deduplicates values whose closest expiration collides and AAPL's calendar
+    // changes over time.
+    int[] requested = {30, 120, 300};
+    LocalDate today = LocalDate.now(NEW_YORK);
+    List<LocalDate> available =
+        client.options().expirations(OptionsExpirationsRequest.of(UNDERLYING)).values().stream()
+            .map(e -> e.withZoneSameInstant(NEW_YORK).toLocalDate())
+            .distinct()
+            .toList();
+    assertThat(available).as("AAPL has options expirations year-round").isNotEmpty();
+
+    // For each requested value, the candidates are the expirations nearest to it. One day of
+    // slack covers ties and the server computing dte at a slightly different moment than here.
+    Map<Integer, Set<LocalDate>> candidatesByValue = new HashMap<>();
+    for (int days : requested) {
+      long best =
+          available.stream()
+              .mapToLong(d -> Math.abs(ChronoUnit.DAYS.between(today, d) - days))
+              .min()
+              .orElseThrow();
+      candidatesByValue.put(
+          days,
+          available.stream()
+              .filter(d -> Math.abs(ChronoUnit.DAYS.between(today, d) - days) <= best + 1)
+              .collect(Collectors.toSet()));
+    }
+    Set<LocalDate> allCandidates = new HashSet<>();
+    candidatesByValue.values().forEach(allCandidates::addAll);
+
     List<OptionQuote> chain =
         client
             .options()
             .chain(
                 OptionsChainRequest.builder(UNDERLYING)
-                    .expirationFilter(ExpirationFilter.dteList(30, 120, 300))
+                    .expirationFilter(ExpirationFilter.dteList(requested))
                     .side(OptionSide.CALL)
                     .strikeLimit(1)
                     .build())
             .values();
 
     assertThat(chain).isNotEmpty();
-    long distinctExpirations = chain.stream().map(OptionQuote::expiration).distinct().count();
-    // 30/120/300 are far enough apart that dedup can't collapse them — the API documents one
-    // closest expiration selected per value, so this must land on exactly three, not merely
-    // "more than the one expiration a bare call returns" (which a range or single-value misread
-    // of the list would also satisfy).
-    assertThat(distinctExpirations)
-        .as("a comma-separated dte list selects the closest expiration for each of the 3 values")
-        .isEqualTo(3);
+    Set<LocalDate> returned =
+        chain.stream()
+            .map(OptionQuote::expiration)
+            .filter(Objects::nonNull)
+            .map(e -> e.withZoneSameInstant(NEW_YORK).toLocalDate())
+            .collect(Collectors.toSet());
+    assertThat(returned)
+        .as("every returned expiration is the closest one to some requested dte value")
+        .isSubsetOf(allCandidates);
+    candidatesByValue.forEach(
+        (days, candidates) ->
+            assertThat(returned)
+                .as("an expiration closest to dte=%d is present", days)
+                .containsAnyElementsOf(candidates));
+    // A bare chain call returns only the front month, so more than one distinct expiration
+    // proves the whole list reached the server rather than a single value.
+    assertThat(returned)
+        .as("a dte list spanning 30/120/300 days returns more than one expiration")
+        .hasSizeGreaterThan(1);
   }
 
   @Test
