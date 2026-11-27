@@ -27,7 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `UtilitiesResource.deleteToken()` and `UtilitiesResource.deleteTokenAsync()` —
   sync and async methods for the new `DELETE /v1/user/token/` endpoint (API release 3.0.0),
   returning `UtilitiesDeleteTokenResponse`. Revokes the token used to authenticate the call;
-  once successful, the token cannot authenticate further requests.
+  once successful, the token cannot authenticate further requests. Only an explicit
+  `{"s":"ok"}` response decodes to success — a missing or unrecognized `s` value fails with
+  `ParseError` instead. The call never retries, even on a failure that would normally be
+  retried, since a retry would authenticate with the token it just revoked.
 
 ## [1.0.0] - 2026-06-29
 

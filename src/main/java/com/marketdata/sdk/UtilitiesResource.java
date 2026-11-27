@@ -155,11 +155,17 @@ public final class UtilitiesResource {
    * made it can no longer authenticate any further request, including a retry of this one. A new
    * token has to be generated from the Market Data dashboard before the client (or any other
    * consumer of the same token) can make another authenticated call.
+   *
+   * <p>Because of that, this call uses {@link RetryPolicy#noRetry()} rather than the transport's
+   * default retry policy: a successful revocation whose response is lost to a network error, or
+   * whose confirmation comes back as a retryable 5xx, must not be silently replaced by a retry that
+   * then fails to authenticate with the token it just revoked.
    */
   public CompletableFuture<UtilitiesDeleteTokenResponse> deleteTokenAsync() {
     RequestSpec spec = RequestSpec.delete("user/token").build();
     return execute(
         spec,
+        RetryPolicy.noRetry(),
         TokenRevocation.class,
         (d, env, fmt) -> new UtilitiesDeleteTokenResponse(true, env, fmt));
   }

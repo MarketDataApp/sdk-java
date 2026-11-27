@@ -8,6 +8,13 @@ Revoke the token used to authenticate the current request.
 > sharing the same token. Generate a new token from the [Market Data Dashboard](https://www.marketdata.app/dashboard/)
 > before making another authenticated call.
 
+Because of that, the SDK never retries this call automatically, even on a failure that would
+normally be retried (a network error or a 5xx): if the revocation already succeeded server-side
+but its response was lost, a retry would just authenticate with the now-revoked token and fail.
+
+Only an explicit `{"s":"ok"}` envelope decodes to a confirmed revocation; a missing or
+unrecognized `s` value — including an empty body — is rejected rather than read as success.
+
 ## Making Requests
 
 Use the `deleteToken()` method on the `utilities` resource. It requires a valid token — the one it revokes.
