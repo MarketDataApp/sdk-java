@@ -42,7 +42,7 @@ OptionsQuotesRequest.builder(String first, String... rest)
 
 #### Returns
 
-`OptionsQuotesResponse` wraps `List<OptionQuote>`. See [Chain](./chain.md) for the full `OptionQuote` record (price fields plus greeks).
+`OptionsQuotesResponse` wraps `List<OptionQuote>`. See [Chain](./chain.md#optionquote) for the full `OptionQuote` record (price fields plus greeks).
 
 ## Examples
 
