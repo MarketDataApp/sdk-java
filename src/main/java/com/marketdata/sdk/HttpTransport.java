@@ -167,7 +167,7 @@ final class HttpTransport implements AutoCloseable {
   private CompletableFuture<HttpResponseEnvelope> executeAsync(
       RequestSpec spec, RetryExecutor executor) {
     URI uri = buildUri(spec);
-    HttpRequest request = buildHttpRequest(uri, spec.format());
+    HttpRequest request = buildHttpRequest(uri, spec.format(), spec.method());
     RetryPolicy policy = executor.policy();
     return executor.execute(
         (attemptIdx, previousCause) -> {
@@ -396,10 +396,10 @@ final class HttpTransport implements AutoCloseable {
     return URLEncoder.encode(raw, StandardCharsets.UTF_8).replace("+", "%20");
   }
 
-  private HttpRequest buildHttpRequest(URI uri, Format format) {
+  private HttpRequest buildHttpRequest(URI uri, Format format, HttpMethod method) {
     HttpRequest.Builder b =
         HttpRequest.newBuilder(uri)
-            .GET()
+            .method(method.name(), HttpRequest.BodyPublishers.noBody())
             .timeout(REQUEST_TIMEOUT)
             .header("User-Agent", userAgent)
             .header("Accept", format.mediaType());

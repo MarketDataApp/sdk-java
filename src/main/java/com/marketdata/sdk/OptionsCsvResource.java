@@ -48,7 +48,8 @@ public final class OptionsCsvResource extends FormattedResource<OptionsCsvResour
             request.date(),
             request.from(),
             request.to(),
-            request.countback()));
+            request.countback(),
+            request.model()));
   }
 
   public CsvResponse quote(OptionsQuoteRequest request) {
@@ -64,7 +65,12 @@ public final class OptionsCsvResource extends FormattedResource<OptionsCsvResour
       futures.add(
           executeCsv(
                   OptionsResource.quoteSpec(
-                      symbol, request.date(), request.from(), request.to(), request.countback()))
+                      symbol,
+                      request.date(),
+                      request.from(),
+                      request.to(),
+                      request.countback(),
+                      request.model()))
               .thenApply(resp -> Map.entry(symbol, resp)));
     }
     return CompletableFuture.allOf(futures.toArray(new CompletableFuture<?>[0]))

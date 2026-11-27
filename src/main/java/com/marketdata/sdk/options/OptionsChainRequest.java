@@ -50,6 +50,8 @@ public final class OptionsChainRequest {
 
   private final @Nullable LocalDate date;
 
+  private final @Nullable PricingModel model;
+
   private OptionsChainRequest(Builder b) {
     this.symbol = b.symbol;
     this.expirationFilter = b.expirationFilter;
@@ -73,6 +75,7 @@ public final class OptionsChainRequest {
     this.minVolume = b.minVolume;
     this.side = b.side;
     this.date = b.date;
+    this.model = b.model;
   }
 
   /** Shortcut for {@code builder(symbol).build()}. */
@@ -174,6 +177,11 @@ public final class OptionsChainRequest {
     return date;
   }
 
+  /** Pricing model for {@code iv} and the greeks on a historical ({@link #date}) request. */
+  public @Nullable PricingModel model() {
+    return model;
+  }
+
   // ---------- builder ----------
 
   public static final class Builder {
@@ -199,6 +207,7 @@ public final class OptionsChainRequest {
     private @Nullable Long minVolume;
     private @Nullable OptionSide side;
     private @Nullable LocalDate date;
+    private @Nullable PricingModel model;
 
     private Builder(String symbol) {
       this.symbol = Objects.requireNonNull(symbol, "symbol");
@@ -325,6 +334,15 @@ public final class OptionsChainRequest {
     /** Historical chain on a specific trading day. */
     public Builder date(LocalDate value) {
       this.date = Objects.requireNonNull(value, "date");
+      return this;
+    }
+
+    /**
+     * Pricing model for {@code iv} and the greeks on this historical request. Only meaningful
+     * alongside {@link #date}; the API rejects a model named without it with a 400.
+     */
+    public Builder model(PricingModel value) {
+      this.model = Objects.requireNonNull(value, "model");
       return this;
     }
 

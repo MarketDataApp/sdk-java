@@ -9,3 +9,4 @@ Reach the resource through `client.utilities()`.
 - [API Status (Java SDK)](./status.md) — Call status() on the Java SDK utilities resource for a public liveness check of Market Data API services, with an online flag and uptime percentiles.
 - [User (Java SDK)](./user.md) — Retrieve your Market Data account details with the Java SDK, including how much of the daily request quota is still available.
 - [Headers (Java SDK)](./headers.md) — Echo back the headers the Market Data API received with the Java SDK, to confirm your Authorization header arrived. Sensitive values are redacted.
+- [Delete Token (Java SDK)](./delete-token.md) — Revoke the token used to authenticate the request with the Java SDK. Irreversible.

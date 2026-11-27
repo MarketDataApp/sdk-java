@@ -13,6 +13,7 @@ import com.marketdata.sdk.options.OptionsExpirationsRequest;
 import com.marketdata.sdk.options.OptionsLookupRequest;
 import com.marketdata.sdk.options.OptionsQuoteRequest;
 import com.marketdata.sdk.options.OptionsQuotesRequest;
+import com.marketdata.sdk.options.PricingModel;
 import com.marketdata.sdk.options.StrikeFilter;
 import com.marketdata.sdk.options.StrikeRange;
 import java.net.URI;
@@ -490,6 +491,97 @@ class OptionsResourceTest {
                     .build())
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("from must not be after to");
+  }
+
+  // ---------- quote: model query parameter (pricing model on a historical request) ----------
+
+  private static final LocalDate MODEL_DATE = LocalDate.of(2024, Month.JANUARY, 17);
+
+  @Test
+  void quoteModelBsmTranslatesToModelParam() {
+    CapturingClient client = okWith(CANNED_QUOTE_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .quoteAsync(
+            OptionsQuoteRequest.builder("AAPL250117C00150000")
+                .date(MODEL_DATE)
+                .model(PricingModel.BSM)
+                .build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo(
+            "http://localhost/v1/options/quotes/AAPL250117C00150000/?date=2024-01-17&model=bsm");
+  }
+
+  @Test
+  void quoteModelBjsTranslatesToModelParam() {
+    CapturingClient client = okWith(CANNED_QUOTE_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .quoteAsync(
+            OptionsQuoteRequest.builder("AAPL250117C00150000")
+                .date(MODEL_DATE)
+                .model(PricingModel.BJS)
+                .build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo(
+            "http://localhost/v1/options/quotes/AAPL250117C00150000/?date=2024-01-17&model=bjs");
+  }
+
+  @Test
+  void quoteModelCrrTranslatesToModelParam() {
+    CapturingClient client = okWith(CANNED_QUOTE_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .quoteAsync(
+            OptionsQuoteRequest.builder("AAPL250117C00150000")
+                .date(MODEL_DATE)
+                .model(PricingModel.CRR)
+                .build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo(
+            "http://localhost/v1/options/quotes/AAPL250117C00150000/?date=2024-01-17&model=crr");
+  }
+
+  @Test
+  void quoteModelBawTranslatesToModelParam() {
+    CapturingClient client = okWith(CANNED_QUOTE_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .quoteAsync(
+            OptionsQuoteRequest.builder("AAPL250117C00150000")
+                .date(MODEL_DATE)
+                .model(PricingModel.BAW)
+                .build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo(
+            "http://localhost/v1/options/quotes/AAPL250117C00150000/?date=2024-01-17&model=baw");
+  }
+
+  @Test
+  void quotesAttachesModelToEachFanOut() {
+    SymbolRoutingClient client =
+        new SymbolRoutingClient(Map.of("X", CANNED_QUOTE_BODY, "Y", CANNED_QUOTE_BODY));
+    OptionsResource options = resourceWith(client);
+
+    options.quotes(
+        OptionsQuotesRequest.builder("X", "Y").date(MODEL_DATE).model(PricingModel.BSM).build());
+
+    assertThat(client.captured).hasSize(2);
+    for (HttpRequest req : client.captured) {
+      assertThat(req.uri().toString()).endsWith("?date=2024-01-17&model=bsm");
+    }
   }
 
   // ---------- quote: response decoding ----------
@@ -1209,6 +1301,64 @@ class OptionsResourceTest {
     assertThat(url).contains("minVolume=100");
     assertThat(url).contains("maxBidAskSpread=0.5");
     assertThat(url).contains("maxBidAskSpreadPct=0.1");
+  }
+
+  // ---------- chain: model query parameter (pricing model on a historical request) ----------
+
+  @Test
+  void chainModelBsmTranslatesToModelParam() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL").date(MODEL_DATE).model(PricingModel.BSM).build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?date=2024-01-17&model=bsm");
+  }
+
+  @Test
+  void chainModelBjsTranslatesToModelParam() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL").date(MODEL_DATE).model(PricingModel.BJS).build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?date=2024-01-17&model=bjs");
+  }
+
+  @Test
+  void chainModelCrrTranslatesToModelParam() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL").date(MODEL_DATE).model(PricingModel.CRR).build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?date=2024-01-17&model=crr");
+  }
+
+  @Test
+  void chainModelBawTranslatesToModelParam() {
+    CapturingClient client = okWith(CANNED_CHAIN_BODY);
+    OptionsResource options = resourceWith(client);
+
+    options
+        .chainAsync(
+            OptionsChainRequest.builder("AAPL").date(MODEL_DATE).model(PricingModel.BAW).build())
+        .join();
+
+    assertThat(client.captured.get(0).uri().toString())
+        .isEqualTo("http://localhost/v1/options/chain/AAPL/?date=2024-01-17&model=baw");
   }
 
   // ---------- chain: response decoding ----------

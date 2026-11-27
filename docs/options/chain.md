@@ -41,8 +41,24 @@ OptionsChainRequest.builder(String symbol)
     .minOpenInterest(long oi)
     .minVolume(long vol)
     .date(LocalDate date)               // historical chain
+    .model(PricingModel model)          // BSM / BJS / CRR / BAW — pricing model for iv/greeks on a historical (date) request
     .build()
 ```
+
+#### Pricing model (`model`)
+
+`model(PricingModel)` picks the pricing model used for `iv` and the greeks, but only on a
+historical request (paired with `date`) — the API rejects a `model` sent without `date` with a
+400, and the filter is gated to paid plans (a trial gets a 402). `PricingModel.BSM`
+(Black-Scholes-Merton) prices every contract; `BJS` (Bjerksund-Stensland), `CRR`
+(Cox-Ross-Rubinstein) and `BAW` (Barone-Adesi-Whaley) price the American contracts (the European
+contracts keep `BSM` regardless of which of the three is named). Leaving `model` unset defaults
+American contracts to `BJS` and European contracts to `BSM`, and applies broker conventions on top
+(half-ask pricing for a contract with no bid, the greeks of an option without time value for a
+contract at or below the model's floor price, expiration-day greeks, and delta clamped to
+`[-1, 1]`); naming any of the four models explicitly skips those conventions and returns the
+model's own output instead — `null` for a contract that would have gotten the zero-time-value
+treatment, and an unclamped delta.
 
 #### Returns 
 
@@ -73,6 +89,7 @@ import com.marketdata.sdk.options.ExpirationFilter;
 import com.marketdata.sdk.options.OptionQuote;
 import com.marketdata.sdk.options.OptionSide;
 import com.marketdata.sdk.options.OptionsChainRequest;
+import com.marketdata.sdk.options.PricingModel;
 import com.marketdata.sdk.options.StrikeFilter;
 import java.util.List;
 
@@ -113,6 +130,13 @@ try (MarketDataClient client = new MarketDataClient()) {
   var dteComparison = client.options().chain(
       OptionsChainRequest.builder("AAPL")
           .expirationFilter(ExpirationFilter.dteComparison(StrikeFilter.Operator.GTE, 30))
+          .build());
+
+  // Pricing model on a historical chain — model requires date.
+  var priced = client.options().chain(
+      OptionsChainRequest.builder("AAPL")
+          .date(java.time.LocalDate.of(2024, 1, 17))
+          .model(PricingModel.CRR)
           .build());
 }
 ```

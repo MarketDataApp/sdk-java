@@ -4,21 +4,24 @@ import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.marketdata.sdk.utilities.ApiStatus;
 import com.marketdata.sdk.utilities.RequestHeaders;
 import com.marketdata.sdk.utilities.ServiceStatus;
+import com.marketdata.sdk.utilities.TokenRevocation;
 import com.marketdata.sdk.utilities.User;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * System endpoints documented at {@code https://api.marketdata.app/docs/api/utilities/}. None of
- * them are versioned ({@code /v1/}); they live at the API root.
+ * System endpoints documented at {@code https://api.marketdata.app/docs/api/utilities/}. {@code
+ * status}, {@code headers} and {@code user} are unversioned (no {@code /v1/}; they live at the API
+ * root); {@code deleteToken} is the one exception — {@code DELETE /v1/user/token/} is versioned.
  *
  * <p>Constructed once per {@link MarketDataClient}; the consumer reaches it through {@code
  * client.utilities()}. Constructor is package-private (ADR-007) — consumers cannot instantiate.
  *
  * <p>Every endpoint returns a named {@link MarketDataResponse} whose {@link
  * MarketDataResponse#values()} is the flat payload (the service list for {@code status}, the header
- * map for {@code headers}, the {@link User} for {@code user}). These diagnostic endpoints take no
- * universal parameters and have no CSV/HTML facet.
+ * map for {@code headers}, the {@link User} for {@code user}, a {@code Boolean} for {@code
+ * deleteToken}). These diagnostic endpoints take no universal parameters and have no CSV/HTML
+ * facet.
  */
 public final class UtilitiesResource {
 
@@ -37,9 +40,9 @@ public final class UtilitiesResource {
 
   /**
    * Build the Jackson module that maps this resource's response records ({@link RequestHeaders},
-   * {@link User}, {@link ApiStatus}) to their custom deserializers. Each call returns a fresh
-   * {@link SimpleModule}; tests that need the same wiring without constructing a full resource can
-   * register this directly on a bare parser.
+   * {@link User}, {@link ApiStatus}, {@link TokenRevocation}) to their custom deserializers. Each
+   * call returns a fresh {@link SimpleModule}; tests that need the same wiring without constructing
+   * a full resource can register this directly on a bare parser.
    */
   static SimpleModule wireFormatModule() {
     SimpleModule m = new SimpleModule("marketdata-utilities");
@@ -62,6 +65,7 @@ public final class UtilitiesResource {
                     row.dbl("uptimePct90d"),
                     MarketDataDates.marketTimeFromEpochSecond(row.lng("updated"))),
             ApiStatus::new));
+    m.addDeserializer(TokenRevocation.class, new TokenRevocationDeserializer());
     return m;
   }
 
@@ -141,6 +145,28 @@ public final class UtilitiesResource {
   /** Sync wrapper for {@link #statusAsync()}. */
   public UtilitiesStatusResponse status() {
     return transport.joinSync(statusAsync());
+  }
+
+  /**
+   * Async: revoke the token used to authenticate this request. Versioned ({@code /v1/user/token/})
+   * — unlike {@code status}, {@code headers} and {@code user}, which live at the API root.
+   *
+   * <p><strong>Irreversible and self-affecting:</strong> once this call succeeds, the token that
+   * made it can no longer authenticate any further request, including a retry of this one. A new
+   * token has to be generated from the Market Data dashboard before the client (or any other
+   * consumer of the same token) can make another authenticated call.
+   */
+  public CompletableFuture<UtilitiesDeleteTokenResponse> deleteTokenAsync() {
+    RequestSpec spec = RequestSpec.delete("user/token").build();
+    return execute(
+        spec,
+        TokenRevocation.class,
+        (d, env, fmt) -> new UtilitiesDeleteTokenResponse(true, env, fmt));
+  }
+
+  /** Sync wrapper for {@link #deleteTokenAsync()}. */
+  public UtilitiesDeleteTokenResponse deleteToken() {
+    return transport.joinSync(deleteTokenAsync());
   }
 
   // ---------- internal helpers ----------

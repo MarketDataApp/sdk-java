@@ -27,6 +27,7 @@ OptionsQuoteRequest.builder(String optionSymbol)
     .from(LocalDate from)        // date range
     .to(LocalDate to)
     .countback(int n)
+    .model(PricingModel model)   // BSM / BJS / CRR / BAW — pricing model for iv/greeks; requires date, from or to
     .build()
 
 // Multiple contracts (fan-out)
@@ -37,8 +38,17 @@ OptionsQuotesRequest.builder(String first, String... rest)
     .from(LocalDate from)
     .to(LocalDate to)
     .countback(int n)
+    .model(PricingModel model)   // applied identically to every symbol in the fan-out
     .build()
 ```
+
+#### Pricing model (`model`)
+
+`model(PricingModel)` is on both request types — the multi-symbol `OptionsQuotesRequest` applies
+it identically to every symbol in the fan-out. It behaves exactly as on
+[`chain`](./chain.md#pricing-model-model), except the historical-request pairing is `date`, `from`
+or `to` (any one of the three) rather than `date` alone; naming a model without one of those is
+rejected with a 400.
 
 #### Returns
 
@@ -53,6 +63,7 @@ import com.marketdata.sdk.MarketDataClient;
 import com.marketdata.sdk.options.OptionQuote;
 import com.marketdata.sdk.options.OptionsQuoteRequest;
 import com.marketdata.sdk.options.OptionsQuotesRequest;
+import com.marketdata.sdk.options.PricingModel;
 
 try (MarketDataClient client = new MarketDataClient()) {
 
@@ -67,6 +78,21 @@ try (MarketDataClient client = new MarketDataClient()) {
       OptionsQuotesRequest.of("AAPL271217C00300000", "AAPL271217C00310000"));
   quotes.forEach((sym, resp) ->
       System.out.println(sym + " → " + resp.values().size() + " row(s)"));
+
+  // Pricing model on a historical quote — model requires date, from or to.
+  OptionQuote priced = client.options()
+      .quote(OptionsQuoteRequest.builder("AAPL271217C00300000")
+          .date(java.time.LocalDate.of(2024, 1, 17))
+          .model(PricingModel.CRR)
+          .build())
+      .values().get(0);
+
+  // Same pricing model, applied to every symbol in a multi-contract fan-out.
+  var pricedQuotes = client.options().quotes(
+      OptionsQuotesRequest.builder("AAPL271217C00300000", "AAPL271217C00310000")
+          .date(java.time.LocalDate.of(2024, 1, 17))
+          .model(PricingModel.CRR)
+          .build());
 }
 ```
 

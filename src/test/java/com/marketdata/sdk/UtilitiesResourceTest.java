@@ -310,6 +310,75 @@ class UtilitiesResourceTest {
         .hasMessageContaining("JSON null");
   }
 
+  // ---------- /user/token/ endpoint (DELETE) ----------
+
+  @Test
+  void deleteTokenHitsVersionedTokenEndpointWithDeleteVerb() {
+    CapturingClient client =
+        new CapturingClient(
+            200, "{\"s\":\"ok\"}".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    utilities.deleteTokenAsync().join();
+
+    HttpRequest sent = client.captured.get(0);
+    // Versioned (/v1/) — unlike /user/, /status/, /headers/, which live at the API root.
+    assertThat(sent.uri().toString()).isEqualTo("http://localhost/v1/user/token/");
+    assertThat(sent.method()).isEqualTo("DELETE");
+  }
+
+  @Test
+  void deleteTokenAsyncReturnsSuccessOnOkEnvelope() {
+    CapturingClient client =
+        new CapturingClient(
+            200, "{\"s\":\"ok\"}".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    Boolean revoked = utilities.deleteTokenAsync().join().values();
+
+    assertThat(revoked).isTrue();
+  }
+
+  @Test
+  void deleteTokenSyncMirrorsAsync() {
+    CapturingClient client =
+        new CapturingClient(
+            200, "{\"s\":\"ok\"}".getBytes(), HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    Boolean revoked = utilities.deleteToken().values();
+
+    assertThat(revoked).isTrue();
+  }
+
+  @Test
+  void deleteTokenErrorEnvelopeSurfacesAsParseError() {
+    CapturingClient client =
+        new CapturingClient(
+            200,
+            "{\"s\":\"error\",\"errmsg\":\"Token already revoked\"}".getBytes(),
+            HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    assertThatThrownBy(utilities::deleteToken)
+        .isInstanceOf(com.marketdata.sdk.exception.ParseError.class)
+        .hasMessageContaining("Token already revoked");
+  }
+
+  /**
+   * Per ADR-006: sync wrappers must unwrap {@code CompletionException} so consumers catch the
+   * underlying {@link com.marketdata.sdk.exception.MarketDataException} subtype directly — same
+   * parity guarantee already exercised for {@code headers()} and {@code user()}.
+   */
+  @Test
+  void deleteToken401SurfacesAuthenticationErrorDirectly() {
+    CapturingClient client =
+        new CapturingClient(401, new byte[0], HttpHeaders.of(Map.of(), (a, b) -> true));
+    UtilitiesResource utilities = resourceWith(client);
+
+    assertThatThrownBy(utilities::deleteToken).isInstanceOf(AuthenticationError.class);
+  }
+
   // ---------- stub HttpClient ----------
 
   private static final class CapturingClient extends TestHttpClients.StubHttpClient {

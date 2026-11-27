@@ -17,6 +17,7 @@ import com.marketdata.sdk.options.OptionsLookupRequest;
 import com.marketdata.sdk.options.OptionsQuoteRequest;
 import com.marketdata.sdk.options.OptionsQuotes;
 import com.marketdata.sdk.options.OptionsQuotesRequest;
+import com.marketdata.sdk.options.PricingModel;
 import com.marketdata.sdk.options.StrikeFilter;
 import java.io.IOException;
 import java.time.LocalDate;
@@ -121,7 +122,8 @@ public final class OptionsResource extends ConfiguredResource<OptionsResource> {
             request.date(),
             request.from(),
             request.to(),
-            request.countback());
+            request.countback(),
+            request.model());
     config.applyTo(b);
     return execute(
         b.build(),
@@ -146,7 +148,13 @@ public final class OptionsResource extends ConfiguredResource<OptionsResource> {
         new ArrayList<>(symbols.size());
     for (String symbol : symbols) {
       RequestSpec.Builder b =
-          quoteSpec(symbol, request.date(), request.from(), request.to(), request.countback());
+          quoteSpec(
+              symbol,
+              request.date(),
+              request.from(),
+              request.to(),
+              request.countback(),
+              request.model());
       config.applyTo(b);
       futures.add(
           execute(
@@ -217,7 +225,8 @@ public final class OptionsResource extends ConfiguredResource<OptionsResource> {
       @Nullable LocalDate date,
       @Nullable LocalDate from,
       @Nullable LocalDate to,
-      @Nullable Integer countback) {
+      @Nullable Integer countback,
+      @Nullable PricingModel model) {
     RequestSpec.Builder b = RequestSpec.get("options/quotes/" + PathSegments.encode(optionSymbol));
     if (date != null) {
       b.query("date", DateTimeFormatter.ISO_LOCAL_DATE.format(date));
@@ -230,6 +239,9 @@ public final class OptionsResource extends ConfiguredResource<OptionsResource> {
     }
     if (countback != null) {
       b.query("countback", countback);
+    }
+    if (model != null) {
+      b.query("model", model.wireValue());
     }
     return b;
   }
@@ -304,6 +316,9 @@ public final class OptionsResource extends ConfiguredResource<OptionsResource> {
     }
     if (r.date() != null) {
       b.query("date", DateTimeFormatter.ISO_LOCAL_DATE.format(r.date()));
+    }
+    if (r.model() != null) {
+      b.query("model", r.model().wireValue());
     }
   }
 
